@@ -12,6 +12,7 @@
  */
 
 export { createTool, isCreatedTool, type ToolSpec, type CreatedTool } from "./create-tool.js";
+export { createToolGroup, type ToolGroupMember, type ToolGroupSpec } from "./tool-group.js";
 export { permissiveValidator, fromStandardSchema } from "./validator.js";
 export {
   createToolCatalog,

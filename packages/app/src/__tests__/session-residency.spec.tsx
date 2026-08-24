@@ -28,7 +28,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { createKnobStore } from "@agentick/knobs";
 import { InMemorySessionStore } from "@agentick/session";
 import { MemoryTimelineStore } from "@agentick/timeline";
-import type { CreateSessionInput, ExecutionTarget } from "@agentick/spec";
+import type { CreateSessionInput, ExecutionTarget, SessionHarnessProtocol } from "@agentick/spec";
 
 import { createApp } from "../react.js";
 
@@ -216,7 +216,7 @@ describe("resumeSession brings an evicted session back", () => {
     app.hook({
       onAppResumeSession: async (
         input: { sessionId: string },
-        next: (i: { sessionId: string }) => Promise<unknown>,
+        next: (i: { sessionId: string }) => Promise<SessionHarnessProtocol | undefined>,
       ) => {
         const session = await next(input);
         if (session !== undefined) resumes++;

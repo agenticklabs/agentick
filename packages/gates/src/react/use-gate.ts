@@ -22,6 +22,10 @@
  *     controls release via `knob_set`. `clear()` / `defer()` are host
  *     shortcuts.
  *
+ * Only the VALUE species mount here: a stop gate (`stopWhen`) has no
+ * value, no knob, and no instructions to render, so there is nothing for
+ * a hook to reflect — register those on `session.gates`.
+ *
  * Verified gates (`satisfied`):
  *   - Level-triggered; auto-clears on pass, re-engages on regression.
  *     Optional `activateWhen` arms the obligation. Backing knob is
@@ -37,7 +41,7 @@ import React, { useCallback, useEffect } from "react";
 import { useSyncExternalStore } from "react";
 import { useBridges } from "@agentick/compiler-react";
 
-import { type GateDescriptor, type GateValue } from "../descriptor.js";
+import { type GateValue, type ValueGateDescriptor } from "../descriptor.js";
 import { useGatesController } from "./gates-context.js";
 
 // ============================================================================
@@ -70,7 +74,7 @@ export interface GateState {
 // Hook
 // ============================================================================
 
-export function useGate(name: string, options: GateDescriptor): GateState {
+export function useGate(name: string, options: ValueGateDescriptor): GateState {
   const controller = useGatesController();
   const { knobs } = useBridges();
 

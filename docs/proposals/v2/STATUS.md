@@ -2308,6 +2308,77 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-24 — arc 1: tool capability metadata, stop gates, bound-schema exposure
+
+One PR covering BACKLOG §A/§B/§C's framework half. Five decisions worth
+recording:
+
+**`summary` + `group` are FIRST-CLASS on `ToolDeclaration`, not blessed
+annotation keys.** `ToolAnnotations` is the bag for advisory hints and
+per-call presentation seams; the declaration is what the tool IS. `aliases`
+already set that precedent explicitly ("aliases are DISPATCH names — they
+live on the declaration, not the annotations"). The deciding argument is
+readability: an `annotations.summary` would sit directly beside
+`annotations.displaySummary` (what a SPECIFIC call is doing) and resolve into
+`ToolPresentation.summary` — three different `summary` concepts in one
+namespace. On the declaration it sits beside `description`, where "the
+one-sentence form of description" is self-evident. Cost of first-class was
+one line in `toToolInfo` plus the `UnhandledSpecKeys` conformance trip in the
+compiler's tool contributor, which is a feature — it forced the JSX path to be
+wired rather than silently dropping the fields.
+
+**A tool group IS a flat array; no group entity exists anywhere.**
+`createToolGroup({ name, tools })` eagerly flattens and stamps `group` paths,
+prepending the parent segment. Nesting is expressed as nested arrays, so the
+recursion needs no type of its own, and `tools: [...group]` needs no widening
+of the five `tools:` slots or their fold sites. `summary` was deliberately
+LEFT OFF the group options: the `groups` enumeration that would consume it is
+explicitly deferred (BACKLOG §A) and a field nothing reads is dead surface.
+`// TODO(tool-groups)` marks the trailhead.
+
+**`_summary` was already built; it became REQUIRED.** Injection lives at the
+projector (`buildTools`, @agentick/model), not the executor — the registry's
+schemas stay pristine and only the model-facing wire projection is decorated,
+so host-door dispatch never sees the field. The existing `narrate` cascade
+(app → session → per-tool `annotations.narrate`) is the off-switch; no second
+`injectCallSummary` flag was added. Required is free: the executor strips the
+field BEFORE validating against the tool's own schema, which never mentions
+it, so `required` cannot fail a dispatch — it is purely the instruction that
+makes the model fill it in, and it keeps the schema legal under provider
+strict modes.
+
+**Gates gained a THIRD species rather than bending the existing two.**
+`stopOnTools(...names)` needs to STOP the loop; both existing species can only
+hold it open, and `LoopControlSeam.stopAfterTick` was declared but never
+called. A `StopGateDescriptor` registers no backing knob, carries no
+instructions, and is invisible to the model; the value-cell species the model
+CAN write still only ever `continue`. So the ADR 51 provenance rule ("the host
+may stop-force, the model may not") is preserved, and the two docblocks that
+stated it as "gates only ever continue" were corrected in
+`session-bridges.ts` and `harness.ts`. `GateInfo.verified: boolean` became
+`species: "latch" | "verified" | "stop"` — with three species a boolean is
+duplicate truth. Mutations (`clear`/`defer`/`override`) REFUSE loudly on a
+stop gate rather than no-op'ing.
+
+**A deliberate stop now has a name.** The three verbatim-duplicated inline
+stop-reason unions collapsed into one exported `LoopStopReason`, gaining
+`"halted"`; `StopCause` gained a matching `{ kind: "halted"; reason }` arm so
+the reason string survives (it was previously dropped on the floor at the
+stop-force branch). `stopOnTools("done")` therefore surfaces as
+`stopReason: "halted"`, `stopCause: { kind: "halted", reason: "gate:done" }`.
+
+**The bound-schema exposure landed on the two seams that already existed.**
+Render side: a seeded `RenderContext.responseFormat` slot filled by the
+session's `resolveRenderContext`, read by `useResponseFormat()` — the same
+seam and timing as `useActiveModel`, whose docblock had already anticipated
+riders like this. Handler side: `DispatchContext.responseFormat`, set by the
+loop at the model-door dispatch site (where `TickInput.responseFormat` was
+already in lexical scope) and surfaced as `ctx.responseFormat`. Both are
+EXPOSURES — no validation, no done tool, no `<OutputContract/>` in the
+framework, per BACKLOG §B. `ctxExtensions` was the wrong channel and was
+rejected: it is session-scoped and built once per session, so it cannot vary
+per execution.
+
 ### 2026-08-23 — process shutdown hibernates; `closed` is explicit intent only
 
 Production defect (knowify dock, diagnosed 2026-08-23): the app close

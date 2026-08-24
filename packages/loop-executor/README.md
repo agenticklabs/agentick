@@ -124,6 +124,8 @@ declare function hasUnansweredInput(): boolean;
 
 Resolution is two-tier: **stop-force beats continue-force beats abstain**, all under `maxTicks` as a hard cap that no `continue` can exceed. This is a _gate_ — it decides whether the loop runs another tick. It is not a guard; guards admit or deny a single operation (see below).
 
+A stop-force reports `stopReason: "halted"` with `stopCause: { kind: "halted", reason }` — distinct from the provider's own reason, from `"aborted"` (cancelled from outside) and from `"vetoed"` (a guard refused the model call). The reason string is carried verbatim, so `stopOnTools("done")` in [@agentick/gates](../gates) surfaces as `reason: "gate:done"` and a caller can say WHY the turn ended. `halted` is a normal completion, not a failure.
+
 `notifyTickEnd` runs **after** the tick command's terminal, so every hook registered on `onAfterLoopTick` has already settled. Settle is in the cascade; decide is outside it.
 
 ### Failed ticks reach the gate too

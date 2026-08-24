@@ -50,9 +50,13 @@ import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub";
 import {
   GATE_OPTIONS,
   VERIFIED_GATE_OPTIONS,
+  gateSpecies,
+  isStopGate,
   isVerifiedGate,
   type GateDescriptor,
+  type GateSpecies,
   type GateValue,
+  type ValueGateDescriptor,
 } from "./descriptor.js";
 
 // ============================================================================
@@ -60,8 +64,8 @@ import {
 // ============================================================================
 
 /**
- * The loop continuation seam — the block/continue surface a gate drives
- * when the loop would otherwise stop. Structurally the spec's
+ * The loop continuation seam — the continue/stop surface a gate drives:
+ * value gates hold a loop open, stop gates end one. Structurally the spec's
  * `LoopBridge`; named locally so the controller has no hard dependency
  * on a bridge slot.
  */
@@ -194,8 +198,9 @@ export interface GatesParentLayer {
 /** Unified read row over a registered gate (tree-declared or programmatic). */
 export interface GateInfo {
   readonly name: string;
-  readonly value: GateValue;
-  readonly verified: boolean;
+  readonly species: GateSpecies;
+  /** Absent on stop gates — they hold no value cell. */
+  readonly value?: GateValue;
   readonly description: string;
 }
 
@@ -206,16 +211,19 @@ export interface GateInfo {
 export interface GateHandle {
   readonly name: string;
   readonly descriptor: GateDescriptor;
-  /** True for verified (satisfied) gates; false for latch (activateWhen) gates. */
-  readonly verified: boolean;
-  /** Current gate value — the synchronous mirror of the backing knob. */
-  readonly value: GateValue;
-  /** `value !== "inactive"` — the gate is currently blocking exit. */
+  readonly species: GateSpecies;
+  /**
+   * Current gate value — the synchronous mirror of the backing knob.
+   * Absent on stop gates (no value cell, no knob).
+   */
+  readonly value?: GateValue;
+  /** The gate is currently holding the loop open. Always false for stop gates. */
   readonly engaged: boolean;
   /**
    * Release the gate — the host-side equivalent of the model clearing a
    * latch via `knob_set`. Transient on verified gates: the predicate
-   * re-engages at the next tick end if still unsatisfied.
+   * re-engages at the next tick end if still unsatisfied. Rejects on a
+   * stop gate — there is no value to release.
    *
    * Async + journaled: routes through the `gates:clear` command when the
    * controller is harness-owned (the sibling contract — `knobs.set` /
@@ -226,8 +234,8 @@ export interface GateHandle {
   clear(): Promise<void>;
   /**
    * Postpone a latch gate (`deferred`) — the model must still face it
-   * before completing. No-op on verified gates. Async + journaled (see
-   * {@link clear}).
+   * before completing. No-op on verified gates, rejects on stop gates.
+   * Async + journaled (see {@link clear}).
    */
   defer(): Promise<void>;
   /**
@@ -256,14 +264,15 @@ export interface GateHandle {
 interface GateEntry {
   name: string;
   descriptor: GateDescriptor;
-  verified: boolean;
+  species: GateSpecies;
   /**
    * Synchronous source of truth for the gate's value — updated
    * immediately on `transition` (so same-tick logic sees the new value)
    * and re-synced from the knob whenever the knob changes (so a model
    * `knob_set` clear is observed). Mirrors `useGate`'s `stateRef`.
+   * Undefined for stop gates, which own no cell.
    */
-  value: GateValue;
+  value: GateValue | undefined;
   /**
    * Verified-gate arming latch (sticky per registration). Verified gates
    * without `activateWhen` are armed from the first tick.
@@ -338,24 +347,28 @@ export class GatesController {
    * last-writer-wins on the descriptor (like ToolBridge / knobs).
    */
   register(name: string, descriptor: GateDescriptor): GateHandle {
-    const verified = isVerifiedGate(descriptor);
+    const species = gateSpecies(descriptor);
 
     const existing = this.gates.get(name);
     if (existing) {
+      if (existing.species !== species) {
+        throw new Error(
+          `gate "${name}" is registered as a ${existing.species} gate; unregister it before re-registering it as ${species}.`,
+        );
+      }
       // Replace the descriptor in place; keep the entry (and its handle
       // identity + current value + subscribers) stable.
       existing.descriptor = descriptor;
-      existing.verified = verified;
       existing.armed = false;
-      void this.deps.knobs.register({ id: name, descriptor: this.knobRegistration(descriptor) });
+      if (!isStopGate(descriptor)) this.registerKnob(name, descriptor);
       return existing.handle;
     }
 
     const entry: GateEntry = {
       name,
       descriptor,
-      verified,
-      value: (this.deps.knobs.get(name) ?? "inactive") as GateValue,
+      species,
+      value: undefined,
       armed: false,
       knobUnsub: () => {},
       handle: undefined as unknown as GateHandle,
@@ -363,21 +376,24 @@ export class GatesController {
     (entry as { handle: GateHandle }).handle = this.makeHandle(entry);
     this.gates.set(name, entry);
 
-    // TODO(op-scope): still fire-and-forget, and it demonstrably orphans. When
-    // a knob write triggers a re-render that re-registers the gate, the
-    // resulting `knobs:command:register` lands with NEITHER `tickId` NOR
-    // `executionId` — measured nested inside a `knobs:command:set` that had
-    // both. `transition` was fixed by composing `knobs.fx.set`; this one
-    // cannot follow directly because `register` is a SYNCHRONOUS public API
-    // (it returns `GateHandle` and `useGate` calls it during render), so
-    // making it Effect-returning ripples into the React front-end. Lower
-    // stakes than the write — a registration is idempotent metadata, not a
-    // value change — but it is the same defect and it is not fixed.
-    void this.deps.knobs.register({ id: name, descriptor: this.knobRegistration(descriptor) });
+    // A stop gate owns no cell: no knob, nothing model-visible, nothing to
+    // mirror. Only the value species is knob-backed.
+    if (!isStopGate(descriptor)) this.bindKnobCell(entry, descriptor);
 
-    // Keep the synchronous mirror aligned with the knob so a model
-    // `knob_set` clear (latch) is observed by subsequent ticks + by
-    // handle subscribers, exactly as `useGate` re-read `state` per render.
+    // Topology ping: a new gate appeared — `subscribeAll` observers re-read.
+    this.changes.notify(name);
+    return entry.handle;
+  }
+
+  /**
+   * Give a value gate its backing knob and keep the synchronous mirror
+   * aligned with it, so a model `knob_set` clear (latch) is observed by
+   * subsequent ticks + by handle subscribers.
+   */
+  private bindKnobCell(entry: GateEntry, descriptor: ValueGateDescriptor): void {
+    const { name } = entry;
+    entry.value = (this.deps.knobs.get(name) ?? "inactive") as GateValue;
+    this.registerKnob(name, descriptor);
     entry.knobUnsub = this.deps.knobs.subscribe(name, () => {
       const next = (this.deps.knobs.get(name) ?? "inactive") as GateValue;
       if (next !== entry.value) {
@@ -385,10 +401,20 @@ export class GatesController {
         this.changes.notify(name);
       }
     });
+  }
 
-    // Topology ping: a new gate appeared — `subscribeAll` observers re-read.
-    this.changes.notify(name);
-    return entry.handle;
+  // TODO(op-scope): still fire-and-forget, and it demonstrably orphans. When
+  // a knob write triggers a re-render that re-registers the gate, the
+  // resulting `knobs:command:register` lands with NEITHER `tickId` NOR
+  // `executionId` — measured nested inside a `knobs:command:set` that had
+  // both. `transition` was fixed by composing `knobs.fx.set`; this one
+  // cannot follow directly because `register` is a SYNCHRONOUS public API
+  // (it returns `GateHandle` and `useGate` calls it during render), so
+  // making it Effect-returning ripples into the React front-end. Lower
+  // stakes than the write — a registration is idempotent metadata, not a
+  // value change — but it is the same defect and it is not fixed.
+  private registerKnob(name: string, descriptor: ValueGateDescriptor): void {
+    void this.deps.knobs.register({ id: name, descriptor: this.knobRegistration(descriptor) });
   }
 
   /** Remove a gate and tear down its knob subscription. */
@@ -423,8 +449,8 @@ export class GatesController {
     for (const entry of this.gates.values()) {
       byName.set(entry.name, {
         name: entry.name,
+        species: entry.species,
         value: entry.value,
-        verified: entry.verified,
         description: entry.descriptor.description,
       });
     }
@@ -521,6 +547,14 @@ export class GatesController {
     return Effect.gen(this, function* () {
       const { name, descriptor } = entry;
 
+      if (isStopGate(descriptor)) {
+        // Unguarded by `shouldContinue`, unlike the arms below: they invert a
+        // loop that would stop, this one ends a loop that would continue. The
+        // controller reports its verdict either way; the session resolves.
+        if (descriptor.stopWhen(result)) this.loop().stopAfterTick(`gate:${name}`);
+        return;
+      }
+
       if (isVerifiedGate(descriptor)) {
         // Optional arming scope: while unarmed the gate is dormant —
         // `satisfied` is not evaluated and the gate never blocks. The
@@ -596,14 +630,14 @@ export class GatesController {
       get descriptor() {
         return entry.descriptor;
       },
-      get verified() {
-        return entry.verified;
+      get species() {
+        return entry.species;
       },
       get value() {
         return entry.value;
       },
       get engaged() {
-        return entry.value !== "inactive";
+        return entry.value !== undefined && entry.value !== "inactive";
       },
       // Public mutations route through the admission sink (journaled command
       // when harness-owned, raw transition otherwise) — one grammar with the
@@ -633,14 +667,31 @@ export class GatesController {
    * controller's handle).
    */
   rawClear(name: string): Effect.Effect<void, SubstrateError, never> {
-    const entry = this.gates.get(name);
-    return entry ? this.transition(entry, "inactive") : Effect.void;
+    return Effect.gen(this, function* () {
+      const entry = this.valueEntry(name, "clear");
+      if (entry) yield* this.transition(entry, "inactive");
+    });
   }
 
-  /** Postpone a latch gate — the raw transition. No-op on verified / unknown. */
+  /** Postpone a latch gate — the raw transition. No-op on verified / unknown, rejects on stop. */
   rawDefer(name: string): Effect.Effect<void, SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      const entry = this.valueEntry(name, "defer");
+      if (entry?.species === "latch") yield* this.transition(entry, "deferred");
+    });
+  }
+
+  /**
+   * The named entry, refusing loudly when a value verb names a stop gate —
+   * a stop gate has no cell to clear, defer, or override, and answering
+   * "done" to a request that cannot be honored is worse than rejecting it.
+   */
+  private valueEntry(name: string, verb: string): GateEntry | undefined {
     const entry = this.gates.get(name);
-    return entry && !entry.verified ? this.transition(entry, "deferred") : Effect.void;
+    if (entry?.species === "stop") {
+      throw new Error(`${verb}() has no meaning on stop gate "${name}" — it holds no value.`);
+    }
+    return entry;
   }
 
   /**
@@ -657,9 +708,9 @@ export class GatesController {
     origin: GateOverrideOrigin,
   ): Effect.Effect<void, SubstrateError, never> {
     return Effect.gen(this, function* () {
-      const entry = this.gates.get(name);
+      const entry = this.valueEntry(name, "override");
       if (!entry) return;
-      if (!entry.verified) {
+      if (entry.species !== "verified") {
         throw new Error(
           `override() is a verified-gate escape; gate "${name}" is a latch gate — use clear().`,
         );
@@ -717,7 +768,7 @@ export class GatesController {
     return typeof lc === "function" ? lc() : lc;
   }
 
-  private knobRegistration(descriptor: GateDescriptor): KnobRegistration {
+  private knobRegistration(descriptor: ValueGateDescriptor): KnobRegistration {
     const verified = isVerifiedGate(descriptor);
     return {
       defaultValue: "inactive" as KnobPrimitive,

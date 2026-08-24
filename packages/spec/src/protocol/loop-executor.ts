@@ -35,7 +35,7 @@ import type { PromiseView } from "./promise-view.js";
 import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
-  LanguageModelStopReason,
+  LoopStopReason,
   StopCause,
   UsageStats,
 } from "../data/execution-result.js";
@@ -515,19 +515,7 @@ export interface ExecutionRunResult {
    * tick was unpriced — an unpriced tick never folds in as zero.
    */
   readonly cost?: import("../data/usage-cost.js").CostRollup;
-  readonly stopReason:
-    | LanguageModelStopReason
-    | "max_ticks"
-    | "aborted"
-    | "vetoed"
-    | "executor_failed"
-    | "timeout"
-    // §B2 — the execution stopped because the declared structured output was
-    // DELIVERED via the terminal tool (natural OR forced wrap-up path). Reported
-    // instead of the provider's `tool_use`: the loop stopped on the delivery,
-    // not on a pending tool call. The `responseFormat` strategy keeps the
-    // provider stop reason (no terminal tool involved).
-    | "output_delivered";
+  readonly stopReason: LoopStopReason;
   /** Canonical content stream — concatenated `output` from each tick's executor result. */
   readonly output: readonly ContentBlock[];
   /** Tool dispatch results accumulated across ticks. */
@@ -761,12 +749,7 @@ export interface TickResult extends TickInfo {
    * that a fork, a restore, or a second participant would desynchronize.
    */
   readonly consecutiveFailures: number;
-  readonly stopReason?:
-    | LanguageModelStopReason
-    | "max_ticks"
-    | "aborted"
-    | "vetoed"
-    | "executor_failed";
+  readonly stopReason?: LoopStopReason;
   /**
    * The resolved structured-output delivery strategy for this tick (§B2), set
    * by the tick body when an {@link OutputSpec} is in play. The run-execution

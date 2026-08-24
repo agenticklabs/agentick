@@ -39,8 +39,22 @@
  */
 
 import type { ExecutionTarget } from "../data/execution-target.js";
+import type { ResponseFormat } from "../data/rendered-tree.js";
 
 export interface RenderContext {
+  /**
+   * The output shape THIS send is bound to (`SendInput.responseFormat`),
+   * absent when the send carried none. A seeded core slot for the same reason
+   * as the two below: the session resolves it and has no package to augment
+   * from.
+   *
+   * An EXPOSURE, not a mechanism. The framework validates nothing and renders
+   * nothing from it — an app reads it to render the bound schema at context
+   * bottom, keeping the volatile shape out of the tools block, which is a
+   * sacred cache prefix. Its handler-side twin is
+   * {@link import("./tool-executor.js").DispatchContext.responseFormat}.
+   */
+  readonly responseFormat?: ResponseFormat;
   /**
    * The active model's window facts for THIS render (ADR 54/55).
    * Framework-produced by the loop/session; plain numbers, no

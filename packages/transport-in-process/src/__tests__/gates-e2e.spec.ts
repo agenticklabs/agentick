@@ -91,8 +91,8 @@ describe("gates end-to-end — client ↔ gateway (dynamic lane) ↔ session", (
     const rows = await gates.refresh();
 
     const byName = new Map(rows.map((g) => [g.name, g]));
-    expect(byName.get("inv")).toMatchObject({ name: "inv", verified: true });
-    expect(byName.get("review")).toMatchObject({ name: "review", verified: false });
+    expect(byName.get("inv")).toMatchObject({ name: "inv", species: "verified" });
+    expect(byName.get("review")).toMatchObject({ name: "review", species: "latch" });
 
     await cleanup();
   });

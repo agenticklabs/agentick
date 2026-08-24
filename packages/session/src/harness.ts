@@ -2066,9 +2066,10 @@ export class SessionHarness<P = unknown>
 
       // (b) Tree + gate loop-control requests recorded on the live loop
       // bridge across this tick (`useLoopControl().stop/continueAfterTick`
-      // from tree effects, plus the gate holds from (a)). Provenance (ADR
-      // 51): only trusted tree code ever emits `stop` — gates only ever
-      // `continue` — so a drained `stop` is legitimately a tier-1 halt.
+      // from tree effects, plus the gate verdicts from (a)). Provenance (ADR
+      // 51): `stop` comes only from trusted tree code or a stop gate, which is
+      // host-declared and model-invisible — the value-cell gates the model can
+      // write only ever `continue`. So a drained `stop` is a tier-1 halt.
       const loopReq = this.bridges.loop.drainLoopRequests();
 
       // (a') Compaction (ADR 97). Here rather than in the tree because a
@@ -3426,16 +3427,23 @@ export class SessionHarness<P = unknown>
                   // per-tick-model): under #169 it's IR-derived per tick and this
                   // re-resolves per render.
                   resolveRenderContext: () => {
+                    // The send's bound output shape is model-independent, so it
+                    // survives the model-less branch below.
+                    const bound: RenderContext =
+                      effectiveResponseFormat !== undefined
+                        ? { responseFormat: effectiveResponseFormat }
+                        : {};
                     // Model-less send: no fallback target to project. The tree may
                     // still declare a per-tick `<Model>`, but that resolves
                     // POST-render (chicken-and-egg, see the loop's ADR-56 notes),
                     // so `activeModel`/`contextInfo` are simply absent this render.
-                    if (targetForCall === undefined) return {};
+                    if (targetForCall === undefined) return bound;
                     const contextWindow = effectiveModelInfo(
                       targetForCall,
                       this.models,
                     )?.contextWindow;
                     const rc: RenderContext = {
+                      ...bound,
                       ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
                       activeModel: {
                         provider: targetForCall.provider,

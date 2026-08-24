@@ -24,6 +24,7 @@ export { useTransformModelInput } from "./use-transform-model-input.js";
 export { useContextInfo, type ContextInfo } from "./use-context-info.js";
 export { useRenderContext } from "./use-render-context.js";
 export { useActiveModel, type ActiveModel } from "./use-active-model.js";
+export { useResponseFormat, type BoundResponseFormat } from "./use-response-format.js";
 export { useOnError } from "./use-on-error.js";
 export { useOnMount, useOnUnmount } from "./use-on-mount.js";
 export { useOnLifecycleCustom } from "./use-on-lifecycle-custom.js";

@@ -37,7 +37,7 @@ function narrationProp(schema: Record<string, unknown>): unknown {
 }
 
 describe("buildTools — model-narration `_summary` injection", () => {
-  it("injects an optional `_summary` string property when narration is enabled (default)", () => {
+  it("injects a `_summary` string property when narration is enabled (default)", () => {
     const [projected] = buildTools([tool()]);
     const prop = narrationProp(projected.inputSchema) as Record<string, unknown>;
     expect(prop).toBeDefined();
@@ -47,8 +47,22 @@ describe("buildTools — model-narration `_summary` injection", () => {
     expect((projected.inputSchema.properties as Record<string, unknown>).query).toBeDefined();
   });
 
-  it("does NOT add `_summary` to `required`", () => {
+  it("adds `_summary` to `required`, preserving the author's own required keys", () => {
     const [projected] = buildTools([tool()]);
+    expect(projected.inputSchema.required).toEqual(["query", TOOL_NARRATION_FIELD]);
+  });
+
+  it("adds `_summary` to `required` on a schema that declared none", () => {
+    const [projected] = buildTools([
+      tool({
+        inputSchema: jsonSchema({ type: "object", properties: { query: { type: "string" } } }),
+      }),
+    ]);
+    expect(projected.inputSchema.required).toEqual([TOOL_NARRATION_FIELD]);
+  });
+
+  it("leaves `required` untouched when narration is disabled", () => {
+    const [projected] = buildTools([tool()], false);
     expect(projected.inputSchema.required).toEqual(["query"]);
   });
 

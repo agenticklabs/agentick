@@ -38,7 +38,7 @@ import type { ModelInfoResult } from "../wire/params.js";
 import type { EventEnvelope } from "../data/events.js";
 import type { RenderedTree } from "../data/rendered-tree.js";
 import type { ContentBlock } from "../data/content-blocks.js";
-import type { LanguageModelStopReason, StopCause, UsageStats } from "../data/execution-result.js";
+import type { LoopStopReason, StopCause, UsageStats } from "../data/execution-result.js";
 import type { TickResult } from "./loop-executor.js";
 import type { LanguageModelInput } from "./executor.js";
 import type { StreamEvent } from "../data/streaming.js";
@@ -501,18 +501,7 @@ export interface SendResult<T = unknown> {
    * @see docs/proposals/v2/usage-cost.md §6
    */
   readonly cost?: import("../data/usage-cost.js").CostRollup;
-  readonly stopReason:
-    | LanguageModelStopReason
-    | "max_ticks"
-    | "aborted"
-    | "vetoed"
-    | "executor_failed"
-    | "timeout"
-    // §B2 — the declared structured output was delivered via the terminal tool
-    // (natural or forced wrap-up path); `data` carries the validated value.
-    // Reported instead of the provider's `tool_use`. The `responseFormat`
-    // strategy keeps the provider stop reason.
-    | "output_delivered";
+  readonly stopReason: LoopStopReason;
   readonly ticks: number;
   readonly executionId: string;
   /**

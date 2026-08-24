@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TickResult } from "@agentick/spec";
 import { stubKnobsHarness } from "@agentick/knobs/testing";
 
-import { gate } from "../descriptor.js";
+import { gate, gateSpecies, isStopGate, isVerifiedGate, stopOnTools } from "../descriptor.js";
 import { GatesController } from "../controller.js";
 import { fakeGatesController, spyLoopControl } from "../testing/index.js";
 
@@ -32,8 +32,14 @@ function tickResult(
   };
 }
 
-const wrote = (tool: string): Pick<TickResult, "toolResults"> => ({
-  toolResults: [{ toolCallId: "c1", toolName: tool, succeeded: true, content: [], durationMs: 1 }],
+const wrote = (...tools: string[]): Pick<TickResult, "toolResults"> => ({
+  toolResults: tools.map((toolName, i) => ({
+    toolCallId: `c${i}`,
+    toolName,
+    succeeded: true,
+    content: [],
+    durationMs: 1,
+  })),
 });
 
 // ============================================================================
@@ -236,11 +242,11 @@ describe("GatesController — unified registry", () => {
     const info = controller.list();
     expect(info).toHaveLength(2);
     expect(info.find((g) => g.name === "latch")).toMatchObject({
-      verified: false,
+      species: "latch",
       description: "L",
     });
     expect(info.find((g) => g.name === "verified")).toMatchObject({
-      verified: true,
+      species: "verified",
       description: "V",
     });
   });
@@ -273,12 +279,15 @@ describe("GatesController — unified registry", () => {
     const byName = new Map(child.list().map((g) => [g.name, g]));
     expect([...byName.keys()].sort()).toEqual(["child-only", "parent-only", "shared"]);
     // Self shadows the parent's `shared` row entirely (child's species + description win).
-    expect(byName.get("shared")).toMatchObject({ verified: true, description: "child-shared" });
+    expect(byName.get("shared")).toMatchObject({
+      species: "verified",
+      description: "child-shared",
+    });
     // Parent-only rows fall through.
-    expect(byName.get("parent-only")).toMatchObject({ verified: false, description: "P" });
+    expect(byName.get("parent-only")).toMatchObject({ species: "latch", description: "P" });
 
     // get(): self shadows, else falls through to the parent's handle.
-    expect(child.get("shared")!.verified).toBe(true);
+    expect(child.get("shared")!.species).toBe("verified");
     expect(child.get("parent-only")).toBe(parent.controller.get("parent-only"));
   });
 
@@ -329,5 +338,133 @@ describe("GatesController — unified registry", () => {
     // The shadowed parent gate was SKIPPED — never engaged, never blocked.
     expect(parent.knobs.get("shared")).toBe("inactive");
     expect(parent.loop.continueCalls).toEqual([]);
+  });
+});
+
+describe("GatesController — stop gate", () => {
+  it("ends a turn the loop would have continued when a named tool was dispatched", async () => {
+    const { controller, loop } = fakeGatesController();
+    controller.register("completion", stopOnTools("done"));
+
+    await controller.handleTickEnd(tickResult({ shouldContinue: true, ...wrote("done") }));
+
+    expect(loop.stopCalls).toEqual(["gate:completion"]);
+    expect(loop.continueCalls).toEqual([]);
+  });
+
+  it("leaves a tick that dispatched no named tool alone", async () => {
+    const { controller, loop } = fakeGatesController();
+    controller.register("completion", stopOnTools("done", "handoff"));
+
+    await controller.handleTickEnd(tickResult({ shouldContinue: true, ...wrote("search") }));
+    await controller.handleTickEnd(tickResult({ shouldContinue: true }));
+
+    expect(loop.stopCalls).toEqual([]);
+    expect(loop.continueCalls).toEqual([]);
+  });
+
+  it("sees the WHOLE parallel batch — the batch completes, then the turn ends", async () => {
+    const { controller, loop } = fakeGatesController();
+    let observed: string[] = [];
+    controller.register("completion", stopOnTools("done"));
+    controller.register("observer", {
+      description: "records the settled batch",
+      stopWhen: (r) => {
+        observed = r.toolResults.map((t) => t.toolName);
+        return false;
+      },
+    });
+
+    await controller.handleTickEnd(
+      tickResult({ shouldContinue: true, ...wrote("search", "done", "write_file") }),
+    );
+
+    expect(observed).toEqual(["search", "done", "write_file"]);
+    expect(loop.stopCalls).toEqual(["gate:completion"]);
+  });
+
+  it("registers no knob, holds no value, and still lists", async () => {
+    const knobs = stubKnobsHarness();
+    const { controller } = fakeGatesController(knobs);
+    const handle = controller.register("completion", stopOnTools("done"));
+
+    await controller.handleTickEnd(tickResult({ shouldContinue: true, ...wrote("done") }));
+
+    expect(knobs.list()).toEqual([]);
+    expect(knobs.get("completion")).toBeUndefined();
+    expect(handle.value).toBeUndefined();
+    expect(handle.engaged).toBe(false);
+
+    const [row] = controller.list();
+    expect(row).toMatchObject({ name: "completion", species: "stop" });
+    expect(row!.value).toBeUndefined();
+  });
+
+  it("composes with a value gate: both signals reach the loop seam in one pass", async () => {
+    const { controller, loop } = fakeGatesController();
+    controller.register(
+      "inv",
+      gate({ description: "x", instructions: "x", satisfied: () => false }),
+    );
+    controller.register("completion", stopOnTools("done"));
+
+    await controller.handleTickEnd(tickResult({ shouldContinue: false, ...wrote("done") }));
+
+    // Resolution (stop beats continue) is the session's job — the controller
+    // reports both verdicts.
+    expect(loop.continueCalls).toEqual(["gate:inv"]);
+    expect(loop.stopCalls).toEqual(["gate:completion"]);
+  });
+
+  it("refuses clear / defer / override — there is no value to mutate", async () => {
+    const { controller } = fakeGatesController();
+    const handle = controller.register("completion", stopOnTools("done"));
+
+    await expect(handle.clear()).rejects.toThrow(/holds no value/);
+    await expect(handle.defer()).rejects.toThrow(/holds no value/);
+    await expect(handle.override("inactive")).rejects.toThrow(/holds no value/);
+    await expect(controller.clear("completion")).rejects.toThrow(/holds no value/);
+  });
+
+  it("evaluates a FAILED tick without throwing", async () => {
+    const { controller, loop } = fakeGatesController();
+    controller.register("completion", stopOnTools("done"));
+
+    await controller.handleTickEnd(
+      tickResult({
+        shouldContinue: false,
+        executorTerminal: {
+          outcome: "failed",
+          error: new Error("boom"),
+        } as unknown as TickResult["executorTerminal"],
+      }),
+    );
+
+    expect(loop.stopCalls).toEqual([]);
+  });
+
+  it("stopOnTools() with no tool names is a construction error", () => {
+    expect(() => stopOnTools()).toThrow(/at least one tool name/);
+  });
+
+  it("discriminates all three species", () => {
+    const latch = gate({ description: "x", instructions: "x", activateWhen: () => false });
+    const verified = gate({ description: "x", instructions: "x", satisfied: () => true });
+    const stop = stopOnTools("done");
+
+    expect([latch, verified, stop].map(gateSpecies)).toEqual(["latch", "verified", "stop"]);
+    expect([latch, verified, stop].map(isStopGate)).toEqual([false, false, true]);
+    expect([latch, verified, stop].map(isVerifiedGate)).toEqual([false, true, false]);
+  });
+
+  it("refuses to re-register a name under a different species", () => {
+    const { controller } = fakeGatesController();
+    controller.register("completion", stopOnTools("done"));
+    expect(() =>
+      controller.register(
+        "completion",
+        gate({ description: "x", instructions: "x", activateWhen: () => true }),
+      ),
+    ).toThrow(/registered as a stop gate/);
   });
 });

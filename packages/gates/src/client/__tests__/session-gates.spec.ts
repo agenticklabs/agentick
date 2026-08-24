@@ -18,7 +18,7 @@ import type { GateInfo } from "../../controller.js";
 import "../register.js";
 
 const GATES: readonly GateInfo[] = [
-  { name: "review", value: "active", verified: false, description: "Await review" },
+  { name: "review", species: "latch", value: "active", description: "Await review" },
 ];
 
 /**

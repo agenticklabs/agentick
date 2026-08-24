@@ -255,6 +255,48 @@ export const compactHistory = createTool({
 | `"dispatch"` | Host code, via `dispatch(name, input)` |
 | `"runtime"`  | Internal framework use only            |
 
+## Summaries and the capability tree
+
+A large toolbox is unreadable as a flat list — for the model and for the person watching. Two declaration fields fix that, and neither costs a schema.
+
+**`summary`** is one sentence: what the tool does, statically. It's the currency of a capabilities listing you keep in context permanently, so the model knows the lay of the land without every schema being resident. It is not `displaySummary` — that one describes what a _specific call_ is doing.
+
+**`group`** is a path: `["api", "jobs"]`. The tree is nothing but the set of paths. No registry holds a group, dispatch never consults one, and a client derives its tree view by grouping the flat tool list on this field.
+
+```ts
+export const listJobs = createTool({
+  name: "list_jobs",
+  description: "List jobs, optionally filtered by status.",
+  summary: "Lists jobs.",
+  group: ["api", "jobs"],
+  inputSchema: z.object({ status: z.enum(["open", "closed"]).optional() }),
+  handler: async ({ status }) => JSON.stringify(await fetchJobs(status)),
+});
+```
+
+### `createToolGroup`
+
+Writing `group` by hand on every tool is the part you'd get wrong. `createToolGroup` stamps it for you and **returns a plain flat array of declarations** — there is no group object, nothing group-shaped survives the call:
+
+```ts
+import { createToolGroup } from "@agentick/tool";
+
+export const jobTools = createToolGroup({
+  name: "jobs",
+  tools: [
+    listJobs, // → group: ["jobs"]
+    createToolGroup({
+      name: "drafts",
+      tools: [createDraft, publishDraft], // → group: ["jobs", "drafts"]
+    }),
+  ],
+});
+
+createApp(Agent, { tools: [...jobTools] });
+```
+
+A nested group is just a nested array — that _is_ the recursion. Each group prepends its own name onto whatever path its members already carry, so a tool that declared `group: ["x"]` inside a `"jobs"` group ends up at `["jobs", "x"]`. Members may be `createTool` bundles or raw declarations, mixed freely; the flattening keeps the declaration and drops the wrapper, so register handlers the way you always did.
+
 ## Catalogs
 
 When the tool set changes at runtime — auth state, feature flags, late registration — hand consumers a catalog instead of an array. Consumers re-read on every list and subscribe for change notifications; the MCP server projection turns those notifications into `notifications/tools/list_changed`.
@@ -354,12 +396,14 @@ composeTransforms(prefix("api_"), rename({ a: "b" })); // "a" → "api_a" (renam
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `createTool(spec)`                   | The factory. Returns a `CreatedTool` bundle                          |
 | `isCreatedTool(value)`               | Structural guard separating a bundle from a raw declaration          |
+| `createToolGroup(spec)`              | Stamp a capability-tree path; returns a flat `ToolDeclaration[]`     |
 | `permissiveValidator`                | Validator that accepts every input unchanged (the no-schema default) |
 | `fromStandardSchema(schema)`         | Adapt any Standard Schema validator to the `Validator` interface     |
 | `createToolCatalog(initial?)`        | Mutable catalog with change notifications                            |
 | `staticToolCatalog(decls)`           | Read-only catalog over a fixed array                                 |
 | `isToolCatalog(x)`                   | Duck-typed guard (`list` + `subscribeAll`)                           |
 | `ToolSpec` / `CreatedTool`           | Factory input and returned bundle types                              |
+| `ToolGroupSpec` / `ToolGroupMember`  | `createToolGroup` input, and what may sit in its `tools`             |
 | `ToolCatalog` / `MutableToolCatalog` | Read surface and mutation surface                                    |
 
 Additional `ToolSpec` fields not covered above: `narrate` (opt this tool out of injected model narration), `providerOptions` (per-provider tool options, e.g. OpenAI `strict`), `metadata` (arbitrary data on the declaration), and `handlerRef` (override the generated id when an external resolver already knows it).
@@ -383,5 +427,6 @@ Additional `ToolSpec` fields not covered above: `narrate` (opt this tool out of 
 ## Verified by
 
 - `src/__tests__/create-tool.spec.ts` — bundle shape, default exposure, `handlerRef` override, annotation/metadata forwarding, confirmation seams and aliases, client-handled tools, permissive-vs-Standard-Schema validation, handler invocation contract.
+- `src/__tests__/tool-group.spec.ts` — `summary`/`group` on the declaration (both handler shapes, and absent when unset), and `createToolGroup` flattening: parent-first path prefixing across nesting levels, pre-existing paths, mixed bundle/declaration members, source declarations left unmutated.
 - `src/transforms/__tests__/transforms.spec.ts` — every primitive, composition order, `null` short-circuiting, and an end-to-end projection.
 - [@agentick/tool-executor](../tool-executor) `src/__tests__/tool-result-currency.spec.ts` — the three return shapes, `outputSchema` validation, soft-vs-hard error semantics, and executor-stamped provenance. `confirmation-seams.spec.ts` and `narration-strip.spec.ts` cover the confirmation, `title`, and `displaySummary` seams end to end.

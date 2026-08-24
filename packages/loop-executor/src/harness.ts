@@ -87,6 +87,7 @@ import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelStopReason,
+  LoopStopReason,
   LoopExecutionEvent,
   LoopExecutorError,
   LoopExecutorFx,
@@ -470,14 +471,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       const maxConsecutiveFailedTicks =
         input.maxConsecutiveFailedTicks ?? DEFAULT_MAX_CONSECUTIVE_FAILED_TICKS;
 
-      let stopReason:
-        | LanguageModelStopReason
-        | "max_ticks"
-        | "aborted"
-        | "vetoed"
-        | "executor_failed"
-        | "timeout"
-        | "output_delivered" = "end";
+      let stopReason: LoopStopReason = "end";
 
       // The account of a bad stop, kept alongside the stop reason it produced.
       // Without this the mapping below was one-way and lossy: the outcome became a
@@ -719,8 +713,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           : forward?.kind === "stop"
             ? false
             : provisionalContinue || forward?.kind === "continue";
+        const halt =
+          !terminalCaptured && forward?.kind === "stop" ? (forward.reason ?? "stop") : undefined;
         const tickStopReason: string = !wantsContinue
-          ? result.stopReason
+          ? halt !== undefined
+            ? "halted"
+            : result.stopReason
           : acc.ticks >= input.maxTicks
             ? "max_ticks"
             : "continue";
@@ -752,7 +750,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         if (!wantsContinue) {
           // §B2 — a delivered structured output reports `output_delivered`, not
           // the provider's `tool_use`: the loop stopped on the delivery.
-          stopReason = terminalCaptured ? "output_delivered" : result.stopReason;
+          if (terminalCaptured) {
+            stopReason = "output_delivered";
+          } else if (halt !== undefined) {
+            stopReason = "halted";
+            stopCause = { kind: "halted", reason: halt };
+          } else {
+            stopReason = result.stopReason;
+          }
           break;
         }
 
@@ -1456,7 +1461,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 // back to the connection that asked for this turn.
                 ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
                 ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
-                ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
+                // The shape this send is bound to, surfaced to handlers as
+                // `ctx.responseFormat` so a completion tool can read it.
+                ...(input.responseFormat !== undefined
+                  ? { responseFormat: input.responseFormat }
+                  : {}),
               },
               // Structured cancellation (Stage 5) — an in-flight tool
               // handler tears down when abort()/timeout fires (the tool

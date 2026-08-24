@@ -67,6 +67,8 @@ export function toToolInfo(decl: ToolDeclaration): ToolInfo {
   return {
     name: decl.name,
     description: decl.description,
+    ...(decl.summary !== undefined ? { summary: decl.summary } : {}),
+    ...(decl.group !== undefined ? { group: decl.group } : {}),
     exposure: decl.exposure,
     ...(decl.aliases !== undefined ? { aliases: decl.aliases } : {}),
     ...(decl.annotations !== undefined ? { annotations: decl.annotations } : {}),

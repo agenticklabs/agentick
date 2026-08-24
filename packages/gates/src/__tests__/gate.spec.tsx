@@ -24,7 +24,7 @@ import { CompilerHarness } from "@agentick/compiler-react";
 import { fakeBridges } from "@agentick/compiler";
 import { stubKnobsHarness } from "@agentick/knobs/testing";
 import { flush } from "@agentick/compiler-react/testing";
-import { gate } from "../descriptor.js";
+import { gate, type ValueGateDescriptor } from "../descriptor.js";
 import { GatesController } from "../controller.js";
 import { spyLoopControl, type SpyLoopControl } from "../testing/index.js";
 import { useGate, type GateState } from "../react/use-gate.js";
@@ -68,7 +68,7 @@ function tickResult(
 
 // Capture the GateState across renders so tests can imperatively poke it
 // (call `clear()` / `defer()`) without needing user-event simulation.
-function captureGate(name: string, opts: Parameters<typeof gate>[0]) {
+function captureGate(name: string, opts: ValueGateDescriptor) {
   const ref: { current: GateState | null } = { current: null };
   function Probe() {
     const g = useGate(name, opts);
@@ -86,7 +86,7 @@ function captureGate(name: string, opts: Parameters<typeof gate>[0]) {
  * now owns. The `loop` spy IS the controller's continuation seam, so a
  * blocking gate's `continueAfterTick` is observable via `loop.continueCalls`.
  */
-async function mountGate(name: string, opts: Parameters<typeof gate>[0]) {
+async function mountGate(name: string, opts: ValueGateDescriptor) {
   const knobs = stubKnobsHarness();
   const loop: SpyLoopControl = spyLoopControl();
   const controller = new GatesController({ knobs, loopControl: loop });

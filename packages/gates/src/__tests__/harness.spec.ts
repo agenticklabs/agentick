@@ -18,7 +18,7 @@ import type { CommandInfo, TickResult } from "@agentick/spec";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { stubKnobsHarness } from "@agentick/knobs/testing";
 
-import { gate } from "../descriptor.js";
+import { gate, stopOnTools } from "../descriptor.js";
 import { GatesHarness } from "../harness.js";
 import { spyLoopControl } from "../testing/index.js";
 import type { GateOverrideAudit } from "../controller.js";
@@ -143,6 +143,21 @@ describe("GatesHarness", () => {
   it("a verb naming a missing gate rejects with a typed error (errors over nulls)", async () => {
     const { harness } = await makeHarness();
     await expect(harness.clear({ name: "does-not-exist" })).rejects.toBeDefined();
+  });
+
+  it("lists a stop gate valueless and refuses the value verbs on it", async () => {
+    const { harness } = await makeHarness();
+    harness.controller.register("completion", stopOnTools("done"));
+
+    const [row] = await harness.list();
+    expect(row).toMatchObject({ name: "completion", species: "stop" });
+    expect(row!.value).toBeUndefined();
+
+    await expect(harness.clear({ name: "completion" })).rejects.toThrow(/holds no value/);
+    await expect(harness.defer({ name: "completion" })).rejects.toThrow(/holds no value/);
+    await expect(harness.override({ name: "completion", value: "inactive" })).rejects.toThrow(
+      /holds no value/,
+    );
   });
 
   it("enumerates the four wire verbs via gates:commands, all exposure: wire", async () => {

@@ -52,10 +52,11 @@ import { omitUndefined } from "@agentick/utils";
  * drains them once per tick-end (in `notifyLifecycle`) and folds them
  * into its `TickEndForwardDecision`.
  *
- * Provenance falls out of the recorder for free (ADR 51): gates only ever
- * call `continueAfterTick` (they hold the loop open, never stop-force), so
- * a `stop` signal can ONLY originate from trusted tree code — exactly the
- * "host/tree may stop-force, the model may not" rule.
+ * Provenance falls out of the recorder for free (ADR 51): a `stop` signal can
+ * ONLY originate from trusted tree code or from a STOP gate — and a stop gate
+ * is host-declared, knob-less and model-invisible. The value-cell gate species
+ * the model CAN write only ever call `continueAfterTick`. So the
+ * "host/tree may stop-force, the model may not" rule holds either way.
  */
 export interface RecordingLoopBridge extends LoopBridge {
   /**

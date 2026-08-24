@@ -274,12 +274,27 @@ The escape hatches, when you need a lower rung:
 
 These hooks are synchronous reads of the render envelope — facts about _this_ render, available while the tree is producing IR.
 
-| Hook                 | Returns                                                               |
-| -------------------- | --------------------------------------------------------------------- |
-| `useContextInfo()`   | `{ contextWindow?, usedTokens, utilization? }`                        |
-| `useActiveModel()`   | `ActiveModel \| undefined` — `{ provider?, modelId?, capabilities? }` |
-| `useRenderContext()` | the full envelope (`{}` outside a run)                                |
-| `useSession()`       | `{ id, status, currentTick?, executionId? }` — read-only              |
+| Hook                  | Returns                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| `useContextInfo()`    | `{ contextWindow?, usedTokens, utilization? }`                        |
+| `useActiveModel()`    | `ActiveModel \| undefined` — `{ provider?, modelId?, capabilities? }` |
+| `useResponseFormat()` | `ResponseFormat \| undefined` — the shape THIS send is bound to       |
+| `useRenderContext()`  | the full envelope (`{}` outside a run)                                |
+| `useSession()`        | `{ id, status, currentTick?, executionId? }` — read-only              |
+
+`useResponseFormat()` is an **exposure, not a mechanism**. It hands you the send's `responseFormat` so you can render the bound schema at the BOTTOM of context — where a per-send shape belongs, because the tools block above it is a cache prefix that must stay byte-stable. The framework validates nothing against it and ships no output-contract component; that is application code. Its dispatch-time twin is `ctx.responseFormat` on a tool handler.
+
+```tsx
+function OutputContract() {
+  const format = useResponseFormat();
+  if (format?.type !== "json_schema") return null;
+  return (
+    <Section title="Answer shape">
+      <Json data={format.schema} />
+    </Section>
+  );
+}
+```
 
 Render less as the window fills:
 

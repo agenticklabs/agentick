@@ -1,9 +1,8 @@
 /**
  * Gates — compiler-agnostic descriptor types and factory.
  *
- * A gate is a knob-backed continuation condition that blocks loop
- * completion until it is cleared. Two species, discriminated by the
- * descriptor:
+ * A gate is a rule about loop continuation. Three species, discriminated
+ * by the descriptor:
  *
  * **Latch gates** (`activateWhen`) — edge-triggered, model-cleared. The
  * predicate arms the gate once (consulted only while `inactive`);
@@ -21,6 +20,13 @@
  * `activateWhen` ARMS the gate (edge-triggered, sticky) so the
  * invariant only applies once something made it relevant — dormant
  * gates neither verify nor block.
+ *
+ * **Stop gates** (`stopWhen`) — the inverse species. Latch and verified
+ * gates are value cells that HOLD a loop open; a stop gate ENDS a loop
+ * that would continue. It carries no value, registers no backing knob,
+ * and is invisible to the model: nothing about it is settable, so there
+ * is nothing to show or to forge. {@link stopOnTools} is the shipped
+ * factory.
  *
  * The descriptors and `gate()` factory live here because they're pure
  * data — no compiler dependency. The consumer hook (`useGate`) is
@@ -88,7 +94,26 @@ export interface VerifiedGateDescriptor {
   readonly activateWhen?: (result: TickResult) => boolean;
 }
 
-export type GateDescriptor = LatchGateDescriptor | VerifiedGateDescriptor;
+/**
+ * Stop gate: ends the turn when the predicate holds.
+ *
+ * Evaluated at TICK END, so a parallel tool batch has fully settled
+ * before the predicate is consulted — a stop never interrupts a batch
+ * mid-flight.
+ */
+export interface StopGateDescriptor {
+  /** Short human-readable label. Surfaced by `gates:list`. */
+  readonly description: string;
+  /** Ends the turn when it returns true against the settled tick. */
+  readonly stopWhen: (result: TickResult) => boolean;
+}
+
+/** The knob-backed species — the two that hold a value the model can read. */
+export type ValueGateDescriptor = LatchGateDescriptor | VerifiedGateDescriptor;
+
+export type GateDescriptor = ValueGateDescriptor | StopGateDescriptor;
+
+export type GateSpecies = "latch" | "verified" | "stop";
 
 /**
  * The three known gate values for LATCH gates, surfaced as `options`
@@ -104,17 +129,42 @@ export const GATE_OPTIONS: readonly GateValue[] = ["inactive", "active", "deferr
  */
 export const VERIFIED_GATE_OPTIONS: readonly GateValue[] = ["inactive", "active"];
 
-/** Discriminate the two gate species at runtime. */
 export function isVerifiedGate(opts: GateDescriptor): opts is VerifiedGateDescriptor {
   return "satisfied" in opts && typeof (opts as VerifiedGateDescriptor).satisfied === "function";
+}
+
+export function isStopGate(opts: GateDescriptor): opts is StopGateDescriptor {
+  return "stopWhen" in opts && typeof (opts as StopGateDescriptor).stopWhen === "function";
+}
+
+export function gateSpecies(opts: GateDescriptor): GateSpecies {
+  if (isStopGate(opts)) return "stop";
+  return isVerifiedGate(opts) ? "verified" : "latch";
 }
 
 /**
  * Trivial descriptor factory. Exists so authors can declare gates at
  * module scope (`const verificationGate = gate({ … });`) and pass the
  * descriptor into the compiler's gate hook (e.g.,
- * `useGate(name, verificationGate)` in React).
+ * `useGate(name, verificationGate)` in React). Identity on the type so
+ * the species survives — `useGate` accepts only the value species.
  */
-export function gate(opts: GateDescriptor): GateDescriptor {
+export function gate<T extends GateDescriptor>(opts: T): T {
   return opts;
+}
+
+/**
+ * The turn ends once the tick dispatched one of these tools — the
+ * canonical explicit-completion mechanism (`stopOnTools("done")`).
+ *
+ * Reads the DISPATCHED calls (`toolResults`), not the requested ones: a
+ * call an admission guard refused never ran, and must not end the turn.
+ */
+export function stopOnTools(...names: string[]): StopGateDescriptor {
+  if (names.length === 0) throw new Error("stopOnTools() requires at least one tool name.");
+  const stopAt = new Set(names);
+  return {
+    description: `Ends the turn once ${names.join(" or ")} is called`,
+    stopWhen: (result) => result.toolResults.some((t) => stopAt.has(t.toolName)),
+  };
 }

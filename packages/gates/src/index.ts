@@ -1,15 +1,18 @@
 /**
  * `@agentick/gates` — knob-backed continuation conditions.
  *
- * A gate blocks loop completion until cleared. Two species:
+ * A gate is a rule about loop continuation. Three species:
  *
  *   - **Latch gates** (`activateWhen`) — edge-triggered; the model
  *     clears via `knob_set` (three states: `inactive`/`active`/`deferred`).
  *   - **Verified gates** (`satisfied`) — level-triggered; a code
  *     predicate evaluated every tick auto-clears on pass and re-engages
  *     on regression. Backing knob is read-only to the model.
+ *   - **Stop gates** (`stopWhen`) — the inverse: they end a turn that
+ *     would continue. No knob, no value, invisible to the model.
+ *     `stopOnTools("done")` is the shipped factory.
  *
- * The gate's value lives in the session's KnobsHarness — gates have no
+ * A value gate's cell lives in the session's KnobsHarness — gates have no
  * independent state, no separate harness, no inbox address.
  *
  * This root is compiler-agnostic — the pure descriptor types +
@@ -26,10 +29,21 @@
  * augmentation of `SessionHarnessProtocol` (see `./augment.ts`).
  */
 
-export { gate, isVerifiedGate, GATE_OPTIONS, VERIFIED_GATE_OPTIONS } from "./descriptor.js";
+export {
+  gate,
+  gateSpecies,
+  isStopGate,
+  isVerifiedGate,
+  stopOnTools,
+  GATE_OPTIONS,
+  VERIFIED_GATE_OPTIONS,
+} from "./descriptor.js";
 export type {
   GateDescriptor,
+  GateSpecies,
   LatchGateDescriptor,
+  StopGateDescriptor,
+  ValueGateDescriptor,
   VerifiedGateDescriptor,
   GateValue,
 } from "./descriptor.js";

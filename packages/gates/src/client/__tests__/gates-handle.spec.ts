@@ -32,8 +32,8 @@ function fakeCommandClient(captured: Captured[], rows: () => readonly GateInfo[]
 }
 
 const GATES: readonly GateInfo[] = [
-  { name: "review", value: "active", verified: false, description: "Await review" },
-  { name: "inv", value: "inactive", verified: true, description: "Invariant" },
+  { name: "review", species: "latch", value: "active", description: "Await review" },
+  { name: "inv", species: "verified", value: "inactive", description: "Invariant" },
 ];
 
 describe("gatesHandle", () => {
@@ -47,7 +47,11 @@ describe("gatesHandle", () => {
     await waitFor(() => handle.list().length > 0);
 
     expect(handle.list()).toEqual(GATES);
-    expect(handle.get("inv")).toMatchObject({ name: "inv", verified: true, value: "inactive" });
+    expect(handle.get("inv")).toMatchObject({
+      name: "inv",
+      species: "verified",
+      value: "inactive",
+    });
     expect(handle.get("nope")).toBeUndefined();
     expect(captured[0]).toEqual({ method: "gates/list", params: { sessionId: "s1" } });
   });

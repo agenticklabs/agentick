@@ -29,6 +29,10 @@
  *   - `gates:clear`    → the named gate's `clear()`.
  *   - `gates:defer`    → the named gate's `defer()` (latch gates only; a no-op
  *                        on verified gates, per the controller).
+ *
+ * The three mutation verbs reject on a STOP gate — it holds no value cell, so
+ * clearing, deferring, or overriding one has nothing to mean. `gates:list`
+ * still shows it (`species: "stop"`, no `value`): auditable, just valueless.
  *   - `gates:override` → the named gate's `override()` — the verified-gate,
  *                        audited escape. The command stamps `origin: "wire"` on
  *                        the {@link GateOverrideAudit} (the verified-only rule

@@ -464,9 +464,10 @@ function projectBlock(block: ContentBlock): LanguageModelMessagePart {
  * is skipped for a tool when `narrate` is `false` (app-level off-switch),
  * when the tool sets `annotations.narrate === false`, or when the tool's
  * own schema already declares a `_summary` property (implicit opt-out —
- * we never clobber an author field). `_summary` is NEVER added to
- * `required`. Token cost: one extra schema property per tool + one extra
- * model-emitted sentence per call — disable app-wide via `narrate: false`.
+ * we never clobber an author field). Injected as REQUIRED — see
+ * {@link injectNarration}. Token cost: one extra schema property per tool +
+ * one extra model-emitted sentence per call — disable app-wide via
+ * `narrate: false`.
  */
 export function buildTools(
   tools: readonly ToolDeclaration[],
@@ -539,9 +540,15 @@ export function buildProviderTools(
  * Inject the reserved {@link TOOL_NARRATION_FIELD} into a tool's wire JSON
  * schema when narration is enabled for that tool. Never mutates the input
  * (`toJsonSchema` may return a cached raw-schema reference shared across
- * calls) — shallow-copies the schema and its `properties`. Skips injection
- * when the schema already declares `_summary` (implicit per-tool opt-out).
- * `_summary` is optional — never added to `required`.
+ * calls) — shallow-copies the schema, its `properties` and its `required`.
+ * Skips injection when the schema already declares `_summary` (implicit
+ * per-tool opt-out).
+ *
+ * Injected as REQUIRED. The executor strips the field before validating
+ * against the tool's own schema, which never mentions it — so `required` here
+ * cannot fail a dispatch. It is purely the instruction that makes the model
+ * actually fill it in, and it keeps the schema legal under provider strict
+ * modes, which demand every property be required.
  */
 function injectNarration(
   schema: Record<string, unknown>,
@@ -553,6 +560,7 @@ function injectNarration(
     // The author already owns `_summary` — leave their field intact.
     return schema;
   }
+  const required = Array.isArray(schema.required) ? (schema.required as unknown[]) : [];
   return {
     ...schema,
     properties: {
@@ -562,5 +570,6 @@ function injectNarration(
         description: "One short first-person sentence describing this call, shown to the user.",
       },
     },
+    required: [...required, TOOL_NARRATION_FIELD],
   };
 }

@@ -78,6 +78,7 @@ export {
   useContextInfo,
   useRenderContext,
   useActiveModel,
+  useResponseFormat,
   useOnError,
   useOnMount,
   useOnUnmount,

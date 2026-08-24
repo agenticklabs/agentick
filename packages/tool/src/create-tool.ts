@@ -45,6 +45,19 @@ export interface ToolSpec<TInput = unknown> {
   /** Human-readable description. Surfaced to the model in the tool list. */
   readonly description: string;
   /**
+   * ONE sentence: what the tool does. The currency of a capabilities
+   * section — the always-in-context listing that tells the model the lay of
+   * the land without spending a schema on every tool. Static and
+   * call-independent, unlike {@link displaySummary} (what a SPECIFIC call is
+   * doing).
+   */
+  readonly summary?: string;
+  /**
+   * Where this tool sits in the capability tree, as a PATH: `["api", "jobs"]`.
+   * Usually stamped by {@link createToolGroup} rather than written by hand.
+   */
+  readonly group?: readonly string[];
+  /**
    * Input schema. Accepts any Standard-Schema-compliant validator
    * (Zod 4, Valibot, ArkType, Effect Schema, ...) OR a raw JSON Schema
    * wrapped via `jsonSchema({ ... })`. Used for BOTH:
@@ -304,7 +317,11 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
       name: spec.name,
       description: spec.description,
       inputSchema: schema,
-      ...omitUndefined({ outputSchema: spec.outputSchema }),
+      ...omitUndefined({
+        summary: spec.summary,
+        group: spec.group,
+        outputSchema: spec.outputSchema,
+      }),
       exposure: spec.exposure ?? ["model"],
       ...omitUndefined({
         handlerRef: spec.handlerRef,
@@ -325,7 +342,11 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
     name: spec.name,
     description: spec.description,
     inputSchema: schema,
-    ...omitUndefined({ outputSchema: spec.outputSchema }),
+    ...omitUndefined({
+      summary: spec.summary,
+      group: spec.group,
+      outputSchema: spec.outputSchema,
+    }),
     exposure: spec.exposure ?? ["model"],
     handlerRef,
     ...omitUndefined({

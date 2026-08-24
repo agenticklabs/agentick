@@ -90,7 +90,9 @@ session.tools.has("ls"); // name, then alias
 const off = session.tools.subscribeAll(() => rerender()); // registry topology
 ```
 
-`ToolInfo` is the wire-safe row — `name`, `description`, `exposure`, `aliases?`, `annotations?`, `hasInputSchema`. The live `StandardSchemaV1` validator never crosses; power users who need it keep `session.toolExecutor`.
+`ToolInfo` is the wire-safe row — `name`, `description`, `summary?`, `group?`, `exposure`, `aliases?`, `annotations?`, `hasInputSchema`. The live `StandardSchemaV1` validator never crosses; power users who need it keep `session.toolExecutor`.
+
+**`summary` and `group`.** A tool's one-sentence `summary` and its capability-tree `group` path (`["api", "jobs"]`) ride the row so a client can render a grouped catalog — the model's lay of the land — without a schema per tool. The registry has no concept of a group: the tree IS the set of paths, and `createToolGroup` in `@agentick/tool` is the authoring sugar that stamps them.
 
 Subscriptions fire only from registration mutations (`register` / `unregister` / `removeBoundTools` / `replaceCompilerTools`), never from the hot dispatch read path — so subscribing costs nothing per call.
 
@@ -185,6 +187,7 @@ const handler: ToolHandler = async (input, { ctx, use }) => {
   ctx.transport; // "in-process" here; "mcp" under an MCP-server projection
   ctx.task; // "auto" | "ref" | "inline" — resolved task mode for this call
   ctx.sessionId; // work-path identity, derived from the dispatching crossing
+  ctx.responseFormat; // the output shape THIS send is bound to, when it carried one
   ctx.setState("last", input); // readable from a tool's render()
   ctx.emit({ name: "session:channel:my_channel", payload: input });
 
@@ -719,7 +722,7 @@ Re-declaring the same name replaces it within the client slice, so a reconnect t
 
 `displaySummary` is a seam like the confirmation ones — a static string or a per-call function on the validated input + ctx.
 
-`_summary` is a **reserved** optional field the model projector injects into every model-facing tool schema, letting the model say in one sentence what a call is doing — the sentence that lights a spinner. The executor **strips it from the raw input before validation** (shallow copy; the caller's object is never mutated), so it never reaches the author's schema, the handler, or the persisted `tool_result`. Stripping is model-door only. A tool whose own schema declares `_summary` opts out implicitly; `narrate: false` opts out explicitly.
+`_summary` is a **reserved** field the model projector injects — as **required** — into every model-facing tool schema, letting the model say in one sentence what a call is doing: the sentence that lights a spinner. Required in the wire schema is what makes the model actually fill it in; it cannot fail a dispatch, because the executor strips the field before validating against the tool's own schema, which never mentions it. The executor **strips it from the raw input before validation** (shallow copy; the caller's object is never mutated), so it never reaches the author's schema, the handler, or the persisted `tool_result`. Stripping is model-door only. A tool whose own schema declares `_summary` opts out implicitly; `narrate: false` opts out explicitly.
 
 > [!WARNING]
 > Injecting `_summary` into every tool schema and having the model emit a sentence per call is real input **and** output token cost on every tool-using tick. It defaults on; turn it off where the narration isn't worth it:

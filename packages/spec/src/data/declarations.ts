@@ -377,6 +377,23 @@ export interface ToolDeclaration {
   readonly name: string;
   readonly description: string;
   /**
+   * ONE sentence: what the tool does. The currency of a capabilities
+   * section — the always-in-context listing that tells the model the lay of
+   * the land without spending a schema on every tool. Static and
+   * call-independent, unlike {@link ToolAnnotations.displaySummary} (what a
+   * SPECIFIC call is doing) and {@link ToolPresentation.summary} (that one
+   * resolved). Crosses the wire on {@link import("../protocol/tool-executor.js").ToolInfo}.
+   */
+  readonly summary?: string;
+  /**
+   * Where this tool sits in the capability tree, as a PATH:
+   * `["api", "jobs"]`. The tree is the SET of paths — no registry or runtime
+   * concept of a group exists, and dispatch never consults this. A client
+   * derives its tree view by grouping the flat tool list on this field;
+   * `createToolGroup` is the authoring sugar that stamps it.
+   */
+  readonly group?: readonly string[];
+  /**
    * Adopter-supplied input schema. Any Standard-Schema-compliant
    * validator (Zod 4, Valibot, ArkType, Effect Schema, ...) OR a raw
    * JSON Schema wrapped via `jsonSchema({ ... })`. Projected to wire
@@ -522,6 +539,10 @@ export interface ClientToolAnnotations {
 export interface ClientToolDeclaration {
   readonly name: string;
   readonly description: string;
+  /** One sentence: what the tool does. See {@link ToolDeclaration.summary}. */
+  readonly summary?: string;
+  /** Capability-tree path. See {@link ToolDeclaration.group}. */
+  readonly group?: readonly string[];
   /**
    * Raw JSON Schema object for the tool input. Wrapped server-side into a
    * `StandardSchemaV1` via `jsonSchema(...)` — the wire cannot carry a live

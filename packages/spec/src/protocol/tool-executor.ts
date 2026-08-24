@@ -105,6 +105,15 @@ export interface DispatchContext {
    * `target`, and each attached client compares it against its own id.
    */
   readonly clientId?: string;
+  /**
+   * The output shape the CURRENT execution is bound to
+   * (`SendInput.responseFormat`), absent when the send carried none. Set by
+   * the loop on the model door; the host door carries whatever the caller
+   * supplies. Surfaced to handlers as `ctx.responseFormat` — an EXPOSURE the
+   * framework never validates against. Render-side twin:
+   * {@link import("./render-context.js").RenderContext.responseFormat}.
+   */
+  readonly responseFormat?: import("../data/rendered-tree.js").ResponseFormat;
   /** Caller-supplied request context (user, requestId, traceparent, …). */
   readonly request?: Readonly<Record<string, unknown>>;
   /**
@@ -293,6 +302,10 @@ export interface DispatchOptions {
 export interface ToolInfo {
   readonly name: string;
   readonly description: string;
+  /** One sentence: what the tool does. See {@link ToolDeclaration.summary}. */
+  readonly summary?: string;
+  /** Capability-tree path. See {@link ToolDeclaration.group}. */
+  readonly group?: readonly string[];
   /** Which doors the tool is reachable from (`"model"` / `"dispatch"` / `"runtime"`). */
   readonly exposure: readonly ToolExposure[];
   /** Alternate dispatch names (declaration-level, not annotations). */
@@ -498,6 +511,8 @@ export function toClientToolRegistration(
     description: declaration.description,
     inputSchema: jsonSchema(declaration.inputSchema),
     exposure: ["model"],
+    ...(declaration.summary !== undefined ? { summary: declaration.summary } : {}),
+    ...(declaration.group !== undefined ? { group: declaration.group } : {}),
     ...(declaration.aliases !== undefined ? { aliases: declaration.aliases } : {}),
     ...(declaration.annotations !== undefined
       ? { annotations: stripServerOnlyAnnotations(declaration.annotations) }

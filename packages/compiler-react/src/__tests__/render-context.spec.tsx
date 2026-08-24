@@ -14,6 +14,7 @@ import { CompilerHarness } from "../harness/compiler-harness.js";
 import { useRenderContext } from "../react/hooks/use-render-context.js";
 import { useContextInfo, type ContextInfo } from "../react/hooks/use-context-info.js";
 import { useActiveModel, type ActiveModel } from "../react/hooks/use-active-model.js";
+import { useResponseFormat, type BoundResponseFormat } from "../react/hooks/use-response-format.js";
 import { flush } from "../testing/flush.js";
 
 // The seam's CENTRAL claim (ADR 55): a package can contribute a slot to
@@ -137,6 +138,54 @@ describe("RenderContext envelope", () => {
     await flush();
 
     expect(model).toBeUndefined();
+  });
+
+  it("useResponseFormat reads the send's bound output shape synchronously", async () => {
+    const harness = await makeHarness("h_rc_rf");
+    let format: BoundResponseFormat | undefined;
+
+    function App() {
+      format = useResponseFormat();
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    const bound = {
+      type: "json_schema",
+      name: "answer",
+      schema: { type: "object", properties: { verdict: { type: "string" } } },
+    } as const;
+
+    await harness.mount({
+      mountId: "m_rc_rf",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+      renderContext: { responseFormat: bound },
+    });
+    await flush();
+
+    expect(format).toEqual(bound);
+  });
+
+  it("useResponseFormat returns undefined when the send carried no format", async () => {
+    const harness = await makeHarness("h_rc_rf2");
+    let format: BoundResponseFormat | undefined = { type: "text" };
+
+    function App() {
+      format = useResponseFormat();
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_rc_rf2",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+      renderContext: { contextInfo: { contextWindow: 1000 } },
+    });
+    await flush();
+
+    expect(format).toBeUndefined();
   });
 
   it("an augmented slot round-trips (proves packages can extend the envelope)", async () => {

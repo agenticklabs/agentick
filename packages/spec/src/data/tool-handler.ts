@@ -231,6 +231,17 @@ export interface ToolHandlerCtx
    */
   readonly tools?: import("../protocol/tool-executor.js").ToolsHandle;
 
+  /**
+   * The output shape the CURRENT execution is bound to
+   * (`SendInput.responseFormat`), absent when the send carried none.
+   *
+   * An EXPOSURE, not a mechanism: a completion tool reads it to validate its
+   * own payload and re-ask, which is application policy. The framework
+   * validates nothing against it and ships no completion tool. Render-side
+   * twin: `RenderContext.responseFormat`.
+   */
+  readonly responseFormat?: import("./rendered-tree.js").ResponseFormat;
+
   // ── Transport discriminator + extras (NEW — ADR 43) ───────────────
 
   /**

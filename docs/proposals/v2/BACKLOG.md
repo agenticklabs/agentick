@@ -11,7 +11,7 @@ arc 1)**, then by opportunity. Sequencing rationale inline per stream.
 
 ---
 
-## A. Context architecture — "the lay of the land" 🔒 ARC 1 LOCKED (2026-08-24)
+## A. Context architecture — "the lay of the land" ✅ ARC 1 FRAMEWORK LANDED (2026-08-24, pending publish)
 
 The model knows what it can do WITHOUT searching; it searches only for
 specifics. "Rules and conventions drive success."
@@ -39,9 +39,22 @@ specifics. "Rules and conventions drive success."
   few-shot questions per tool.
 
 Split: ONE small framework PR (fields + sugar) / knowify-led everything
-else. NEXT: arc-1 brief.
+else.
 
-## B. Explicit completion — the done tool ✅ DESIGN RATIFIED, BUILD PENDING
+LANDED: `ToolDeclaration.summary` + `.group` as FIRST-CLASS fields (not
+annotations — the declaration is what the tool IS; `annotations.summary` would
+have collided with `displaySummary`/`ToolPresentation.summary`), carried on
+`ToolInfo` so `list()` and the wire see them. `createToolGroup({name, tools})`
+in `@agentick/tool` — a group IS a flat array, nesting is nested arrays,
+nothing group-shaped survives. Group-level `summary` deliberately omitted: the
+`groups` enumeration that would consume it is still deferred, so the field
+would be dead surface (`TODO(tool-groups)` marks it).
+
+NEXT: knowify-side curation / keywords / embeddings; the app-side capabilities
+SECTION; the dock's tree panel (which is what unblocks a `groups`
+enumeration).
+
+## B. Explicit completion — the done tool ✅ FRAMEWORK SEAMS LANDED (2026-08-24, pending publish)
 
 Ratified 2026-08-24; precedent recorded (Vercel answer-tool, Cline
 attempt_completion, SWE-agent submit, AutoGPT finish, OpenAI Agents SDK
@@ -66,10 +79,23 @@ stop-at-tools).
   current text-parse path is the legacy this deletes, no-compat);
   `skills.run` output shape ditto; app output logic collapses on it.
 
-NEXT: the two seams (gate factory + exposure) fold into arc 1; sugar rungs
-after app-side proof.
+LANDED: `stopOnTools(...names)` as a THIRD gate species (`StopGateDescriptor`
+— no backing knob, no instructions, model-invisible, so the "host may
+stop-force, the model may not" provenance rule survives). A deliberate stop
+now reports `stopReason: "halted"` with `stopCause: { kind: "halted", reason:
+"gate:done" }` — the reason string used to be dropped. Bound-schema exposure
+landed on both existing seams: `useResponseFormat()` (render, via a seeded
+`RenderContext` slot) and `ctx.responseFormat` (dispatch, via
+`DispatchContext`). Per-tick dispatched tools needed NO new gate ctx — the
+gate predicate already receives the settled `TickResult`, whose `toolResults`
+IS the dispatched-and-settled set, which is also what makes "a parallel batch
+completes first" fall out for free.
 
-## C. Session tools — the model holds its own handles 🔒 ARC 1 LOCKED (2026-08-24)
+NEXT: the app builds `done` + `<OutputContract/>` on these seams. Sugar rungs
+(`terminal: true` / `stopOn`) only after app-side proof — three-consumers
+rule.
+
+## C. Session tools — the model holds its own handles ✅ ARC 1 FRAMEWORK LANDED (2026-08-24, pending publish)
 
 - `ask_user`: DONE (app-side, already shipped).
 - Toast: it IS just a notification channel — a channel name + dock renderer
@@ -83,9 +109,16 @@ after app-side proof.
   `announce`-style tool only if narration proves unreliable (absorption
   rule). Ryan still kicking the parallel story around.
 
-NEXT: arc-1 brief (with A) — knowify-led + the one framework PR (summary/
-group fields, createToolGroup, \_summary injection, stopOnTools gate
-factory, bound-schema exposure).
+LANDED (`_summary`): it turned out to be already built — injection lives at
+the PROJECTOR (`buildTools`), stripping in the executor before validation,
+resolving into `ToolPresentation.narration`, with the `narrate` cascade as the
+off-switch. This arc made it REQUIRED in the wire schema (free: the strip is
+pre-validation, so `required` cannot fail a dispatch — it only makes the model
+fill it in, and keeps the schema legal under provider strict modes). No second
+`injectCallSummary` flag was added; `narrate` is the one switch.
+
+NEXT: `notify_user` + the toast channel (zero framework). The parallel-batch UX
+grouping is still Ryan's open question.
 
 ## D. Memory / search plane ⏸ DESIGN SKETCHED
 

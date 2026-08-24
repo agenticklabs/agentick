@@ -19,10 +19,21 @@ export { GatesContext, GatesProvider, useGates, type GatesProviderProps } from "
 
 // Re-export descriptor + controller types so adopters can pull
 // everything from /react.
-export { gate, isVerifiedGate, GATE_OPTIONS, VERIFIED_GATE_OPTIONS } from "../descriptor.js";
+export {
+  gate,
+  gateSpecies,
+  isStopGate,
+  isVerifiedGate,
+  stopOnTools,
+  GATE_OPTIONS,
+  VERIFIED_GATE_OPTIONS,
+} from "../descriptor.js";
 export type {
   GateDescriptor,
+  GateSpecies,
   LatchGateDescriptor,
+  StopGateDescriptor,
+  ValueGateDescriptor,
   VerifiedGateDescriptor,
   GateValue,
 } from "../descriptor.js";

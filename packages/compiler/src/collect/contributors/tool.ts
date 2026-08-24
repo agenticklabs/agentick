@@ -25,8 +25,8 @@ import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
  * Deltas (documented): `id` / `description` / `exposure` are re-typed
  * OPTIONAL — the contributor defaults `id` from {@link CollectContext.stableId},
  * `description` from folded child text, and `exposure` to `["model"]`.
- * Every other spec field (`aliases`, `providerOptions`, `outputSchema`,
- * `handlerRef`, `annotations`, `metadata`) forwards verbatim.
+ * Every other spec field (`summary`, `group`, `aliases`, `providerOptions`,
+ * `outputSchema`, `handlerRef`, `annotations`, `metadata`) forwards verbatim.
  */
 export type ToolProps = Omit<ToolDeclaration, "id" | "description" | "exposure"> & {
   readonly id?: string;
@@ -37,6 +37,8 @@ export type ToolProps = Omit<ToolDeclaration, "id" | "description" | "exposure">
 /** Spec keys forwarded verbatim from props. */
 type ToolForwarded =
   | "name"
+  | "summary"
+  | "group"
   | "inputSchema"
   | "outputSchema"
   | "aliases"

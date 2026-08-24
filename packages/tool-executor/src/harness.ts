@@ -874,6 +874,7 @@ export class ToolExecutorHarness
             sessionId: input.context.sessionId,
             executionId: input.context.executionId,
             tickId: input.context.tickId,
+            responseFormat: input.context.responseFormat,
           }),
           signal: controller.signal,
           // Resolved task mode for THIS dispatch (#174). Mirrors

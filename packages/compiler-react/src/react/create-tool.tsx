@@ -50,6 +50,10 @@ export interface ReactToolSpec<
 > {
   readonly name: string;
   readonly description: string;
+  /** ONE sentence: what the tool does. Static, call-independent. */
+  readonly summary?: string;
+  /** Capability-tree path (`["api", "jobs"]`); usually stamped by `createToolGroup`. */
+  readonly group?: readonly string[];
   /**
    * Standard-Schema-compliant validator. Drives BOTH runtime
    * validation and the wire JSON Schema (via `toJsonSchema()`).
@@ -125,6 +129,8 @@ export function createTool<
   const base = baseCreateTool<TInput>({
     name: spec.name,
     description: spec.description,
+    ...(spec.summary !== undefined ? { summary: spec.summary } : {}),
+    ...(spec.group !== undefined ? { group: spec.group } : {}),
     ...(spec.inputSchema !== undefined ? { inputSchema: spec.inputSchema } : {}),
     ...(spec.outputSchema !== undefined ? { outputSchema: spec.outputSchema } : {}),
     ...(spec.exposure !== undefined ? { exposure: spec.exposure } : {}),
@@ -161,6 +167,8 @@ export function createTool<
       id: base.declaration.id,
       name: base.declaration.name,
       description: base.declaration.description,
+      ...(base.declaration.summary !== undefined ? { summary: base.declaration.summary } : {}),
+      ...(base.declaration.group !== undefined ? { group: base.declaration.group } : {}),
       inputSchema: base.declaration.inputSchema,
       ...(base.declaration.outputSchema !== undefined
         ? { outputSchema: base.declaration.outputSchema }

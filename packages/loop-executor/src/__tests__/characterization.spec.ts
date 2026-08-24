@@ -359,10 +359,31 @@ describe("LoopExecutorHarness [characterization] — ADR 67 forward decision", (
     const { terminal } = await runChar({
       ticks: [toolUse("c1"), ended()],
       maxTicks: 5,
-      notifyTickEnd: () => ({ kind: "stop" }),
+      notifyTickEnd: () => ({ kind: "stop", reason: "gate:done" }),
     });
     expect(terminal.result!.ticks).toBe(1); // stopped despite provisional continue
-    expect(terminal.result!.stopReason).toBe("tool_use");
+    expect(terminal.result!.stopReason).toBe("halted");
+    expect(terminal.result!.stopCause).toEqual({ kind: "halted", reason: "gate:done" });
+  });
+
+  it("stop-force without a reason still reports 'halted'", async () => {
+    const { terminal } = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      notifyTickEnd: () => ({ kind: "stop" }),
+    });
+    expect(terminal.result!.stopReason).toBe("halted");
+    expect(terminal.result!.stopCause).toEqual({ kind: "halted", reason: "stop" });
+  });
+
+  it("a natural stop is NOT reported as halted", async () => {
+    const { terminal } = await runChar({
+      ticks: [ended()],
+      maxTicks: 5,
+      notifyTickEnd: () => undefined,
+    });
+    expect(terminal.result!.stopReason).toBe("end");
+    expect(terminal.result!.stopCause).toBeUndefined();
   });
 
   it("continue-force: notifyTickEnd 'continue' extends a would-stop `end` tick", async () => {

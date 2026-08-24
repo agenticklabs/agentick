@@ -115,6 +115,10 @@ declare module "react" {
         readonly id?: string;
         readonly name: string;
         readonly description?: string;
+        /** ONE sentence: what the tool does — `ToolDeclaration.summary`. */
+        readonly summary?: string;
+        /** Capability-tree path — `ToolDeclaration.group`. */
+        readonly group?: readonly string[];
         readonly inputSchema?: Record<string, unknown>;
         readonly outputSchema?: Record<string, unknown>;
         readonly exposure?: readonly ToolExposure[];

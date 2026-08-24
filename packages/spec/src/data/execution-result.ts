@@ -162,6 +162,17 @@ export type StopCause =
       readonly kind: "vetoed";
       /** The guard's reason, verbatim. Absent when the veto gave none. */
       readonly reason?: string;
+    }
+  | {
+      /**
+       * Tick-end control asked the loop to stop while it would otherwise have
+       * continued — the third species alongside failed and vetoed, and the only
+       * one that is not something going wrong. A `stopOnTools` gate firing is
+       * the paradigm case; so is tree code calling `stopAfterTick`.
+       */
+      readonly kind: "halted";
+      /** Who asked, verbatim — e.g. `"gate:done"`. */
+      readonly reason?: string;
     };
 
 // ============================================================================
@@ -179,6 +190,35 @@ export type LanguageModelStopReason =
   | "content_filter"
   | "stop_sequence"
   | "other";
+
+/**
+ * Why an agentick RUN stopped — the provider's reason plus the loop's own
+ * outcomes. One definition for every site that reports one (`ExecutionRunResult`,
+ * `SendResult`, `TickResult`); a tick simply never produces the run-only values.
+ *
+ *   - `max_ticks`        — the tick ceiling, not a natural end.
+ *   - `aborted`          — cancelled from outside.
+ *   - `vetoed`           — a guard refused the model call.
+ *   - `executor_failed`  — the model executor errored.
+ *   - `halted`           — tick-end control asked to stop (a `stopOnTools` gate,
+ *                          tree `stopAfterTick`). Carries its reason on
+ *                          {@link StopCause} `{ kind: "halted" }`.
+ *   - `timeout`          — the run's wall clock expired.
+ *   - `output_delivered` — the declared structured output was delivered via the
+ *                          terminal tool. Reported instead of the provider's
+ *                          `tool_use`: the loop stopped on the delivery, not on a
+ *                          pending tool call. The `responseFormat` strategy keeps
+ *                          the provider stop reason (no terminal tool involved).
+ */
+export type LoopStopReason =
+  | LanguageModelStopReason
+  | "max_ticks"
+  | "aborted"
+  | "vetoed"
+  | "executor_failed"
+  | "halted"
+  | "timeout"
+  | "output_delivered";
 
 /**
  * Tool call extracted from a language-model response. Consistency
