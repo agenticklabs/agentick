@@ -196,8 +196,12 @@ carry usage rollups.
 
 ## Parked decisions (Ryan's, not work)
 
-- Dock send default: flip onBusy 'queue' -> 'steer' (steer = same behavior
-  plus barging in). Ryan leans steer; AFTER the create-on-open cleanup.
+- ~~Dock send default: flip onBusy 'queue' -> 'steer'~~ DONE 2026-08-24
+  (knowify `4407fe6fa2`): steer is the panel default; the fold prefers the
+  executionId-stamped copy so a steered message renders between the answers
+  it interrupted (the echo-position wire race is dead). Header-per-message
+  kept after design discussion (speaker-turn grammar beats execution
+  grammar); Ryan may revisit the header wholesale later.
 
 - In-prompt self-name: "You are Ernesto" (`identity.tsx:132`) vs the
   "Knowify AI" display title — behavior-changing; full rename / internal
@@ -209,6 +213,21 @@ carry usage rollups.
 - Core-domain `GroupId` v4 mints (scheduling/allocations) — Ryan, 2026-08-24.
 
 ## Standing context
+
+2026-08-24 latest — persist-is-a-command + steer default landed:
+(1) agentick next.153: `session:persist` declared command — the earn
+moment (first running / eager genesis) is journaled, hookable
+(onBeforeSessionPersist veto = ephemeral-by-policy), terminal event
+carries the record. SessionRuntime sheds the eager flag; public
+session.persist(). Ratified over the rejected onRecordPersisted
+callback: commands are the discoverable hook surface, no outliers.
+(2) knowify `4407fe6fa2`: onBusy steer default + steer-safe fold (see
+parked list). (3) `70f041c582`: client-tool declarations re-issue per
+handshake epoch (reconnect had silently dropped ALL client tools).
+OPEN NEXT: thread list consumes session:persist terminal events at
+gateway scope (insert from payload, delete the get()+retry proxy);
+TODO(window-id-dedup) — one entry id can appear twice in the client
+window; assistant-api 18m suite + eslint OOM (diagnosed) still queued.
 
 2026-08-24 later — first-send production hardening (knowify `1798ebb322`):
 (1) framework next.152 threads the session's principal into every bridge
