@@ -210,6 +210,25 @@ carry usage rollups.
 
 ## Standing context
 
+2026-08-24 later — first-send production hardening (knowify `1798ebb322`):
+(1) framework next.152 threads the session's principal into every bridge
+harness (`sessionScoped` third fact; timeline TODO(D-phase) resolved) so
+store adapters attribute writes without a session-row join — fixed
+"cannot attribute an append" on a fresh chat. (2) That woke the timeline
+FK stub, exposing a true-simultaneity upsert race: an `(id)`-target
+arbiter doesn't cover `uq_sessions_origin_id` — targetless ON CONFLICT
+DO NOTHING on the sessions+executions stubs, retry-once in
+KnowifySessionStore.put; red/green pinned. (3) Reflection: title is
+REQUIRED while a thread is unnamed (trivial exchanges included), and an
+empty-response settle still runs the pass while the title debt is open.
+(4) Thread list: a LIVE status frame for an unknown session fetches the
+row (`ThreadListSource.get` → session/get) and inserts it on top;
+reflection titles carry onto the row via retitle(). Suites: knowify-app
+440, adapters 21+27, reflection 11. eslint OOM root cause recorded
+(parserOptions.project = whole monorepo, zero typed rules enabled —
+3-line deletion or oxlint, Ryan's call); assistant-api 18m suite still
+suspect, unaddressed by Ryan's order.
+
 2026-08-24 LANDED — knowify rip-out COMPLETE (knowify `3416927a25`,
 pushed): draft model deleted wholesale (catalogs/conversationPalette/
 openDraft/materialize + specs + DI token), sessionPalette folds the LIVE
