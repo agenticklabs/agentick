@@ -71,9 +71,21 @@ const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 export interface WebSecurityOptions {
   /**
    * Cross-origin allow-list. Omitted / empty → same-origin only. Entries are
-   * full origins (`https://app.example.com`). NEVER `"*"`: there is no
-   * wildcard — a permissive origin is a security regression this policy
-   * refuses to express.
+   * full origins (`https://app.example.com`) or SUBDOMAIN PATTERNS with one
+   * `*` confined to the leftmost hostname label —
+   * `https://*.staging.example.com`, prefix form
+   * `https://pr-*.staging.example.com`. The `*` never matches a dot (one
+   * label deep), the scheme is required, and a pattern port must match
+   * exactly. Admission through a pattern is bounded by DNS control of the
+   * parent domain — the preview-deploy shape — at the documented cost that a
+   * subdomain takeover on that zone becomes an allowlist bypass.
+   *
+   * Still NEVER `"*"`: a bare wildcard, a wildcard outside the leftmost
+   * label, or a pattern with fewer than two literal labels after it
+   * (`https://*.com`) is refused AT CONSTRUCTION with a thrown error — full
+   * permissiveness is a security regression this policy refuses to express.
+   * Patterns feed the ORIGIN checks only; they never widen the `Host`
+   * allow-list (the DNS-rebinding defense stays explicit).
    */
   readonly allowedOrigins?: readonly string[];
   /**
@@ -203,11 +215,79 @@ function originAuthority(origin: string): string | undefined {
   }
 }
 
+/** Escape a literal for embedding in a RegExp. */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Compile one `allowedOrigins` subdomain pattern (an entry containing `*`)
+ * into an origin matcher, refusing every form that degenerates toward full
+ * permissiveness. The rules are the {@link WebSecurityOptions.allowedOrigins}
+ * contract; violations THROW so a misconfigured allowlist fails loud at
+ * construction instead of shipping silently permissive.
+ */
+function compileOriginPattern(entry: string): (origin: URL) => boolean {
+  const refuse = (why: string): never => {
+    throw new Error(`allowedOrigins pattern "${entry}": ${why}`);
+  };
+  const m = /^([a-z][a-z0-9+.-]*):\/\/([^/]+)$/.exec(entry);
+  if (!m) refuse("must be scheme://host[:port] with no path");
+  const [, scheme, authority] = m!;
+  if (authority!.includes("[")) refuse("IPv6 literals cannot carry a wildcard");
+  const colon = authority!.lastIndexOf(":");
+  const hostname = colon >= 0 ? authority!.slice(0, colon) : authority!;
+  const port = colon >= 0 ? authority!.slice(colon + 1) : "";
+  if (port !== "" && !/^\d+$/.test(port)) refuse("port must be numeric");
+  const labels = hostname.split(".");
+  const [head, ...rest] = labels;
+  if ((head!.match(/\*/g) ?? []).length !== 1 || rest.some((l) => l.includes("*"))) {
+    refuse("exactly one * is allowed, confined to the leftmost hostname label");
+  }
+  if (rest.length < 2) refuse("at least two literal labels must follow the wildcard");
+  if (rest.some((l) => l.length === 0)) refuse("empty hostname label");
+  const [before, after] = head!.split("*");
+  const label =
+    before === "" && after === ""
+      ? "[^.]+"
+      : `${escapeRegExp(before!)}[^.]*${escapeRegExp(after!)}`;
+  const hostRe = new RegExp(`^${label}\\.${rest.map(escapeRegExp).join("\\.")}$`);
+  const defaultPort = scheme === "https" ? "443" : scheme === "http" ? "80" : "";
+  const wantPort = port === "" || port === defaultPort ? "" : port;
+  return (origin) => {
+    if (origin.protocol !== `${scheme}:`) return false;
+    if ((origin.port || "") !== wantPort) return false;
+    return hostRe.test(origin.hostname);
+  };
+}
+
 export function resolveWebSecurity(options?: WebSecurityOptions): WebSecurityPolicy {
-  const allowedOrigins = new Set((options?.allowedOrigins ?? []).map((o) => o.toLowerCase()));
+  const entries = (options?.allowedOrigins ?? []).map((o) => o.toLowerCase());
+  for (const entry of entries) {
+    if (entry === "*") {
+      throw new Error(
+        'allowedOrigins: "*" is refused — a permissive origin disables the cross-site defense',
+      );
+    }
+  }
+  const allowedOrigins = new Set(entries.filter((o) => !o.includes("*")));
+  const originPatterns = entries.filter((o) => o.includes("*")).map(compileOriginPattern);
+  // Pattern entries deliberately excluded: a wildcard ORIGIN must not widen
+  // the Host allow-list (DNS-rebinding defense) — hosts stay explicit.
   const allowedOriginAuthorities = new Set(
     [...allowedOrigins].map((o) => originAuthority(o)).filter((a): a is string => a !== undefined),
   );
+  /** Exact allowlist hit, or a subdomain-pattern match. Input lowercased. */
+  function originAllowed(originLower: string): boolean {
+    if (allowedOrigins.has(originLower)) return true;
+    if (originPatterns.length === 0) return false;
+    try {
+      const parsed = new URL(originLower);
+      return originPatterns.some((match) => match(parsed));
+    } catch {
+      return false;
+    }
+  }
   const allowedHosts = new Set((options?.allowedHosts ?? []).map((h) => h.toLowerCase()));
   const trustProxy = options?.trustProxy ?? false;
   const csrfEnabled = options?.csrf ?? true;
@@ -253,7 +333,7 @@ export function resolveWebSecurity(options?: WebSecurityOptions): WebSecurityPol
     // A browser cross-site fetch-metadata signal, not overridden by an
     // explicit origin allowlist entry, is a hard reject.
     if (secFetchSite === "cross-site") {
-      if (!(origin && allowedOrigins.has(origin.toLowerCase()))) {
+      if (!(origin && originAllowed(origin.toLowerCase()))) {
         return { ok: false, status: 403, reason: "cross-site request rejected" };
       }
     }
@@ -262,7 +342,7 @@ export function resolveWebSecurity(options?: WebSecurityOptions): WebSecurityPol
       const o = origin.toLowerCase();
       const oAuthority = originAuthority(o);
       const sameOrigin = oAuthority !== undefined && host !== undefined && oAuthority === host;
-      if (!sameOrigin && !allowedOrigins.has(o)) {
+      if (!sameOrigin && !originAllowed(o)) {
         return { ok: false, status: 403, reason: `origin not allowed: ${origin}` };
       }
     }
@@ -291,9 +371,10 @@ export function resolveWebSecurity(options?: WebSecurityOptions): WebSecurityPol
     const oAuthority = originAuthority(o);
     // Same-origin needs no CORS headers.
     if (oAuthority !== undefined && host !== undefined && oAuthority === host) return undefined;
-    // Cross-origin: emit headers ONLY for an explicitly allowlisted origin.
-    // Never a wildcard — we echo the exact allowlisted origin.
-    if (!allowedOrigins.has(o)) return undefined;
+    // Cross-origin: emit headers ONLY for an allowlisted origin (exact or
+    // pattern-matched). Never a wildcard header — we echo the REQUEST's exact
+    // origin, so the response is as narrow as the caller.
+    if (!originAllowed(o)) return undefined;
     return {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Credentials": "true",

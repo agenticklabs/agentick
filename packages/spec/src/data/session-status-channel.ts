@@ -53,3 +53,15 @@ export interface SessionStatusFrame {
 export function sessionStatusEventQuery(): EventQuery {
   return channelEventQuery(SESSION_STATUS_CHANNEL);
 }
+
+/**
+ * Subscriber query for `session:persist`'s TERMINAL op events — the moment a
+ * session is committed to persistence, carrying the written record in the
+ * payload. The wire-visible half of `onAfterSessionPersist`: the same fact the
+ * server hook observes, heard across the wire. Pair with a gateway/app
+ * `SubscriptionScope` for a thread list holding no session handles; skip
+ * records carrying `parentSessionId` when the list is a root projection.
+ */
+export function sessionPersistEventQuery(): EventQuery {
+  return { name: { exact: "session:command:persist" }, phase: "terminal" };
+}

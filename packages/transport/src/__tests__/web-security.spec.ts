@@ -218,3 +218,82 @@ describe("CORS is never permissive", () => {
     expect(p.corsHeadersFor("https://anything.example.com", req())).toBeUndefined();
   });
 });
+
+describe("subdomain patterns in allowedOrigins", () => {
+  const patterned = { allowedOrigins: ["https://*.staging.example.com"] };
+
+  it("admits a one-label subdomain, cross-site signal included", () => {
+    const p = resolveWebSecurity(patterned);
+    const verdict = p.checkAccess(
+      req({
+        headers: {
+          host: "127.0.0.1:3000",
+          origin: "https://pr-123.staging.example.com",
+          "sec-fetch-site": "cross-site",
+        },
+      }),
+    );
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("the * never matches a dot — one label deep only", () => {
+    const p = resolveWebSecurity(patterned);
+    const verdict = p.checkAccess(
+      req({ headers: { host: "127.0.0.1:3000", origin: "https://a.b.staging.example.com" } }),
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("scheme and port are exact — https pattern rejects http and odd ports", () => {
+    const p = resolveWebSecurity(patterned);
+    for (const origin of [
+      "http://pr-1.staging.example.com",
+      "https://pr-1.staging.example.com:8443",
+    ]) {
+      expect(p.checkAccess(req({ headers: { host: "127.0.0.1:3000", origin } })).ok).toBe(false);
+    }
+  });
+
+  it("a prefix pattern narrows within the label", () => {
+    const p = resolveWebSecurity({ allowedOrigins: ["https://pr-*.staging.example.com"] });
+    expect(
+      p.checkAccess(
+        req({ headers: { host: "127.0.0.1:3000", origin: "https://pr-42.staging.example.com" } }),
+      ).ok,
+    ).toBe(true);
+    expect(
+      p.checkAccess(
+        req({ headers: { host: "127.0.0.1:3000", origin: "https://evil.staging.example.com" } }),
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("CORS echoes the REQUEST's exact origin for a pattern match — never the pattern", () => {
+    const p = resolveWebSecurity(patterned);
+    const headers = p.corsHeadersFor("https://pr-9.staging.example.com", req());
+    expect(headers?.["Access-Control-Allow-Origin"]).toBe("https://pr-9.staging.example.com");
+    for (const v of Object.values(headers ?? {})) expect(v).not.toContain("*");
+  });
+
+  it("a pattern never widens the Host allow-list — DNS rebinding stays defended", () => {
+    const p = resolveWebSecurity(patterned);
+    const verdict = p.checkAccess(req({ headers: { host: "pr-1.staging.example.com" } }));
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("refuses every form that degenerates toward full permissiveness", () => {
+    for (const entry of [
+      "*",
+      "https://*",
+      "https://*.com",
+      "https://api.*.example.com",
+      "https://*.*.example.com",
+      "*.example.com",
+      "https://*.example.com/path",
+    ]) {
+      expect(() => resolveWebSecurity({ allowedOrigins: [entry] })).toThrow(
+        /refused|wildcard|label|scheme|path/,
+      );
+    }
+  });
+});
