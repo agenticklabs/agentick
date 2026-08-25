@@ -1,6 +1,6 @@
 {
   "name": "@agentick/session",
-  "version": "1.0.0-next.153",
+  "version": "1.0.0-next.154",
   "description": "Reference session harness for Agentick v2. Integration site that wires JSX agent + compiler + loop executor into the user-facing `session.send({ messages })` surface.",
   "keywords": [
     "agent",
@@ -80,6 +80,7 @@
     "@agentick/store": "workspace:*",
     "@agentick/tasks": "workspace:*",
     "@agentick/timeline": "workspace:*",
+    "@agentick/tool": "workspace:*",
     "@agentick/tool-executor": "workspace:*",
     "@agentick/utils": "workspace:*",
     "effect": "^3.22.0"
