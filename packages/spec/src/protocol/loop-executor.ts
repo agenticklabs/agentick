@@ -135,6 +135,12 @@ export interface LoopToolResult {
   readonly toolName: string;
   readonly succeeded: boolean;
   readonly content: readonly ContentBlock[];
+  /**
+   * Backlog F — the called tool was `internal` (resolved from the session
+   * registry). The result inherits it; the session's apply stamps the
+   * `tool_result` message `visibility:"internal"` (client-hidden, model-visible).
+   */
+  readonly internal?: boolean;
   readonly durationMs: number;
   readonly error?: unknown;
 }

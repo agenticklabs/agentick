@@ -352,6 +352,13 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly principal?: string;
   /**
+   * Session is INTERNAL (backlog F — internal-visibility.md): the durable top
+   * rung of the stamp spine, from `CreateSessionInput.internal`; inherited by
+   * spawned / forked children. Every execution/message/block is stamped
+   * `internal` (client-hidden, model-visible). `undefined` ⇒ not internal.
+   */
+  readonly internal?: boolean;
+  /**
    * Compiler that owns the agent's element tree. Typed as the
    * protocol — any conformant impl (React compiler, future Angular
    * compiler, etc.) drops in.
@@ -1035,6 +1042,8 @@ export class SessionHarness<P = unknown>
         parentSessionId: options.parentSessionId,
         // ADR 48 — persist ownership on the durable record (resume index).
         principal: options.principal,
+        // Backlog F — the session's durable `internal` (top rung of the stamp spine).
+        internal: options.internal,
         // SP5 — persist the full lineage on the record (omit for a root).
         spawnPath:
           options.spawnPath && options.spawnPath.length > 0 ? options.spawnPath : undefined,
@@ -2330,6 +2339,9 @@ export class SessionHarness<P = unknown>
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
+        // Backlog F — a child inherits the parent's `internal`, or is declared
+        // internal explicitly; stamps the whole child spine.
+        internal: this.runtime.isInternal() || input.internal === true ? true : undefined,
         // SP6 + EX1 — fan our construction signal AND the spawning execution's
         // teardown signal into the child, as one merged construction signal.
         // The first makes a parent abort tear down the child's in-flight work
@@ -2439,6 +2451,8 @@ export class SessionHarness<P = unknown>
         sessionId: input.sessionId,
         metadata: input.metadata ?? parentMeta,
         maxTicks: input.maxTicks,
+        // Backlog F — explicit fork-internal; `spawn` ORs in the parent's own.
+        internal: input.internal === true ? true : undefined,
       }),
     })) as SessionHarnessProtocol<P>;
     // Branch THEN restore. The branch copies this session's durable scopes onto
@@ -3262,6 +3276,7 @@ export class SessionHarness<P = unknown>
       this._currentExecutionAbort = null;
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
+      this.runtime.setCurrentExecutionInternal(false); // execution rung cleared (backlog F)
       // Completion resolves the interruption (execution-resume.md §3.3) —
       // keyed to THIS executionId, so an unrelated fresh turn settling never
       // erases a different (dropped) interruption's history. Runs in the
@@ -3302,6 +3317,14 @@ export class SessionHarness<P = unknown>
     // never resolved, shutdown hung, and a queued send joined a dead turn.
     try {
       await this._mountReady;
+
+      // Execution rung of the internal stamp (backlog F): fold the session's
+      // durable `internal` with this send's `internal`, and park it BEFORE the
+      // input append below so input messages are stamped too. Every append
+      // during this execution reads it (see `appendMessageEntryFx`).
+      this.runtime.setCurrentExecutionInternal(
+        this.runtime.isInternal() || input.internal === true,
+      );
 
       // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
       // drain. The first tick's render sees it via <Timeline/>.
@@ -3642,6 +3665,8 @@ export class SessionHarness<P = unknown>
                       ? "vetoed"
                       : "succeeded"
                   : "aborted",
+              // Execution rung (backlog F) — still set here; the rail clears in .finally.
+              ...(this.runtime.currentExecutionInternal() ? { internal: true } : {}),
               // The CAUSE rides the record too — the only account a reloaded client
               // can read, since a turn that died before its first tick appended no
               // assistant entry at all.
@@ -3751,6 +3776,8 @@ export class SessionHarness<P = unknown>
             .endTurn({
               executionId,
               outcome: "failed",
+              // Execution rung (backlog F) — still set here; the rail clears in .finally.
+              ...(this.runtime.currentExecutionInternal() ? { internal: true } : {}),
               ...omitUndefined({
                 usage: this._executionRollup?.usage,
                 byModel: this._executionRollup?.byModel,
@@ -4036,6 +4063,9 @@ export class SessionHarness<P = unknown>
           content: [block],
           toolCallId: tr.toolCallId,
           name: tr.toolName,
+          // Tool rung (backlog F): an internal tool's result is client-hidden.
+          // Explicit wins in `appendMessageEntryFx`, so this ORs with execution-internal.
+          ...(tr.internal === true ? { visibility: "internal" as const } : {}),
           metadata: {
             executionId: input.executionId,
             tickId: input.tickId,
@@ -4136,7 +4166,7 @@ export class SessionHarness<P = unknown>
   private appendMessageEntryFx(input: {
     readonly role: import("@agentick/spec").SessionMessageRole;
     readonly content: readonly ContentBlock[];
-    readonly visibility?: "model" | "observer" | "log";
+    readonly visibility?: "model" | "observer" | "log" | "internal";
     readonly toolCallId?: string;
     readonly name?: string;
     readonly tags?: readonly string[];
@@ -4154,10 +4184,15 @@ export class SessionHarness<P = unknown>
         metadata: input.metadata,
       }),
     };
+    // Message rung of the internal stamp (backlog F): an explicit visibility
+    // wins; otherwise an internal execution stamps its products `internal`. The
+    // one denormalization site — leaves come out self-describing.
+    const visibility =
+      input.visibility ?? (this.runtime.currentExecutionInternal() ? "internal" : undefined);
     const entry: TimelineEntry = {
       kind: "message",
       message,
-      ...omitUndefined({ visibility: input.visibility, tags: input.tags }),
+      ...omitUndefined({ visibility, tags: input.tags }),
     };
     return this.bridges.timeline.fx.append([entry]).pipe(Effect.as(messageId));
   }
@@ -4166,7 +4201,7 @@ export class SessionHarness<P = unknown>
   private async appendMessageEntry(input: {
     readonly role: import("@agentick/spec").SessionMessageRole;
     readonly content: readonly ContentBlock[];
-    readonly visibility?: "model" | "observer" | "log";
+    readonly visibility?: "model" | "observer" | "log" | "internal";
     readonly toolCallId?: string;
     readonly name?: string;
     readonly tags?: readonly string[];

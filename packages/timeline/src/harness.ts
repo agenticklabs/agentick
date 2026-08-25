@@ -1100,6 +1100,8 @@ export class TimelineHarness
     readonly cost?: CostRollup;
     readonly stopCause?: StopCause;
     readonly target?: { readonly provider?: string; readonly modelId?: string };
+    /** Backlog F — the whole turn/execution was internal (client-hidden). */
+    readonly internal?: boolean;
   }): Promise<void> {
     if (!this.turnBoundaries) return Promise.resolve();
     const entry: TurnBoundaryEntry = {
@@ -1124,6 +1126,8 @@ export class TimelineHarness
           cost: input.cost,
           stopCause: input.stopCause,
           target: input.target,
+          // Backlog F — the execution's durable internal stamp (cost-query rung).
+          internal: input.internal === true ? true : undefined,
         }),
       },
       ts: Date.now(),

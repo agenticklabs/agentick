@@ -124,6 +124,17 @@ export interface SessionRecord {
   readonly principal?: string;
 
   // ─── runtime accounting (framework-owned), hierarchy-aware ───
+  /**
+   * The session is INTERNAL (backlog F — see internal-visibility.md): every
+   * execution/message/block it produces is stamped `internal` (client-hidden;
+   * the model still reads it, and the bus/journal stay whole). The top of the
+   * stamp spine, set from {@link CreateSessionInput.internal}.
+   *
+   * NOTE (downstream store adapters): persist + round-trip this — it is a durable
+   * session-level disposition, and losing it un-hides a session's whole history
+   * from the client on reload. `KnowifySessionStore` needs the column.
+   */
+  readonly internal?: boolean;
   /** The in-flight execution's id (`exec:${generateId()}`), or absent when idle. */
   readonly currentExecutionId?: string;
   /**

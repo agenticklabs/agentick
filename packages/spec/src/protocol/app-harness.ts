@@ -57,6 +57,14 @@ export interface CreateSessionInput<P = unknown> {
   /** Scope ceiling for the session (#199) — construction-bound. */
   readonly requiredScopes?: readonly string[];
   /**
+   * Declare the whole session INTERNAL (backlog F — see internal-visibility.md):
+   * every execution, message, and block it produces is stamped `internal` and
+   * hidden from the client (the model still reads it; the bus/journal stay whole).
+   * The top of the stamp spine; propagates down via "each layer stamps its
+   * products." Stamped onto {@link SessionRecord.internal}.
+   */
+  readonly internal?: boolean;
+  /**
    * Construction-bound owning principal (ADR 48) — the identity axis of the
    * session's structural identity, stamped onto the {@link SessionHarnessProtocol}
    * and the durable {@link SessionRecord}, and read by the wire dispatch gate for

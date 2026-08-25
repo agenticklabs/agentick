@@ -161,6 +161,8 @@ export interface SessionRuntimeInit {
   readonly parentSessionId?: string;
   /** Owning principal (ADR 48) — construction-bound; folded into every record write. */
   readonly principal?: string;
+  /** Session is INTERNAL (backlog F) — the durable top rung; folded into the record. */
+  readonly internal?: boolean;
   /**
    * Called after a persisting write that CHANGED the status — the transition
    * seam the harness publishes `session:channel:status` from. A write that
@@ -232,6 +234,14 @@ export class SessionRuntime {
    * see the file TODO). Held as a plain scalar, untouched by the view.
    */
   private _currentTick = 0;
+  /**
+   * Live-only (never persisted): is the in-flight execution INTERNAL (backlog F)?
+   * Set at execution start to `record.internal || send.internal`, read at append
+   * to stamp each produced entry `internal`, cleared at execution end — the
+   * execution rung of the stamp spine (see internal-visibility.md). The SESSION
+   * rung is the durable `record.internal`; this is its per-execution fold.
+   */
+  private _currentExecutionInternal = false;
 
   /** The record {@link hydrate} adopted, until {@link takeAdoptedRecord} claims it. */
   private adopted: SessionRecord | undefined;
@@ -260,6 +270,7 @@ export class SessionRuntime {
         usage: { ...ZERO_USAGE },
         parentSessionId: init.parentSessionId,
         principal: init.principal,
+        internal: init.internal,
         spawnPath: init.spawnPath,
         originExecutionId: init.originExecutionId,
         originCallId: init.originCallId,
@@ -456,6 +467,19 @@ export class SessionRuntime {
   /** CACHE-ONLY — rides the next `setStatus` into the store (parity). */
   setCurrentExecutionId(id: string | null): void {
     this.commit({ currentExecutionId: id ?? undefined }, { persist: false });
+  }
+
+  /** Whether the SESSION is internal (durable, backlog F) — the spine's top rung. */
+  isInternal(): boolean {
+    return this.record().internal === true;
+  }
+  /** Whether the in-flight EXECUTION is internal (live-only) — `session || send`. */
+  currentExecutionInternal(): boolean {
+    return this._currentExecutionInternal;
+  }
+  /** Set at execution start (`record.internal || send.internal`); cleared at end. */
+  setCurrentExecutionInternal(value: boolean): void {
+    this._currentExecutionInternal = value;
   }
 
   /**

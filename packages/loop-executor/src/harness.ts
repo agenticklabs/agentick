@@ -1427,6 +1427,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       const dispatchOne = (tc: ToolCall): Effect.Effect<LoopToolResult, never, never> =>
         Effect.gen(function* () {
           const startedAt = Date.now();
+          // Tool rung (backlog F): resolve the called tool's `internal` from the
+          // run's registry; the result carries it, and the session's append ORs
+          // it with execution/tick-internal. (The `tool_use` block stamp is the
+          // block-level follow-on.)
+          const toolInternal =
+            modelToolsForRun.find((t) => t.name === tc.name)?.annotations?.internal === true;
           // The `useOnToolStart` / `useOnToolEnd` projection (incl. the
           // eager model self-narration read) rides the tool executor's
           // OWN `tool:dispatch` command hooks (ADR 89 §4) — the
@@ -1509,6 +1515,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               succeeded: dispatchSucceeded,
               content: ok.content,
               durationMs,
+              ...(toolInternal ? { internal: true } : {}),
             };
           }
           const err = dispatched.left;
@@ -1542,6 +1549,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             content,
             durationMs,
             error: err,
+            ...(toolInternal ? { internal: true } : {}),
           };
         });
 

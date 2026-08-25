@@ -2918,6 +2918,8 @@ export class AppHarness<P = unknown>
       // flow. Stamped onto the harness (read by the wire dispatch gate) + the
       // durable `SessionRecord`.
       ...omitUndefined({ principal: input.principal }),
+      // Backlog F — the session's durable `internal` disposition (top of the stamp spine).
+      ...(input.internal !== undefined ? { internal: input.internal } : {}),
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),
       // The pricing seam rides the SAME one construction body every session
@@ -3184,6 +3186,9 @@ export class AppHarness<P = unknown>
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
+        // Backlog F — the child's resolved `internal` (parent || explicit),
+        // routed through `createSessionBody` onto its `SessionRecord.internal`.
+        internal: input.internal,
       }),
     };
     const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {

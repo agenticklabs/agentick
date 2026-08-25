@@ -171,6 +171,14 @@ export interface ToolAnnotations {
   /** `[V1-INHERITED]` Tool intent hint. */
   readonly intent?: "render" | "action" | "compute";
   /**
+   * Backlog F (internal-visibility.md) — this tool is INTERNAL: its `tool_use`
+   * calls and `tool_result`s are stamped `internal` (client-hidden; the model
+   * still reads them). Resolved via the session registry when a call is seen,
+   * and inherited by the result. Distinct from `exposure` (reachability): an
+   * `internal` tool is still model-callable, its activity just isn't delivered.
+   */
+  readonly internal?: boolean;
+  /**
    * MCP-aligned advisory hint: the tool does not mutate its environment.
    * All four hints are a tool's SELF-DESCRIPTION — advisory, never enforced
    * by the framework, and never trustworthy from an untrusted server.

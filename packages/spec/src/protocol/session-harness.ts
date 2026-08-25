@@ -161,9 +161,15 @@ export interface MessageTimelineEntry {
    *   - "model"    — included in context rendered to the model
    *   - "observer" — visible to bus subscribers; not to the model
    *   - "log"      — only in journal/log; not in any render
+   *   - "internal" — rendered to the model, but NEVER delivered to the client:
+   *                  persisted like any entry (so the model reads it from the
+   *                  durable tier) yet excluded from the bus publish and the
+   *                  history page — undelivered, not hidden. The model-yes /
+   *                  client-no quadrant (e.g. an async task result injected back
+   *                  into the parent turn).
    *   Default: "model".
    */
-  readonly visibility?: "model" | "observer" | "log";
+  readonly visibility?: "model" | "observer" | "log" | "internal";
   readonly tags?: readonly string[];
 }
 
@@ -201,6 +207,14 @@ export interface TurnBoundaryEntry {
      * maps this already refused to launder a provider failure; it laundered a veto.
      */
     readonly outcome: "succeeded" | "failed" | "aborted" | "vetoed";
+    /**
+     * Backlog F — the whole execution was internal (client-hidden; model-visible).
+     * The execution rung's durable stamp: this boundary is the per-execution
+     * record (outcome + usage + cost), so it's where "was this turn internal"
+     * lives for cost-rollup querying. Set from the runtime's execution-internal
+     * rail at `endTurn`.
+     */
+    readonly internal?: boolean;
     /** The TURN's aggregate usage — may exceed the entry-sum when a
      *  tick billed tokens but appended no assistant entry. */
     readonly usage?: import("../data/execution-result.js").UsageStats;
@@ -288,6 +302,13 @@ export interface SendInput<P = unknown, T = unknown> {
   readonly signal?: AbortSignal;
   /** Override the default max tick bound. */
   readonly maxTicks?: number;
+  /**
+   * Declare this EXECUTION internal (backlog F — see internal-visibility.md):
+   * every message + block it produces is stamped `internal` (client-hidden;
+   * model still reads it). ORed with the session's own `internal`. Rides the
+   * runtime execution state (`currentExecutionInternal`) beside the execution id.
+   */
+  readonly internal?: boolean;
   /**
    * Per-call model-executor override. The session uses this
    * model-executor for this single send instead of the app-supplied
@@ -1318,6 +1339,13 @@ export interface SpawnInput<P = unknown> {
    * is threaded explicitly). Omit for a host-driven spawn.
    */
   readonly originCallId?: string;
+  /**
+   * Declare the CHILD session internal (backlog F — internal-visibility.md).
+   * ORed with the parent's own `internal`, so an internal parent's whole spawn
+   * subtree is internal by default; set here to mark a child internal under a
+   * non-internal parent. Stamped onto the child's {@link SessionRecord.internal}.
+   */
+  readonly internal?: boolean;
 }
 
 /**
@@ -1332,6 +1360,12 @@ export interface ForkInput {
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Override the parent's max tick bound for the forked child. */
   readonly maxTicks?: number;
+  /**
+   * Declare the forked child internal (backlog F). ORed with the parent's
+   * `internal` (a fork of an internal session is internal). Stamped onto the
+   * child's {@link SessionRecord.internal}.
+   */
+  readonly internal?: boolean;
 }
 
 // ============================================================================
@@ -1475,6 +1509,12 @@ export interface SpawnContextChildInput<P = unknown> {
   readonly initialProps?: P;
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   readonly maxTicks?: number;
+  /**
+   * The child's resolved `internal` disposition (backlog F) — `spawn()` computes
+   * `parent.internal || input.internal` and threads it here; stamped onto the
+   * child's harness + `SessionRecord`, so its whole spine is internal.
+   */
+  readonly internal?: boolean;
   /**
    * The child's spawn lineage (SP5) — the parent's own `spawnPath`
    * extended with the parent's session id, root-first. Its length is the

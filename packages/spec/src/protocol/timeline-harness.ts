@@ -95,6 +95,8 @@ export interface TimelineReplaceProjectionInput {
 export interface TimelineEndTurnInput {
   readonly executionId: string;
   readonly outcome: "succeeded" | "failed" | "aborted" | "vetoed";
+  /** Backlog F — the whole execution was internal (client-hidden). */
+  readonly internal?: boolean;
   readonly usage?: import("../data/execution-result.js").UsageStats;
   /**
    * The turn's PER-MODEL breakdown. The flat `usage` above is safe to sum
