@@ -223,10 +223,42 @@ NEXT: seam design discussion → then knowify embedding pipeline.
 
 NEXT: after arc 1; the xlsx→jobs story is the flagship demo.
 
-## F. Internal visibility 🔨 DESIGNED — two increments (2026-08-25)
+## F. Internal visibility 🔨 STAMPING BUILT (uncommitted) · FILTERING DESIGNED (2026-08-25)
 
 Executions / messages / blocks the client NEVER receives — undelivered, not
 hidden. Full design: [`internal-visibility.md`](./internal-visibility.md).
+
+STATE (2026-08-25):
+
+- **Stamping phase — BUILT, uncommitted, reviewed.** Pure additive, ZERO behavior
+  change (content carries `internal`; nothing acts on it yet). Doors: `createSession`
+  / `send` / `spawn` / `fork` / tool (`annotations.internal`) / turn boundary /
+  per-message — all fold `parent || own` and stamp at production (§§1–4). Runtime
+  rail (`isInternal` / `currentExecutionInternal`), `SessionRecord.internal`,
+  `TurnBoundaryEntry.internal`, `LoopToolResult.internal`. 6 e2e tests green (durable
+  spine) + 4 todo (spawn/fork integration, streaming sink-wrap, tool_use block).
+  Bus/journal stay whole. ~130 LOC across spec/session/loop-executor/app.
+- **Filtering phase — DESIGNED, not built** (internal-visibility.md §5). Capability
+  `PrincipalCapabilities { includeInternal }` resolved at `AuthSource` (layered:
+  trusted-pole default true / explicit caps / `internal:read` scope sugar / else
+  false) → pull doors (`history`/`list`/`get`/`search` take `includeInternal`) +
+  push funnel redaction (`dispatchRequest` sink, per-connection). Undelivered, not
+  hidden. Tests in §5.4 land with the build.
+
+KNOWIFY-SIDE (split):
+
+- **Author internal (produce):** use the knobs in `ernesto-v2` — mark the delegation
+  injected-result `internal` (and/or `spawn({internal})` for machinery sub-agents),
+  the debug/notify-team tool `internal`, background/system injections
+  `send({internal})`. knowify decides what's machinery.
+- **Grant visibility (deliver):** internal is KNOWIFY's machinery — hidden from ALL
+  customers, INCLUDING `tenant-admin` (a privileged customer, NOT an internal
+  viewer). Default hides from everyone (agentick default `includeInternal:false` for
+  authed connections); knowify OVERRIDES only for KNOWIFY-INTERNAL viewers —
+  `system-user` / support / an explicit debug session — via one role→`includeInternal`
+  line in `assistant-api`'s `AuthSource`, or the `internal:read` scope issued to
+  those. NOT tenant-admin. TODO(confirm assistant-api uses a real AuthSource vs the
+  trusted/local pole — that's where the grant goes).
 
 Key realization: `visibility` is already the `{ model × client }` 2×2 in enum
 disguise (model / observer / log / **internal**=model-yes-client-no); `exposure`
@@ -293,6 +325,19 @@ carry usage rollups.
 - Core-domain `GroupId` v4 mints (scheduling/allocations) — Ryan, 2026-08-24.
 
 ## Standing context
+
+2026-08-25 — RATIFIED: conversation branches (ADR 100,
+blueprint/100-conversation-branches.md). `branchOf {sessionId, messageId,
+kind: reply|fork}` — explicit discriminator, never field combos; session
+tree stays pure delegation; root = no parent AND not reply; reply
+identity = replySessionId() derivation + create-or-resume (one thread
+per message); fork mints fresh ids; client sugar session.reply()/fork();
+timeline contract is the INVARIANT (prefix++own), adapters choose
+copy-vs-stitch; same-principal source guard is load-bearing; naming law:
+fork=conversation, spawn=work. Build sequenced after the clean next.155
+cut. Knowify alignment: branch_kind column + ancestry audit (stitch only
+when kind set). Spawns-as-tasks stays EXPLORATORY — both ledgers, not
+ratified, falsifiable trigger recorded.
 
 2026-08-25 — DEFERRED ARC (Ryan): CLIENT-SIDE HOOK SURFACE. Clients get
 `hook({ onAfterSessionPersist })` with the SAME minted names as the server
