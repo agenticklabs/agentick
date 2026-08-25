@@ -65,9 +65,69 @@ section), flatten-ignored. [superseded note: it was first omitted because the
 `groups` enumeration that would consume it is still deferred, so the field
 would be dead surface (`TODO(tool-groups)` marks it).
 
+CLIENT-HALF projection ✅ LANDED (2026-08-24): a client tool's `summary`/`group`
+now cross the wire. The gap was deeper than a stripping projection — the client
+authoring type `Tool` (`tool-executor/src/client/create-tool.ts`) was a hand-written
+PARALLEL of the wire contract that lacked the two fields entirely, and `toDeclaration`
+was an allowlist that silently under-filled (optional fields → no compile error). Fix
+made `ClientToolDeclaration` the single source of truth: `Tool` now
+`extends Omit<ClientToolDeclaration, "inputSchema">` (inherits every serializable
+field + any future one for free), and `toDeclaration` is STRUCTURAL
+(destructure-out handler/inputSchema/annotations, spread the rest) so it is
+exhaustive-by-construction. Server fold `toClientToolRegistration`
+(`spec/protocol/tool-executor.ts:514-515`) already read both onto the internal
+`ToolDeclaration` → `ToolInfo`, so it is now end-to-end for the CLIENT tools in the
+45 (navigate*to, get_node_map, get_node_content, dom_act, render*\*). Regression pin
+in `create-tool.spec.ts`. STILL PENDING: authoring the summaries/groups onto the
+client declarations (the actual `TODO(canonical-summary)` content move) — the channel
+is now open for it.
+
+PROGRESSIVE-DISCLOSURE SPEC (Ryan, 2026-08-24) — the unifying principle across
+catalogs is "structure in context, detail behind search," but the treatment
+differs per catalog:
+
+- TOOLS: names + GROUP-level summaries in context (capabilities known UPFRONT —
+  tools matter most); descriptions + input/output schemas discovered lazily via
+  tool_search/tool_docs. Names are ALWAYS complete — never hide that a capability
+  exists, only its schema.
+- RESOURCES: the tree, TOP 1-2 LEVELS + folder summaries in context; deeper
+  levels + leaf detail lazily. (Iterating ALL resources is the bloat to kill.)
+- SKILLS: flat NAME enumeration in context (skills are ~flat); descriptions lazy.
+- PROMPTS: OUT of scope — invoked by another means, not model-catalog-surfaced.
+- Each section must SIGNAL that the model should actively search for more.
+  Shared mechanism = a tree-presenter (render to a depth/token budget, summaries at
+  folders, names/counts at leaves) + a lazy-expand tool (search / list(path) /
+  read), instantiated for tools, resources, skills — same shape as dom-map's
+  node-map. This is Arc alpha; NEXT after Arc beta (capability-surfacing).
+
 NEXT: knowify-side curation / keywords / embeddings; the app-side capabilities
 SECTION; the dock's tree panel (which is what unblocks a `groups`
 enumeration).
+
+## Arc beta — surface existing ctx/harness capabilities as model-facing tools (Ryan, 2026-08-24)
+
+Ryan's insight: "so many capabilities we can provide by just letting the model
+access things on the tool-handler ctx / session harnesses." Items 3+4 of the
+2026-08-24 wishlist MERGE into one arc — each is "wrap a capability that already
+exists on ctx/harness as a model tool," not new machinery. Members, spawn/fork
+first (Ryan: "not having a spawn/fork tool is a big loss"):
+
+- SPAWN tool — new sub-agent session (machinery exists: SpawnInput, spawnPath,
+  depth guard). Delegate multi-call work so the parent context stays clean.
+- FORK tool — clone the CURRENT session's context into a child. THE design
+  decision of this arc: what a fork clones (timeline? tools? memory scope? just
+  system + task?). Likely greenfield vs spawn — confirm.
+- message_session tool — deliver a message to another session by id (works for
+  sub-agents too); the inter-session channel we use ourselves.
+- timeline_search + list_sessions tools — ride D's session/search seam + the
+  SessionStore list/query (status/root/parentSessionId filters).
+- Big tool-results -> files (stream E) rides alongside: offload keeps context lean.
+  Pairs with stream F (internal visibility): a sub-agent's intermediate blocks stay
+  UNDELIVERED so delegation doesn't leak chatter into parent OR client context.
+  Seam for all: the server tool-handler ctx (ADR-27 ToolHandlerCtxExtensions
+  augmentation) + bundled-not-privileged tools (ADR 27). NEXT ACTION: map the
+  existing ctx/harness surface, then design the tool shapes; fork semantics is the
+  open decision.
 
 ## B. Explicit completion — the done tool ✅ FRAMEWORK SEAMS LANDED (2026-08-24, pending publish)
 
@@ -163,13 +223,33 @@ NEXT: seam design discussion → then knowify embedding pipeline.
 
 NEXT: after arc 1; the xlsx→jobs story is the flagship demo.
 
-## F. Internal visibility ⏸ QUEUED
+## F. Internal visibility 🔨 DESIGNED — two increments (2026-08-25)
 
 Executions / messages / blocks the client NEVER receives — undelivered, not
-hidden. Framework: a disposition on timeline entries + wire-projection
-filtering. Extends "audience is always model; visibility + exposure are the
-mechanisms" to the client direction. Anchor: `session.run()` for input-less
-internal turns.
+hidden. Full design: [`internal-visibility.md`](./internal-visibility.md).
+
+Key realization: `visibility` is already the `{ model × client }` 2×2 in enum
+disguise (model / observer / log / **internal**=model-yes-client-no); `exposure`
+is a separate reachability axis and stays separate. Split into two increments:
+
+- **F-preliminary — STAMP THE SPINE (decision B, Ryan 2026-08-25):** a uniform
+  `internal?: boolean` declaration knob at every spine level (createSession /
+  send / tool / message / block), propagated by the invariant _each layer stamps
+  its products_ (`effectiveInternal = inherited || own`; denormalize down; leaves
+  self-describing; rides the `currentExecutionId` rail as `currentExecutionInternal`).
+  ONE new persisted field (`SessionRecord.internal?`); everything else on existing
+  carriers (message `visibility:"internal"`, block `metadata.internal`), no
+  migration. Bus + journal stay WHOLE (truthful); interim delivery = client hides
+  what it's told is internal (revert the exploratory server-side filters). The
+  `visibility`→`audience` rename is deferred (uniform `internal` makes it mechanical).
+- **F-edge — PRINCIPAL-GATED DELIVERY (deferred):** admin sees everything, normal
+  client never receives internals. A finite capability bag resolved at the
+  Authorizer → `{ includeInternal }` on store reads (pull) + per-connection funnel
+  redaction (push). Lands on the stamp foundation with NO re-stamp. Anchor:
+  `session.run()` for input-less internal turns.
+
+First consumer: the delegation tools (async-delivery marks the injected completion
+message `internal`).
 
 ## G. Connectors ⏸ QUEUED (Slack polish first)
 
@@ -213,6 +293,17 @@ carry usage rollups.
 - Core-domain `GroupId` v4 mints (scheduling/allocations) — Ryan, 2026-08-24.
 
 ## Standing context
+
+2026-08-25 — DEFERRED ARC (Ryan): CLIENT-SIDE HOOK SURFACE. Clients get
+`hook({ onAfterSessionPersist })` with the SAME minted names as the server
+— two species by origin: (a) server-originated ops project as
+OBSERVER-ONLY hooks client-side (event-emitter style, no transforms — the
+client is not a participant in the op); (b) CLIENT-INITIATED actions get a
+full transforming hook cascade (a client send/append can be reshaped
+before the wire). The op-event subscription is the interim mechanism; a
+`sessionPersistEventQuery()` spec helper rides the next publish for name
+parity. Trigger to build: a second client consumer wanting hook-shaped
+observation (three-consumers rule).
 
 2026-08-24 latest — persist-is-a-command + steer default landed:
 (1) agentick next.153: `session:persist` declared command — the earn
