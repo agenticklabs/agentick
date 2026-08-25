@@ -107,6 +107,29 @@ connector (`thread_ts` ↔ reply thread is 1:1 via `replySessionId`, dissolving
 its binding state); host-side `session.reply()` lands if and when it earns
 itself there (three-consumers rule).
 
+## Amendment — 2026-08-25: creator provenance is an axis, not a kind
+
+"User-created fork" vs "agent-created fork" is PROVENANCE, orthogonal to
+relation — never a third `kind`. The existing origin edges carry it:
+
+- **User-created branch**: `branchOf` set; no origin edges (wire door, a
+  person's gesture).
+- **Agent-created branch**: `branchOf` set PLUS `originExecutionId` /
+  `originCallId` stamped — provenance WITHOUT `parentSessionId`. "An
+  execution created this conversation" is a birth fact, not a lifecycle
+  fact: no scope subordination, no delegation edge, invariant 4 untouched.
+
+The UI reads two axes with two fields: `kind` decides where it renders
+(thread chip vs root row); origin-presence decides how it is badged
+("explored by assistant" vs plain). Four cells, no new enum.
+
+The "sub-agent fork" temptation resolves by the standing test — what is
+the session FOR. An agent forking so the USER can read/continue the
+alternative → branch (`kind: "fork"`, agent provenance). An agent wanting
+history as its own working context → spawn with composed context; it
+never touches `branchOf`. "Spawn a sub-agent as a branch" remains
+deliberately inexpressible.
+
 ## The timeline contract — invariant, not mechanism
 
 **A branch session's timeline reads as the source's entries up to the anchor,
