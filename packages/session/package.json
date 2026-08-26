@@ -1,6 +1,6 @@
 {
   "name": "@agentick/session",
-  "version": "1.0.0-next.158",
+  "version": "1.0.0-next.159",
   "description": "Reference session harness for Agentick v2. Integration site that wires JSX agent + compiler + loop executor into the user-facing `session.send({ messages })` surface.",
   "keywords": [
     "agent",
