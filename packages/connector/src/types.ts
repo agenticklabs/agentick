@@ -18,6 +18,7 @@ import type {
   IngressIdentity,
   MessageSource,
   SendInput,
+  SendMessageInput,
   SendResult,
   StreamEvent,
 } from "@agentick/spec";
@@ -32,20 +33,22 @@ export type InboundSessionInit = Pick<CreateSessionInput, "metadata" | "initialP
 /** An external event, pushed into the connector via `ctx.inbound(...)`. */
 export interface InboundMessage {
   /**
-   * The event's content: plain text, or {@link ContentBlock}s for multimodal
-   * events — an MMS photo as an image block with a `reference` source, a
-   * document as a file block. Blocks are the framework's agnostic currency;
-   * the connector passes them through untouched.
+   * The event's messages, in full — the same {@link SendMessageInput} currency
+   * `session.send` takes: role, content blocks (an MMS photo as an image
+   * block with a `reference` source), per-message metadata. A plain string is
+   * shorthand for one user message. The connector adds nothing but
+   * {@link source} provenance; everything else is the event's own.
    */
-  readonly content: string | readonly ContentBlock[];
+  readonly messages: string | readonly SendMessageInput[];
   /**
    * Route to a specific session (e.g. one per chat/thread/topic). Defaults to
    * the connector's single session ({@link ConnectorSpec.session}).
    */
   readonly sessionId?: string;
   /**
-   * Provenance, stamped at `metadata.source` on the resulting user message.
-   * Typed against the module-augmentable {@link MessageSource} seed.
+   * Provenance, stamped at `metadata.source` on each message that doesn't
+   * already carry one. Typed against the module-augmentable
+   * {@link MessageSource} seed.
    */
   readonly source?: MessageSource;
   /**

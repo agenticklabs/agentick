@@ -16,7 +16,7 @@ const gateway = await createGateway({
     defineConnector({
       name: "telegram",
       start({ inbound }) {
-        bot.on("message", (m) => inbound({ content: m.text, sessionId: `tg:${m.chat.id}` }));
+        bot.on("message", (m) => inbound({ messages: m.text, sessionId: `tg:${m.chat.id}` }));
         return () => bot.stop();
       },
       deliver: ({ sessionId, response }) => bot.send(chatOf(sessionId), response),
@@ -42,7 +42,7 @@ export function telegram(config: { token: string; allowFrom?: string[] }) {
     name: "telegram",
     start({ inbound }) {
       bot.on("message", (m) =>
-        inbound({ content: m.text, sessionId: `tg:${m.chat.id}` }),
+        inbound({ messages: m.text, sessionId: `tg:${m.chat.id}` }),
       );
       void bot.start();
       return () => bot.stop();
@@ -73,11 +73,12 @@ Three ideas, and you know the whole package:
 
 `start` may return a teardown (`useEffect`-style); it runs at gateway close.
 
-`content` takes plain text or the framework's `ContentBlock[]` — so multimodal
-events are first-class: an MMS photo rides as an image block with a
-`reference` source (a claim-check your tools resolve later), a document as a
-file block. The connector never buffers media bytes; blocks are the agnostic
-currency end to end.
+`messages` is the same currency `session.send` takes — full `SendMessageInput`s
+(role, content blocks, per-message metadata), with a plain string as shorthand
+for one user message. Multimodal events are first-class: an MMS photo rides as
+an image block with a `reference` source (a claim-check your tools resolve
+later), a document as a file block. The connector adds only `source`
+provenance; it never buffers media bytes.
 
 ## Acting as your users
 
@@ -92,7 +93,7 @@ start({ inbound }) {
   source.on("message", async (m) => {
     const identity = await authSource.authenticate({ kind: "bearer", token: tokenFor(m) });
     inbound({
-      content: m.body,
+      messages: m.body,
       identity,                                     // verified, never a raw credential
       sessionId: `sms:${m.conversationId}`,
       session: { title: "Text conversation", metadata: { channel: "sms" } },
@@ -119,7 +120,7 @@ defineConnector({
   start({ inbound }) {
     stream.subscribe("email.received", async (e) => {
       inbound({
-        content: await renderEmailPrompt(e),
+        messages: await renderEmailPrompt(e),
         identity: await serviceIdentity(e.tenantId),
         send: { output: classificationSchema, allowedTools: ["query"] },
       });
@@ -145,7 +146,7 @@ bytes go:
 defineConnector({
   name: "voice",
   start({ inbound }) {
-    mic.on("utterance", (u) => inbound({ content: u.transcript, sessionId: u.callId }));
+    mic.on("utterance", (u) => inbound({ messages: u.transcript, sessionId: u.callId }));
   },
   stream: ({ text }) => text().pipeTo(ttsSink), // speak as tokens arrive
   deliver: ({ response }) => transcriptLog(response), // and keep the settled turn
@@ -181,7 +182,7 @@ start({ inbound, confirmed }) {
   bot.on("message", (m) =>
     isReplyToPrompt(m)
       ? confirmed({ correlationId: pendingFor(m), text: m.text })
-      : inbound({ content: m.text }),
+      : inbound({ messages: m.text }),
   );
 }
 ```
@@ -202,7 +203,7 @@ const gateway = await createGateway({
   extensions: [defineConnector({ name: "test", ...probe.spec })],
 });
 // …createApp, then:
-probe.emit({ content: "hello" });
+probe.emit({ messages: "hello" });
 expect(probe.delivered[0]!.response).toBe("reply");
 ```
 
@@ -224,7 +225,6 @@ expect(probe.delivered[0]!.response).toBe("reply");
 
 | `ctx.inbound({ … })` |                                                                    |
 | -------------------- | ------------------------------------------------------------------ |
-| `text`               | The event's message text.                                          |
 | `sessionId`          | Route to a session (per chat/thread/user).                         |
 | `identity`           | Verified `IngressIdentity` — open through the `as()` door.         |
 | `session`            | `createSession` contribution: `title`, `metadata`, `initialProps`. |

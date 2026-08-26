@@ -23,6 +23,7 @@ import type {
   GatewayExtension,
   GatewayInstaller,
   ProtocolEvent,
+  SendMessageInput,
   SendResult,
   SessionHarnessProtocol,
   Unsubscribe,
@@ -62,6 +63,17 @@ type SessionWithElicitation = SessionHarnessProtocol & {
     }): Promise<void>;
   };
 };
+
+function normalizeMessages(msg: InboundMessage): readonly SendMessageInput[] {
+  const base: readonly SendMessageInput[] =
+    typeof msg.messages === "string" ? [{ role: "user", content: msg.messages }] : msg.messages;
+  if (msg.source === undefined) return base;
+  return base.map((m) =>
+    (m.metadata as { source?: unknown } | undefined)?.source !== undefined
+      ? m
+      : { ...m, metadata: { ...m.metadata, source: msg.source } },
+  );
+}
 
 export function defineConnector(spec: ConnectorSpec): GatewayExtension {
   const { name } = spec;
@@ -138,17 +150,12 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
       // ── inbound (required): event → session.send | app.runOnce ──
 
       async function handleInbound(msg: InboundMessage): Promise<void> {
-        const metadata = msg.source !== undefined ? { source: msg.source } : undefined;
-        const message = {
-          role: "user" as const,
-          content: msg.content,
-          ...(metadata ? { metadata } : {}),
-        };
+        const messages = normalizeMessages(msg);
         const door = resolveDoor(msg);
 
         if (spec.ephemeral) {
           const { result, sessionId } = await door.runOnce({
-            send: { ...msg.send, messages: [message] },
+            send: { ...msg.send, messages },
             ...(msg.session?.metadata !== undefined ? { metadata: msg.session.metadata } : {}),
           });
           // No held session to watch on the bus — hand the result off
@@ -176,7 +183,7 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
         const handle = await session.send({
           ...(spec.stream ? { stream: true } : {}),
           ...msg.send,
-          messages: [message],
+          messages,
         });
 
         if (spec.stream) {
@@ -290,7 +297,7 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
             write: (chunk) =>
               handleInbound(
                 typeof chunk === "string"
-                  ? { ...defaults, content: chunk }
+                  ? { ...defaults, messages: chunk }
                   : { ...defaults, ...chunk },
               ),
           }),

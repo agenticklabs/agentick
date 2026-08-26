@@ -88,7 +88,7 @@ describe("connector — inbound", () => {
       for await (const e of sub) appended.push(e);
     })();
 
-    probe.emit({ content: "hello agent", source: { telegram: { chatId: 42 } } });
+    probe.emit({ messages: "hello agent", source: { telegram: { chatId: 42 } } });
 
     await waitFor(() => (appended.length > 0 ? true : undefined), {
       description: "a timeline append is observed",
@@ -116,7 +116,7 @@ describe("connector — one-way ingress (no deliver)", () => {
     expect(probe.spec.confirm).toBeUndefined();
 
     const { app } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
-    probe.emit({ content: "webhook fired" });
+    probe.emit({ messages: "webhook fired" });
 
     await waitFor(() => (app.getSession("connector:test") ? true : undefined), {
       description: "session created by the inbound event",
@@ -131,7 +131,7 @@ describe("connector — outbound (optional deliver)", () => {
     const probe = connectorProbe();
     await buildStack(probe, {}, [{ type: "text", text: "the answer is 42" }]);
 
-    probe.emit({ content: "what is the answer" });
+    probe.emit({ messages: "what is the answer" });
     await waitFor(() => (probe.delivered.length > 0 ? true : undefined), {
       description: "delivery observed",
       timeoutMs: 3000,
@@ -146,7 +146,7 @@ describe("connector — outbound (optional deliver)", () => {
 describe("connector — confirmations (optional)", () => {
   async function confirmVia(probe: ConnectorProbe, replyText: string): Promise<boolean> {
     const { app } = await buildStack(probe, {}, [{ type: "text", text: "ok" }]);
-    probe.emit({ content: "start" });
+    probe.emit({ messages: "start" });
     await waitFor(() => (app.getSession("connector:test") ? true : undefined), {
       description: "connector session exists",
       timeoutMs: 3000,
