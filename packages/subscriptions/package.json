@@ -1,6 +1,6 @@
 {
   "name": "@agentick/subscriptions",
-  "version": "1.0.0-next.155",
+  "version": "1.0.0-next.156",
   "description": "Long-lived subscription primitive for Agentick v2 — <Cron>, <Webhook>, <EventListener>. Bridge + JSX + in-process scheduler driver. The foundation that connectors build on.",
   "keywords": [
     "agent",
