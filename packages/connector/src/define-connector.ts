@@ -30,7 +30,7 @@ import type {
 import { extractText } from "@agentick/spec";
 
 import { formatConfirmationMessage, parseTextConfirmation } from "./confirmations.js";
-import { CONNECTORS_NAMESPACE, type ConnectorsBridge, type ConnectorHandle } from "./registry.js";
+import { CONNECTORS_NAMESPACE, ConnectorsBridge, type ConnectorHandle } from "./registry.js";
 import type {
   ConfirmationPrompt,
   ConfirmationReply,
@@ -316,7 +316,7 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
       // it) — the host-facing registry `connectors(gateway)` reads.
       let bridge = installer.getNamespace<ConnectorsBridge>(CONNECTORS_NAMESPACE);
       if (!bridge) {
-        bridge = new Map();
+        bridge = new ConnectorsBridge();
         installer.registerNamespace(CONNECTORS_NAMESPACE, bridge);
       }
       const handle: ConnectorHandle = {
@@ -335,10 +335,10 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
           });
         },
       };
-      bridge.set(name, handle);
+      bridge.register(handle);
 
       installer.onClose(async () => {
-        bridge.delete(name);
+        bridge.unregister(name);
         for (const unsub of subscriptions) unsub();
         pendingConfirmations.clear();
         if (typeof teardown === "function") await teardown();

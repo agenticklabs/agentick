@@ -40,16 +40,44 @@ export interface ConnectorsRegistry {
   list(): readonly ConnectorHandle[];
 }
 
-/** @internal — the mutable map behind the registry, shared via the bridge slot. */
-export type ConnectorsBridge = Map<string, ConnectorHandle>;
+/**
+ * The bridge value at `gateway.bridges.connectors` — a read-only registry
+ * facade (hosts can look up and deliver, never mutate). Registration is
+ * `defineConnector`'s own, via the internal methods.
+ */
+export class ConnectorsBridge implements ConnectorsRegistry {
+  readonly #handles = new Map<string, ConnectorHandle>();
 
-/** Read the connectors registry off a gateway (empty when none installed). */
+  get(name: string): ConnectorHandle | undefined {
+    return this.#handles.get(name);
+  }
+
+  list(): readonly ConnectorHandle[] {
+    return [...this.#handles.values()];
+  }
+
+  /** @internal defineConnector only. */
+  register(handle: ConnectorHandle): void {
+    this.#handles.set(handle.name, handle);
+  }
+
+  /** @internal defineConnector only. */
+  unregister(name: string): void {
+    this.#handles.delete(name);
+  }
+}
+
+/**
+ * Read the connectors registry off a gateway. Sugar over the typed
+ * augmentation — `gateway.bridges.connectors?.get(name)` is the same door —
+ * collapsing the none-installed case to an empty registry.
+ */
 export function connectors(gateway: {
   readonly bridges: Readonly<Record<string, unknown>>;
 }): ConnectorsRegistry {
   const bridge = gateway.bridges[CONNECTORS_NAMESPACE] as ConnectorsBridge | undefined;
   return {
     get: (name) => bridge?.get(name),
-    list: () => [...(bridge?.values() ?? [])],
+    list: () => bridge?.list() ?? [],
   };
 }
