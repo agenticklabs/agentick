@@ -87,7 +87,7 @@ describe("connector — streaming", () => {
       },
     });
 
-    ctx.inbound({ text: "what is the answer" });
+    ctx.inbound({ content: "what is the answer" });
 
     await waitFor(() => (texts.length > 0 ? true : undefined), {
       description: "streamed text collected",
@@ -129,10 +129,10 @@ describe("connector — streaming", () => {
     // Distinct sessions per chunk: same-session chunks would STEER into the
     // in-flight turn (the right behavior for a chat source; not what this
     // test observes).
-    const source = new ReadableStream<{ text: string; sessionId: string }>({
+    const source = new ReadableStream<{ content: string; sessionId: string }>({
       start(controller) {
-        controller.enqueue({ text: "first line", sessionId: "pipe-1" });
-        controller.enqueue({ text: "second line", sessionId: "pipe-2" });
+        controller.enqueue({ content: "first line", sessionId: "pipe-1" });
+        controller.enqueue({ content: "second line", sessionId: "pipe-2" });
         controller.close();
       },
     });

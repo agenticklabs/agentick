@@ -31,14 +31,13 @@ export type InboundSessionInit = Pick<CreateSessionInput, "metadata" | "initialP
 
 /** An external event, pushed into the connector via `ctx.inbound(...)`. */
 export interface InboundMessage {
-  /** The event's message text. */
-  readonly text: string;
   /**
-   * Sender identifier, checked against {@link ConnectorSpec.allowlist} when
-   * one is set. An unauthenticated platform handle — a gate input, not an
-   * actor (ADR 58 identity model).
+   * The event's content: plain text, or {@link ContentBlock}s for multimodal
+   * events — an MMS photo as an image block with a `reference` source, a
+   * document as a file block. Blocks are the framework's agnostic currency;
+   * the connector passes them through untouched.
    */
-  readonly senderId?: string;
+  readonly content: string | readonly ContentBlock[];
   /**
    * Route to a specific session (e.g. one per chat/thread/topic). Defaults to
    * the connector's single session ({@link ConnectorSpec.session}).
@@ -189,11 +188,6 @@ export interface ConnectorSpec {
    * when one is defined.
    */
   readonly ephemeral?: boolean;
-  /**
-   * Allowed `senderId`s. When set, unlisted (or absent) senders are dropped.
-   * A whitelist gate, not identity.
-   */
-  readonly allowlist?: readonly string[];
   /**
    * Begin operation: subscribe your source and push events through
    * `ctx.inbound`. Return a teardown to run at gateway close.

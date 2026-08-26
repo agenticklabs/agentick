@@ -16,7 +16,7 @@ const gateway = await createGateway({
     defineConnector({
       name: "telegram",
       start({ inbound }) {
-        bot.on("message", (m) => inbound({ text: m.text, sessionId: `tg:${m.chat.id}` }));
+        bot.on("message", (m) => inbound({ content: m.text, sessionId: `tg:${m.chat.id}` }));
         return () => bot.stop();
       },
       deliver: ({ sessionId, response }) => bot.send(chatOf(sessionId), response),
@@ -40,10 +40,9 @@ export function telegram(config: { token: string; allowFrom?: string[] }) {
   const bot = new Bot(config.token);
   return defineConnector({
     name: "telegram",
-    allowlist: config.allowFrom,
     start({ inbound }) {
       bot.on("message", (m) =>
-        inbound({ text: m.text, sessionId: `tg:${m.chat.id}`, senderId: String(m.from.id) }),
+        inbound({ content: m.text, sessionId: `tg:${m.chat.id}` }),
       );
       void bot.start();
       return () => bot.stop();
@@ -74,6 +73,12 @@ Three ideas, and you know the whole package:
 
 `start` may return a teardown (`useEffect`-style); it runs at gateway close.
 
+`content` takes plain text or the framework's `ContentBlock[]` — so multimodal
+events are first-class: an MMS photo rides as an image block with a
+`reference` source (a claim-check your tools resolve later), a document as a
+file block. The connector never buffers media bytes; blocks are the agnostic
+currency end to end.
+
 ## Acting as your users
 
 By default a connector's sessions belong to the trusted host. When events come
@@ -87,7 +92,7 @@ start({ inbound }) {
   source.on("message", async (m) => {
     const identity = await authSource.authenticate({ kind: "bearer", token: tokenFor(m) });
     inbound({
-      text: m.body,
+      content: m.body,
       identity,                                     // verified, never a raw credential
       sessionId: `sms:${m.conversationId}`,
       session: { title: "Text conversation", metadata: { channel: "sms" } },
@@ -114,7 +119,7 @@ defineConnector({
   start({ inbound }) {
     stream.subscribe("email.received", async (e) => {
       inbound({
-        text: await renderEmailPrompt(e),
+        content: await renderEmailPrompt(e),
         identity: await serviceIdentity(e.tenantId),
         send: { output: classificationSchema, allowedTools: ["query"] },
       });
@@ -140,7 +145,7 @@ bytes go:
 defineConnector({
   name: "voice",
   start({ inbound }) {
-    mic.on("utterance", (u) => inbound({ text: u.transcript, sessionId: u.callId }));
+    mic.on("utterance", (u) => inbound({ content: u.transcript, sessionId: u.callId }));
   },
   stream: ({ text }) => text().pipeTo(ttsSink), // speak as tokens arrive
   deliver: ({ response }) => transcriptLog(response), // and keep the settled turn
@@ -176,7 +181,7 @@ start({ inbound, confirmed }) {
   bot.on("message", (m) =>
     isReplyToPrompt(m)
       ? confirmed({ correlationId: pendingFor(m), text: m.text })
-      : inbound({ text: m.text }),
+      : inbound({ content: m.text }),
   );
 }
 ```
@@ -197,7 +202,7 @@ const gateway = await createGateway({
   extensions: [defineConnector({ name: "test", ...probe.spec })],
 });
 // …createApp, then:
-probe.emit({ text: "hello" });
+probe.emit({ content: "hello" });
 expect(probe.delivered[0]!.response).toBe("reply");
 ```
 
@@ -213,7 +218,6 @@ expect(probe.delivered[0]!.response).toBe("reply");
 | `app`                    | Target app id. Default: the gateway's sole app, resolved lazily.                       |
 | `session`                | Default session id. Default: `connector:<name>`.                                       |
 | `ephemeral`              | `runOnce` per event instead of a held session.                                         |
-| `allowlist`              | Allowed `senderId`s; others dropped. A gate, not identity.                             |
 
 `ctx` also carries `writable(defaults?)` (the pipe-friendly twin of `inbound`),
 `confirmed(reply)`, `status(s)`, and `gateway` (the escape hatch: `apps()`, `as()`).
@@ -226,7 +230,6 @@ expect(probe.delivered[0]!.response).toBe("reply");
 | `session`            | `createSession` contribution: `title`, `metadata`, `initialProps`. |
 | `send`               | Per-event send options (`output`, `allowedTools`, `tools`, …).     |
 | `source`             | Provenance, stamped at `metadata.source` on the user message.      |
-| `senderId`           | Checked against `allowlist` when one is set.                       |
 
 ## Reaching connectors from the host
 
@@ -249,7 +252,8 @@ connectors(gateway).get("telegram")?.deliver({
   limiting, retry backoff — deliberately out; compose them around `deliver`.
 - **Identity vs provenance.** `identity` is _who acts_ (verified, opens the
   session as that principal); `source` is _where it came from_ (stamped
-  metadata). `senderId`/`allowlist` is a gate, neither of the above.
+  metadata). Sender gating (allowlists) is deliberately NOT API surface — it's
+  one `if` in your `start()`, where your source's address semantics live.
 - **Per-message actor stamping** (a second user speaking mid-session) waits on
   interceptIngress (#302); `identity` covers the session-opening half today.
 - **No model-facing send tool, deliberately.** A `send_via_connector` tool

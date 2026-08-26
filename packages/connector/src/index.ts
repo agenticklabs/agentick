@@ -12,7 +12,7 @@
  *     defineConnector({
  *       name: "telegram",
  *       start({ inbound }) {
- *         bot.on("message", (m) => inbound({ text: m.text, sessionId: `tg:${m.chat.id}` }));
+ *         bot.on("message", (m) => inbound({ content: m.text, sessionId: `tg:${m.chat.id}` }));
  *         return () => bot.stop();
  *       },
  *       deliver: ({ sessionId, response }) => bot.send(chatOf(sessionId), response),

@@ -78,7 +78,7 @@ describe("connector — identity + session init + ephemeral", () => {
     const { app } = await buildStack(probe, {});
 
     probe.emit({
-      text: "hello",
+      content: "hello",
       identity: IDENTITY,
       sessionId: "sms-thread-1",
       session: { title: "Text conversation", metadata: { channel: "sms" } },
@@ -99,7 +99,7 @@ describe("connector — identity + session init + ephemeral", () => {
     const probe = connectorProbe();
     const { app } = await buildStack(probe, {});
 
-    probe.emit({ text: "hello", sessionId: "plain-1" });
+    probe.emit({ content: "hello", sessionId: "plain-1" });
     await waitFor(() => (app.getSession("plain-1") ? true : undefined), {
       description: "session opened",
       timeoutMs: 3000,
@@ -112,7 +112,7 @@ describe("connector — identity + session init + ephemeral", () => {
     const probe = connectorProbe();
     const { app } = await buildStack(probe, { ephemeral: true });
 
-    probe.emit({ text: "classify this", identity: IDENTITY });
+    probe.emit({ content: "classify this", identity: IDENTITY });
 
     await waitFor(() => (probe.delivered.length > 0 ? true : undefined), {
       description: "runOnce result delivered",

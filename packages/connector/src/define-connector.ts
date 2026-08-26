@@ -138,17 +138,10 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
       // ── inbound (required): event → session.send | app.runOnce ──
 
       async function handleInbound(msg: InboundMessage): Promise<void> {
-        // Allowlist gate (a whitelist, not identity — ADR 58).
-        if (spec.allowlist) {
-          if (msg.senderId === undefined || !spec.allowlist.includes(msg.senderId)) {
-            return; // dropped
-          }
-        }
-
         const metadata = msg.source !== undefined ? { source: msg.source } : undefined;
         const message = {
           role: "user" as const,
-          content: msg.text,
+          content: msg.content,
           ...(metadata ? { metadata } : {}),
         };
         const door = resolveDoor(msg);
@@ -297,7 +290,7 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
             write: (chunk) =>
               handleInbound(
                 typeof chunk === "string"
-                  ? { ...defaults, text: chunk }
+                  ? { ...defaults, content: chunk }
                   : { ...defaults, ...chunk },
               ),
           }),
