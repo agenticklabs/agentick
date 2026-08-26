@@ -36,7 +36,12 @@ export type {
   OutboundDelivery,
   ConfirmationPrompt,
   ConfirmationReply,
+  StreamingTurn,
 } from "./types.js";
+
+// The StreamEvent → assistant-text projection `StreamingTurn.text()` uses,
+// exported for authors composing their own event pipelines.
+export { textStream } from "./text-stream.js";
 
 // Thin confirmation helpers — pure functions, exported for connector authors.
 export {

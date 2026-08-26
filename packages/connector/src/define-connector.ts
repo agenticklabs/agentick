@@ -38,7 +38,9 @@ import type {
   ConnectorStatus,
   ConnectorTeardown,
   InboundMessage,
+  StreamingTurn,
 } from "./types.js";
+import { textStream } from "./text-stream.js";
 
 const ELICITATION_EVENT_NAME = "session:channel:elicitation";
 const LOOP_EXECUTION_EVENT_NAME = "loop:command:run-execution";
@@ -170,7 +172,23 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
         // TODO(#302: per-message actor stamping) — interceptIngress will carry
         // the platform actor per message; `msg.identity` covers the
         // session-opening half today.
-        await session.send({ ...msg.send, messages: [message] });
+        const handle = await session.send({
+          ...(spec.stream ? { stream: true } : {}),
+          ...msg.send,
+          messages: [message],
+        });
+
+        if (spec.stream) {
+          const events = handle.readable();
+          const turn: StreamingTurn = {
+            sessionId: session.id,
+            executionId: handle.executionId,
+            events,
+            text: () => textStream(events),
+            result: handle.result,
+          };
+          void Promise.resolve(spec.stream(turn)).catch(reportError);
+        }
       }
 
       // ── outbound (optional): hand raw output to the source ──
@@ -266,6 +284,15 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
 
       const ctx: ConnectorContext = {
         inbound: (msg) => void handleInbound(msg).catch(reportError),
+        writable: (defaults = {}) =>
+          new WritableStream<InboundMessage | string>({
+            write: (chunk) =>
+              handleInbound(
+                typeof chunk === "string"
+                  ? { ...defaults, text: chunk }
+                  : { ...defaults, ...chunk },
+              ),
+          }),
         confirmed: (reply) => void handleConfirmationReply(reply).catch(reportError),
         status: (status, error) => {
           currentStatus = status;

@@ -101,6 +101,42 @@ defineConnector({
 execution-scoped `tools`, `maxTicks` — anything but `messages`, which is the
 connector's own.
 
+## Streaming
+
+Implement `stream` and every connector-initiated turn is handed to you **live**,
+as web streams — the same `ReadableStream` the execution handle exposes.
+`text()` projects it to plain assistant text (deltas when the model streams,
+whole blocks when it doesn't); `events` is the full firehose. Pipe it wherever
+bytes go:
+
+```ts
+defineConnector({
+  name: "voice",
+  start({ inbound }) {
+    mic.on("utterance", (u) => inbound({ text: u.transcript, sessionId: u.callId }));
+  },
+  stream: ({ text }) => text().pipeTo(ttsSink), // speak as tokens arrive
+  deliver: ({ response }) => transcriptLog(response), // and keep the settled turn
+});
+```
+
+And the inbound face pipes too — `ctx.writable()` turns the connector into a
+`WritableStream` where each chunk becomes one inbound event (a bare string is
+shorthand for `{ text }`):
+
+```ts
+start({ writable }) {
+  socket.readable
+    .pipeThrough(new TextDecoderStream())
+    .pipeThrough(lineSplitter())
+    .pipeTo(writable({ sessionId: "socket-feed" }));
+}
+```
+
+Source in, agent out — both directions are standard web streams. (Two chunks
+racing into one session don't collide: the second **steers** into the in-flight
+turn, exactly like a user sending two quick messages.)
+
 ## Replies that need a human
 
 Implement `confirm` and the agent's confirmations (tool approvals,
@@ -140,16 +176,20 @@ expect(probe.delivered[0]!.response).toBe("reply");
 
 ## API
 
-| `defineConnector({ … })` |                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------- |
-| `name`                   | Connector name — diagnostics + extension routing.                                   |
-| `start(ctx)`             | **Required.** Subscribe your source; push via `ctx.inbound`. May return a teardown. |
-| `deliver(d)`             | _Optional._ Receive each completed turn's raw output.                               |
-| `confirm(p)`             | _Optional._ Present confirmations; answer via `ctx.confirmed`.                      |
-| `app`                    | Target app id. Default: the gateway's sole app, resolved lazily.                    |
-| `session`                | Default session id. Default: `connector:<name>`.                                    |
-| `ephemeral`              | `runOnce` per event instead of a held session.                                      |
-| `allowlist`              | Allowed `senderId`s; others dropped. A gate, not identity.                          |
+| `defineConnector({ … })` |                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| `name`                   | Connector name — diagnostics + extension routing.                                      |
+| `start(ctx)`             | **Required.** Subscribe your source; push via `ctx.inbound`. May return a teardown.    |
+| `deliver(d)`             | _Optional._ Receive each completed turn's raw output.                                  |
+| `stream(t)`              | _Optional._ Receive each connector-initiated turn live (`events`, `text()`, `result`). |
+| `confirm(p)`             | _Optional._ Present confirmations; answer via `ctx.confirmed`.                         |
+| `app`                    | Target app id. Default: the gateway's sole app, resolved lazily.                       |
+| `session`                | Default session id. Default: `connector:<name>`.                                       |
+| `ephemeral`              | `runOnce` per event instead of a held session.                                         |
+| `allowlist`              | Allowed `senderId`s; others dropped. A gate, not identity.                             |
+
+`ctx` also carries `writable(defaults?)` (the pipe-friendly twin of `inbound`),
+`confirmed(reply)`, `status(s)`, and `gateway` (the escape hatch: `apps()`, `as()`).
 
 | `ctx.inbound({ … })` |                                                                    |
 | -------------------- | ------------------------------------------------------------------ |
