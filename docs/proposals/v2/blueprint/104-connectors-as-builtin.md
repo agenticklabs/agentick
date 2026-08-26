@@ -60,19 +60,28 @@ outside any operation context. Side by side:
 `status()` is a diagnostics enum, not telemetry. Failures in `deliver` are whatever the adopter's
 closure does with them.
 
-### Why the extension route cannot close the gap
+### Why the built-in beats the extension route
 
-Two structural reasons, not one:
+**Correction over the design conversation:** the extension route is not structurally impossible —
+`GatewayInstaller` DOES forward `substrate` and the interceptor snapshot
+(`inheritedInterceptors` + `interceptorParent`, the ADR 93 "cascade is total at every host tier"
+landmine-11 fix), so a sufficiently careful extension could construct a harness with both the audit
+trail and the policy seam. The built-in wins on ownership and shape, not on possibility:
 
-1. **No substrate.** `AppInstaller` forwards `substrate: AppSubstrate` (`app-extension.ts:179,542`)
-   precisely so extensions can mount sub-harnesses into the host's journal/bus/inbox family.
-   `GatewayInstaller` forwards nothing — `subscribeBus` is read-only. Fixable by widening the
-   installer, but:
-2. **Outside the construction tree, forever.** ADR 83 §4's live interceptor inheritance rides the
-   _construction_ tree: a `guard()`/`use()` registered on a harness pushes to every live
-   _descendant_. An extension-built harness — even one handed the substrate — is a stranger, not a
-   descendant. The gateway's middleware would never cascade to it. Substrate forwarding buys the
-   audit trail but not the policy seam; only construction buys both.
+1. **One construction owner.** Self-registration had a real ordering wart (first connector to
+   install creates the bridge); an extension-built harness would inherit it. The gateway
+   constructing its own child at a fixed point in its constructor deletes the whole class of
+   ordering questions.
+2. **Lifecycle is the gateway's to pin.** Start-at-`listen()` / stop-first-at-`close()` is a
+   gateway-lifecycle decision. An extension installs at construction and learns about `listen` only
+   indirectly; the owner of `listenBody`/`closeBody` places those calls exactly.
+3. **The first-class idiom.** A `connectors:` option (ADR 42 slot) + a `gateway.connectors` field
+   with a spec protocol is how every other built-in reads. Extension + bridge + accessor is three
+   pieces of ceremony for the same thing, reachable only through `gateway.bridges`.
+4. **The ctx facets need the harness anyway.** `log`/`trace`/`metrics`/`run` on
+   `ConnectorContext` are minted from a live harness's operation machinery
+   (`defineOperationFacets`); once the machinery is a harness, the gateway constructing it is the
+   smallest correct shape.
 
 ### Built-ins are not third parties (the ADR 50 amendment)
 
