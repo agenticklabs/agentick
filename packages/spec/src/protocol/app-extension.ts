@@ -522,6 +522,15 @@ export interface GatewayInstallerHost {
   readonly metadata: Readonly<Record<string, unknown>>;
   /** Live apps hosted by this gateway. */
   readonly apps: () => readonly import("./app-harness.js").AppHarnessProtocol[];
+  /**
+   * The ADR 100 identity door, for extensions that act AS an authenticated
+   * identity (a connector routing an external user's message). Runs the same
+   * seam a transport dispatch runs — authorizer, adopter `onBeforeWire…`
+   * hooks, the ADR-48 principal stamp — terminating on the local harness.
+   */
+  readonly as: (
+    identity: import("../wire/authorizer.js").IngressIdentity,
+  ) => import("./gateway-harness.js").IdentityScopedGateway;
 }
 
 /**

@@ -1,43 +1,44 @@
 /**
- * `@agentick/connector` — bind an external event source to an agent
- * session as one server-side `GatewayExtension` (ADR 58).
- *
- * A connector is an INGRESS binding: inbound event → `session.send`. It
- * is pure composition — no connector subsystem, no new verb. The
- * outbound reply path and confirmation routing are OPTIONAL, wired only
- * when the platform opts in (see {@link ConnectorPlatform}).
+ * `@agentick/connector` — bind any external event source to an agent as one
+ * server-side `GatewayExtension` (ADR 58). Pure composition — it's just a
+ * session under the hood.
  *
  * ```ts
  * import { createGateway } from "@agentick/gateway";
  * import { defineConnector } from "@agentick/connector";
  *
  * const gateway = await createGateway({
- *   extensions: [defineConnector({ name: "telegram", platform: myPlatform })],
+ *   extensions: [
+ *     defineConnector({
+ *       name: "telegram",
+ *       start({ inbound }) {
+ *         bot.on("message", (m) => inbound({ text: m.text, sessionId: `tg:${m.chat.id}` }));
+ *         return () => bot.stop();
+ *       },
+ *       deliver: ({ sessionId, response }) => bot.send(chatOf(sessionId), response),
+ *     }),
+ *   ],
  * });
  * ```
  *
- * Platform ports (`@agentick/connector-telegram`, `@agentick/connector-imessage`)
- * implement the {@link ConnectorPlatform} adapter; they are deferred
- * follow-ups gated on their platform SDKs.
- *
- * @see docs/proposals/v2/blueprint/58-connectors.md
+ * @see README.md
  */
 
 export { defineConnector } from "./define-connector.js";
 
 export type {
-  ConnectorPlatform,
-  ConnectorHandle,
-  ConnectorConfig,
+  ConnectorSpec,
+  ConnectorContext,
+  ConnectorTeardown,
   ConnectorStatus,
   InboundMessage,
+  InboundSessionInit,
   OutboundDelivery,
   ConfirmationPrompt,
   ConfirmationReply,
-  DefineConnectorSpec,
 } from "./types.js";
 
-// Thin confirmation helpers — pure functions, exported for platform ports.
+// Thin confirmation helpers — pure functions, exported for connector authors.
 export {
   parseTextConfirmation,
   formatConfirmationMessage,

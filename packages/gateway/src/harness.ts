@@ -726,6 +726,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       gatewayId: this.scopeId,
       metadata: this.metadata,
       apps: () => Array.from(self._apps.values()),
+      as: (identity) => self.as(identity),
     };
     return {
       kind: "gateway",

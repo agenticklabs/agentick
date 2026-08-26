@@ -1,13 +1,7 @@
 /**
- * Connector integration gate (ADR 58) — the full flow through a REAL
- * in-memory stack: `createGateway` → `createApp` → session, with the
- * connector installed as a gateway extension and a `fakeConnectorPlatform`
- * standing in for the external source.
- *
- * The thesis under test: a connector is an INGRESS binding — inbound
- * event → `session.send`. Outbound delivery and confirmation routing are
- * OPTIONAL halves, wired only when the platform opts in. A one-way
- * ingress-only source is first-class.
+ * End-to-end over the REAL gateway + app + session: the flat-spec API's four
+ * halves — inbound provenance, one-way ingress, optional deliver, optional
+ * confirmations — driven through `connectorProbe()`.
  */
 
 import React from "react";
@@ -16,14 +10,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { reactCompiler } from "@agentick/compiler-react";
-import { createGateway } from "@agentick/gateway";
+import { createGateway, type GatewayHarness } from "@agentick/gateway";
 import "@agentick/elicitation"; // side-effect: augment session.elicit/.elicitation
 import { SPEC_VERSION, type ContentBlock, type ProtocolEvent } from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
 
 import { defineConnector } from "../define-connector.js";
-import type { ConnectorConfig } from "../types.js";
-import { fakeConnectorPlatform, type FakeConnectorPlatform } from "../testing/index.js";
+import type { ConnectorSpec } from "../types.js";
+import { connectorProbe, type ConnectorProbe } from "../testing/index.js";
 
 function Agent() {
   return React.createElement("message" as never, { role: "user" }, "ping");
@@ -48,15 +42,15 @@ function makeExec(output: readonly ContentBlock[]) {
   );
 }
 
-const gateways: Array<{ close: () => Promise<void> }> = [];
+const gateways: GatewayHarness[] = [];
 
 async function buildStack(
-  platform: FakeConnectorPlatform,
-  config: ConnectorConfig,
+  probe: ConnectorProbe,
+  spec: Partial<ConnectorSpec>,
   output: readonly ContentBlock[],
 ) {
   const gateway = await createGateway({
-    extensions: [defineConnector({ name: "test", platform, config })],
+    extensions: [defineConnector({ name: "test", ...probe.spec, ...spec })],
   });
   gateways.push(gateway);
   await gateway.listen();
@@ -78,14 +72,11 @@ declare module "@agentick/spec" {
   }
 }
 
-describe("connector — inbound (a)", () => {
+describe("connector — inbound", () => {
   it("emit → session.send runs and the user message carries metadata.source", async () => {
     const appended: ProtocolEvent[] = [];
-    const platform = fakeConnectorPlatform();
-    const { gateway } = await buildStack(platform, {}, [{ type: "text", text: "reply" }]);
-    // Observe timeline appends on the shared gateway bus to inspect the
-    // stamped provenance (gateway-created sessions use a noop timeline
-    // handle, so we read the append envelope rather than session.timeline).
+    const probe = connectorProbe();
+    const { gateway } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
     const sub = (
       gateway as unknown as { events: (f: object) => AsyncIterable<ProtocolEvent> }
     ).events({
@@ -97,7 +88,7 @@ describe("connector — inbound (a)", () => {
       for await (const e of sub) appended.push(e);
     })();
 
-    platform.emit({ text: "hello agent", source: { telegram: { chatId: 42 } } });
+    probe.emit({ text: "hello agent", source: { telegram: { chatId: 42 } } });
 
     await waitFor(() => (appended.length > 0 ? true : undefined), {
       description: "a timeline append is observed",
@@ -120,45 +111,32 @@ describe("connector — inbound (a)", () => {
 
 describe("connector — one-way ingress (no deliver)", () => {
   it("inbound-only: event → session.send runs, nothing delivered back", async () => {
-    const completed: ProtocolEvent[] = [];
-    const platform = fakeConnectorPlatform({ oneWay: true });
-    expect(platform.deliver).toBeUndefined();
-    expect(platform.presentConfirmation).toBeUndefined();
+    const probe = connectorProbe({ oneWay: true });
+    expect(probe.spec.deliver).toBeUndefined();
+    expect(probe.spec.confirm).toBeUndefined();
 
-    const { gateway } = await buildStack(platform, {}, [{ type: "text", text: "processed" }]);
-    const sub = (
-      gateway as unknown as { events: (f: object) => AsyncIterable<ProtocolEvent> }
-    ).events({
-      surface: "loop",
-      name: { exact: "loop:command:run-execution" },
-      phase: "terminal",
-    });
-    void (async () => {
-      for await (const e of sub) completed.push(e);
-    })();
+    const { app } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
+    probe.emit({ text: "webhook fired" });
 
-    platform.emit({ text: "webhook fired" });
-
-    // The ingress action ran to completion …
-    await waitFor(() => (completed.length > 0 ? true : undefined), {
-      description: "the ingress execution completed",
+    await waitFor(() => (app.getSession("connector:test") ? true : undefined), {
+      description: "session created by the inbound event",
       timeoutMs: 3000,
     });
-    // … and nothing was delivered back (one-way source).
-    expect(platform.delivered).toHaveLength(0);
+    expect(probe.delivered).toHaveLength(0);
   });
 });
 
 describe("connector — outbound (optional deliver)", () => {
-  it("hands the agent's raw output to a platform that implements deliver", async () => {
-    const platform = fakeConnectorPlatform();
-    await buildStack(platform, {}, [{ type: "text", text: "the answer is 42" }]);
-    platform.emit({ text: "what is the answer" });
-    await waitFor(() => (platform.delivered.length > 0 ? true : undefined), {
-      description: "output delivered to the platform",
+  it("hands the agent's raw output to a spec that implements deliver", async () => {
+    const probe = connectorProbe();
+    await buildStack(probe, {}, [{ type: "text", text: "the answer is 42" }]);
+
+    probe.emit({ text: "what is the answer" });
+    await waitFor(() => (probe.delivered.length > 0 ? true : undefined), {
+      description: "delivery observed",
       timeoutMs: 3000,
     });
-    const delivery = platform.delivered[0]!;
+    const delivery = probe.delivered[0]!;
     expect(delivery.response).toContain("the answer is 42");
     expect(delivery.output).toHaveLength(1);
     expect(delivery.output[0]).toMatchObject({ type: "text", text: "the answer is 42" });
@@ -166,12 +144,9 @@ describe("connector — outbound (optional deliver)", () => {
 });
 
 describe("connector — confirmations (optional)", () => {
-  it("presents an elicitation and routes the reply through respond()", async () => {
-    const platform = fakeConnectorPlatform();
-    const { app } = await buildStack(platform, {}, [{ type: "text", text: "ok" }]);
-
-    // Establish the managed session via an inbound event.
-    platform.emit({ text: "start" });
+  async function confirmVia(probe: ConnectorProbe, replyText: string): Promise<boolean> {
+    const { app } = await buildStack(probe, {}, [{ type: "text", text: "ok" }]);
+    probe.emit({ text: "start" });
     await waitFor(() => (app.getSession("connector:test") ? true : undefined), {
       description: "connector session exists",
       timeoutMs: 3000,
@@ -179,35 +154,34 @@ describe("connector — confirmations (optional)", () => {
     const session = app.getSession("connector:test") as unknown as {
       elicit: { confirm: (m: string) => Promise<boolean> };
     };
-
-    const confirmP = session.elicit.confirm("Delete everything?");
-    await waitFor(() => (platform.confirmations.length > 0 ? true : undefined), {
-      description: "platform receives a confirmation prompt",
-      timeoutMs: 3000,
-    });
-    expect(platform.confirmations[0]!.message).toContain("Delete everything?");
-
-    platform.replyLatest("yes");
-    expect(await confirmP).toBe(true);
-  });
-
-  it("a 'no' reply answers the confirmation with false (not a dismissal)", async () => {
-    const platform = fakeConnectorPlatform();
-    const { app } = await buildStack(platform, {}, [{ type: "text", text: "ok" }]);
-    platform.emit({ text: "start" });
-    await waitFor(() => (app.getSession("connector:test") ? true : undefined), {
-      description: "session exists",
-      timeoutMs: 3000,
-    });
-    const session = app.getSession("connector:test") as unknown as {
-      elicit: { confirm: (m: string) => Promise<boolean> };
-    };
     const confirmP = session.elicit.confirm("Proceed?");
-    await waitFor(() => (platform.confirmations.length > 0 ? true : undefined), {
+    await waitFor(() => (probe.prompts.length > 0 ? true : undefined), {
       description: "prompt presented",
       timeoutMs: 3000,
     });
-    platform.replyLatest("no");
-    expect(await confirmP).toBe(false);
+    probe.reply({ correlationId: probe.prompts.at(-1)!.correlationId, text: replyText });
+    return confirmP;
+  }
+
+  it("presents an elicitation and a 'yes' routes back as approved", async () => {
+    const probe = connectorProbe();
+    expect(await confirmVia(probe, "yes")).toBe(true);
+    expect(probe.prompts[0]!.message).toContain("Proceed?");
+  });
+
+  it("a 'no' reply answers the confirmation with false (not a dismissal)", async () => {
+    const probe = connectorProbe();
+    expect(await confirmVia(probe, "no")).toBe(false);
+  });
+});
+
+describe("connector — teardown", () => {
+  it("gateway close runs the teardown returned by start", async () => {
+    const probe = connectorProbe();
+    const { gateway } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
+    expect(probe.stopped).toBe(false);
+    await gateway.close();
+    gateways.pop();
+    expect(probe.stopped).toBe(true);
   });
 });

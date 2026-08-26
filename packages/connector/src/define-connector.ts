@@ -1,29 +1,21 @@
 /**
- * `defineConnector` — a connector as ONE server-side `GatewayExtension`
- * composing existing primitives (ADR 58). No new subsystem, no new verb.
+ * `defineConnector` — one flat spec becomes one `GatewayExtension`.
  *
- * The base is deliberately small — **it's just a session under the
- * hood.** `install(installer)` wires:
+ * `install(installer)` wires:
  *
- *   - **inbound (required)**  external event → `installer.gateway.apps()`
- *     → `getSession()/createSession()` → `session.send({ messages })`,
- *     stamping `metadata.source` provenance. The ingress ACTION defaults
- *     to `session.send`; the shape does not preclude `session.dispatch`
- *     or `app.run` later.
- *   - **outbound (optional)**  wired ONLY when the platform implements
- *     `deliver`. On execution completion, hand the agent's raw output to
- *     the platform. No cadence, content-policy, rate-limit, or retry in
- *     the base — those are deferred riders (README Roadmap).
- *   - **confirmations (optional)**  wired ONLY when the platform
- *     implements `presentConfirmation`. Subscribe the elicitation
- *     channel, format the request, route the reply via
- *     `session.elicitation.respond(...)` (in-process; no wire hop).
- *   - **teardown**  `onClose` → unsubscribe + `platform.stop()`.
+ *   - **inbound (required)** — `spec.start(ctx)` subscribes the source;
+ *     each `ctx.inbound(msg)` becomes `session.send` (or `app.runOnce` in
+ *     ephemeral mode), opened through the gateway's `as()` door when the
+ *     event carries an authenticated identity.
+ *   - **outbound (optional)** — wired only when `spec.deliver` exists: each
+ *     completed turn on a connector-held session hands the raw output over.
+ *   - **confirmations (optional)** — wired only when `spec.confirm` exists:
+ *     elicitation requests are formatted and presented; replies route back
+ *     via `session.elicitation.respond` (in-process, no wire hop).
+ *   - **teardown** — `onClose` → unsubscribe, then `start`'s returned
+ *     teardown, `useEffect`-style.
  *
- * A one-way ingress source (webhook, MQ consumer, cron) implements
- * neither optional half: no subscriptions are opened, inbound-only.
- *
- * @see docs/proposals/v2/blueprint/58-connectors.md
+ * @see README.md
  */
 
 import type {
@@ -41,10 +33,10 @@ import { formatConfirmationMessage, parseTextConfirmation } from "./confirmation
 import type {
   ConfirmationPrompt,
   ConfirmationReply,
-  ConnectorConfig,
-  ConnectorHandle,
+  ConnectorContext,
+  ConnectorSpec,
   ConnectorStatus,
-  DefineConnectorSpec,
+  ConnectorTeardown,
   InboundMessage,
 } from "./types.js";
 
@@ -52,12 +44,10 @@ const ELICITATION_EVENT_NAME = "session:channel:elicitation";
 const LOOP_EXECUTION_EVENT_NAME = "loop:command:run-execution";
 
 /**
- * The session's elicitation harness surface. Cast at the call site —
- * `@agentick/connector` intentionally does NOT depend on
- * `@agentick/elicitation` at runtime (it constructs no harness;
- * the AppHarness owns construction, #159). Identical discipline to the
- * gateway's `session/respond_to_elicitation` wire method
- * (`gateway/src/wire/session-extension.ts`).
+ * The session's elicitation surface, cast at the call site —
+ * `@agentick/connector` deliberately holds no runtime dependency on
+ * `@agentick/elicitation` (the AppHarness owns construction, #159). Same
+ * discipline as the gateway's `session/respond_to_elicitation` wire method.
  */
 type SessionWithElicitation = SessionHarnessProtocol & {
   readonly elicitation: {
@@ -70,10 +60,9 @@ type SessionWithElicitation = SessionHarnessProtocol & {
   };
 };
 
-export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
-  const { name, platform } = spec;
-  const config: ConnectorConfig = spec.config ?? {};
-  const defaultSessionId = config.sessionId ?? `connector:${name}`;
+export function defineConnector(spec: ConnectorSpec): GatewayExtension {
+  const { name } = spec;
+  const defaultSessionId = spec.session ?? `connector:${name}`;
 
   return {
     name: `@agentick/connector:${name}`,
@@ -81,8 +70,7 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
     async install(installer: GatewayInstaller): Promise<void> {
       let currentStatus: ConnectorStatus = "connecting";
 
-      // Sessions this connector bridges. Outbound + confirmation events
-      // for other sessions on the shared gateway bus are ignored.
+      // Sessions this connector holds; other sessions' bus events are ignored.
       const managedSessions = new Set<string>();
       // correlationId → sessionId for in-flight confirmations.
       const pendingConfirmations = new Map<string, { readonly sessionId: string }>();
@@ -96,10 +84,10 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
 
       function resolveApp(): AppHarnessProtocol {
         const apps = installer.gateway.apps();
-        if (config.appId) {
-          const app = apps.find((a) => a.id === config.appId);
+        if (spec.app) {
+          const app = apps.find((a) => a.id === spec.app);
           if (!app) {
-            throw new Error(`connector "${name}": no app "${config.appId}" on the gateway`);
+            throw new Error(`connector "${name}": no app "${spec.app}" on the gateway`);
           }
           return app;
         }
@@ -109,44 +97,88 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
         return apps[0]!;
       }
 
-      async function resolveSession(sessionId: string): Promise<SessionHarnessProtocol> {
+      /**
+       * The app door for one inbound event. An authenticated identity routes
+       * through the gateway's ADR 100 `as()` seam — authorizer, adopter
+       * `onBeforeWire…` hooks, principal stamp, exactly as a transport
+       * dispatch — landing on the LOCAL harness; without one, the trusted
+       * local pole, as before.
+       */
+      function resolveDoor(msg: InboundMessage): {
+        createSession(
+          init: Parameters<AppHarnessProtocol["createSession"]>[0],
+        ): Promise<SessionHarnessProtocol>;
+        runOnce: AppHarnessProtocol["runOnce"];
+        getSession(sessionId: string): SessionHarnessProtocol | undefined;
+      } {
         const app = resolveApp();
-        return app.getSession(sessionId) ?? (await app.createSession({ sessionId }));
+        if (msg.identity === undefined) {
+          return {
+            createSession: (init) => app.createSession(init),
+            runOnce: (input) => app.runOnce(input),
+            getSession: (sessionId) => app.getSession(sessionId),
+          };
+        }
+        const scoped = installer.gateway.as(msg.identity).app(app.id);
+        if (!scoped) {
+          throw new Error(`connector "${name}": app "${app.id}" not resolvable through as()`);
+        }
+        return {
+          createSession: (init) => scoped.createSession(init),
+          runOnce: (input) => scoped.runOnce(input),
+          // The identity door has no session-read verb; create-or-resume
+          // covers the identity path.
+          getSession: () => undefined,
+        };
       }
 
-      // ── inbound (required): event → session.send ──
+      // ── inbound (required): event → session.send | app.runOnce ──
 
       async function handleInbound(msg: InboundMessage): Promise<void> {
         // Allowlist gate (a whitelist, not identity — ADR 58).
-        if (config.allowlist) {
-          if (msg.senderId === undefined || !config.allowlist.includes(msg.senderId)) {
+        if (spec.allowlist) {
+          if (msg.senderId === undefined || !spec.allowlist.includes(msg.senderId)) {
             return; // dropped
           }
         }
 
+        const metadata = msg.source !== undefined ? { source: msg.source } : undefined;
+        const message = {
+          role: "user" as const,
+          content: msg.text,
+          ...(metadata ? { metadata } : {}),
+        };
+        const door = resolveDoor(msg);
+
+        if (spec.ephemeral) {
+          const { result, sessionId } = await door.runOnce({
+            send: { ...msg.send, messages: [message] },
+            ...(msg.session?.metadata !== undefined ? { metadata: msg.session.metadata } : {}),
+          });
+          // No held session to watch on the bus — hand the result off directly.
+          if (spec.deliver && result.output.length > 0) {
+            await spec.deliver({ sessionId, response: result.response, output: result.output });
+          }
+          return;
+        }
+
         const sessionId = msg.sessionId ?? defaultSessionId;
-        const session = await resolveSession(sessionId);
+        const session =
+          door.getSession(sessionId) ?? (await door.createSession({ sessionId, ...msg.session }));
         managedSessions.add(session.id);
 
-        const metadata = msg.source !== undefined ? { source: msg.source } : undefined;
-        // TODO(#302: per-message actor stamping) — attribute to the platform
-        // actor (RuntimeContextUser) once interceptIngress lands (ADR 34/#302);
-        // today attributes to the connector's service-account principal.
-        //
-        // The ingress ACTION is `session.send` by default. The seam is
-        // intentionally open — a future config could route an event to
-        // `session.tools.dispatch(tool, input)` or `app.run(...)` instead.
-        await session.send({
-          messages: [{ role: "user", content: msg.text, ...(metadata ? { metadata } : {}) }],
-        });
+        // TODO(#302: per-message actor stamping) — interceptIngress will carry
+        // the platform actor per message; `msg.identity` covers the
+        // session-opening half today.
+        await session.send({ ...msg.send, messages: [message] });
       }
 
-      // ── outbound (optional): hand raw output to the platform ──
+      // ── outbound (optional): hand raw output to the source ──
 
       const subscriptions: Unsubscribe[] = [];
 
-      if (platform.deliver) {
-        const deliver = platform.deliver.bind(platform);
+      if (spec.deliver) {
+        const deliver = spec.deliver.bind(spec);
         const extractSendResult = (event: ProtocolEvent): SendResult | undefined => {
           const payload = event.payload as
             | { result?: { outcome?: string; result?: SendResult } }
@@ -164,10 +196,9 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
               if (!sid || !managedSessions.has(sid)) return;
               const result = extractSendResult(event);
               if (!result || result.output.length === 0) return;
-              // `SendResult.response` is assembled by the session-send
-              // wrapper and is absent on the raw loop-terminal envelope, so
-              // derive the concatenated text from `output` (the field that
-              // IS present) — accurate regardless of who assembled the result.
+              // `SendResult.response` is assembled by the session-send wrapper
+              // and is absent on the raw loop-terminal envelope — derive from
+              // `output` (the field that IS present).
               const response = result.response ?? extractText(result.output);
               void Promise.resolve(
                 deliver({ sessionId: sid, response, output: result.output }),
@@ -177,7 +208,7 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
         );
       }
 
-      // ── confirmations (optional): elicitation channel → platform ──
+      // ── confirmations (optional): elicitation channel → source ──
 
       async function handleConfirmationReply(reply: ConfirmationReply): Promise<void> {
         const entry = pendingConfirmations.get(reply.correlationId);
@@ -186,9 +217,8 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
         const session = resolveApp().getSession(entry.sessionId);
         if (!session) return;
         // A text reply ANSWERS a yes/no confirmation: "yes" → accepted(true),
-        // "no" → accepted(false) (v1 `ToolConfirmationResponse.approved`
-        // parity). `declined` / `cancelled` model an explicit dismissal,
-        // which a text reply is not.
+        // "no" → accepted(false). `declined`/`cancelled` model an explicit
+        // dismissal, which a text reply is not.
         const decision = parseTextConfirmation(reply.text);
         const elic = session as SessionWithElicitation;
         await elic.elicitation.respond({
@@ -199,16 +229,15 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
         });
       }
 
-      if (platform.presentConfirmation) {
-        const present = platform.presentConfirmation.bind(platform);
+      if (spec.confirm) {
+        const present = spec.confirm.bind(spec);
         subscriptions.push(
           installer.subscribeBus({ name: { exact: ELICITATION_EVENT_NAME } }, (event) => {
             const sid = event.scope?.sessionId;
             if (!sid || !managedSessions.has(sid)) return;
             // `request()` envelopes carry correlationId in a `metadata`
-            // sidecar the base harness stamps at publish time
-            // (base-harness.ts) — not on the typed `EventEnvelope`, so read
-            // it through a cast. Observed wire shape.
+            // sidecar the base harness stamps at publish time — not on the
+            // typed `EventEnvelope`. Observed wire shape.
             const meta = (event as { metadata?: { correlationId?: string; requestType?: string } })
               .metadata;
             if (meta?.requestType !== "request" || !meta.correlationId) return;
@@ -233,25 +262,26 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
         );
       }
 
-      // ── platform handle ──
+      // ── start the source ──
 
-      const handle: ConnectorHandle = {
-        emitInbound: (msg) => void handleInbound(msg).catch(reportError),
-        respondConfirmation: (reply) => void handleConfirmationReply(reply).catch(reportError),
-        reportStatus: (status, error) => {
+      const ctx: ConnectorContext = {
+        inbound: (msg) => void handleInbound(msg).catch(reportError),
+        confirmed: (reply) => void handleConfirmationReply(reply).catch(reportError),
+        status: (status, error) => {
           currentStatus = status;
           if (status === "error" && error) reportError(error);
         },
+        gateway: installer.gateway,
       };
 
-      await platform.start(handle);
-      currentStatus = platform.status ?? "connected";
+      const teardown: ConnectorTeardown = await spec.start(ctx);
+      if (currentStatus === "connecting") currentStatus = "connected";
       void currentStatus; // reserved for a future status-projection surface
 
       installer.onClose(async () => {
         for (const unsub of subscriptions) unsub();
         pendingConfirmations.clear();
-        await platform.stop();
+        if (typeof teardown === "function") await teardown();
       });
     },
   };

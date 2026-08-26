@@ -1,181 +1,163 @@
 /**
  * Public contract for `@agentick/connector`.
  *
- * A **connector** is an INGRESS binding: an external event source
- * (Telegram, iMessage, a webhook, an MQ consumer, a cron tick, …) that
- * holds a session and turns each inbound event into an agentic action —
- * by default `session.send`. It is a server-side `GatewayExtension`
- * composing existing primitives (ADR 58). No new subsystem, no new verb.
+ * A **connector** binds an external event source — a chat platform, a
+ * webhook, a message queue, a cron tick — to an agent. Each inbound event
+ * becomes an agentic action (a `session.send`, or a one-shot `app.runOnce`);
+ * the agent's replies flow back out through `deliver`. It is one server-side
+ * `GatewayExtension` composing existing primitives (ADR 58): no new
+ * subsystem, no new verb — it's just a session under the hood.
  *
- * **Ingress is the base; delivery is a specialization.** The
- * emit-inbound half of {@link ConnectorPlatform} is REQUIRED; the
- * deliver-outbound half is OPTIONAL. A one-way source (webhook, queue
- * consumer, bus subscriber, cron) implements only inbound and never
- * delivers a reply. The conversational reply path is layered on top for
- * platforms that want it.
- *
- * The richer v1 "delivery" behaviors (cadence buffering, content-policy
- * filtering, rate limiting, retry backoff) are deliberately NOT in the
- * base — see the README Roadmap. Delivery here is a thin
- * `deliver?(output)` hand-off; a platform that wants formatting/chunking
- * composes `@agentick/formatters` + `splitMessage` itself.
- *
- * @see docs/proposals/v2/blueprint/58-connectors.md
+ * @see README.md for the narrative; docs/proposals/v2/blueprint/58-connectors.md
  */
 
-import type { ContentBlock, MessageSource } from "@agentick/spec";
+import type {
+  ContentBlock,
+  CreateSessionInput,
+  GatewayInstallerHost,
+  IngressIdentity,
+  MessageSource,
+  SendInput,
+} from "@agentick/spec";
 
 // ============================================================================
-// Status
+// Inbound
 // ============================================================================
 
-export type ConnectorStatus = "disconnected" | "connecting" | "connected" | "error";
+/** Session-opening contribution an event may carry (used when it opens the session). */
+export type InboundSessionInit = Pick<CreateSessionInput, "metadata" | "initialProps" | "title">;
 
-// ============================================================================
-// Connector config
-// ============================================================================
-
-export interface ConnectorConfig {
-  /**
-   * Which hosted app this connector binds to. Defaults to the gateway's
-   * sole app when omitted. Resolved lazily at first inbound (apps may
-   * not exist at gateway-construction time).
-   */
-  readonly appId?: string;
-  /**
-   * Session this connector routes to. Defaults to a stable
-   * per-connector id (`connector:<name>`), so a source maps to one
-   * long-lived session. Per-event routing (one session per chat/topic)
-   * is a platform concern — a port stamps `InboundMessage.sessionId`.
-   */
-  readonly sessionId?: string;
-  /**
-   * Allowed sender identifiers. When set, an inbound event whose
-   * `senderId` is not listed is dropped. A whitelist gate, not identity
-   * (ADR 58 §identity model). Omit to allow all.
-   */
-  readonly allowlist?: readonly string[];
-}
-
-// ============================================================================
-// Inbound / outbound payloads (platform ↔ connector)
-// ============================================================================
-
-/** Platform → connector: an external event carrying text to send. */
+/** An external event, pushed into the connector via `ctx.inbound(...)`. */
 export interface InboundMessage {
   /** The event's message text. */
   readonly text: string;
   /**
-   * Provenance stamped at `metadata.source` on the resulting user
-   * message. Typed against the module-augmentable {@link MessageSource}
-   * empty-seed. Provenance, NOT identity (ADR 58).
-   */
-  readonly source?: MessageSource;
-  /**
-   * Sender identifier checked against {@link ConnectorConfig.allowlist}.
-   * Unauthenticated platform handle — a gate input, not an actor.
+   * Sender identifier, checked against {@link ConnectorSpec.allowlist} when
+   * one is set. An unauthenticated platform handle — a gate input, not an
+   * actor (ADR 58 identity model).
    */
   readonly senderId?: string;
   /**
-   * Route to a specific session. Defaults to the connector's configured
-   * session. A port that maps each chat/topic to its own session stamps
-   * this.
+   * Route to a specific session (e.g. one per chat/thread/topic). Defaults to
+   * the connector's single session ({@link ConnectorSpec.session}).
    */
   readonly sessionId?: string;
+  /**
+   * Provenance, stamped at `metadata.source` on the resulting user message.
+   * Typed against the module-augmentable {@link MessageSource} seed.
+   */
+  readonly source?: MessageSource;
+  /**
+   * An AUTHENTICATED identity to act as. Present → the session opens through
+   * the gateway's `as()` door (ADR 100): authorizer, adopter wire hooks, and
+   * the principal stamp run exactly as they would for a transport dispatch.
+   * Absent → the trusted local pole, as before. Authenticating is the
+   * connector author's job; this field carries the result, never a credential.
+   */
+  readonly identity?: IngressIdentity;
+  /** Merged into `createSession` when this event opens the session. */
+  readonly session?: InboundSessionInit;
+  /**
+   * Per-event send options merged over the default send — structured `output`,
+   * `allowedTools`, execution-scoped `tools`, `maxTicks`, …. `messages` is the
+   * connector's own and cannot be overridden here.
+   */
+  readonly send?: Omit<SendInput, "messages">;
 }
 
-/**
- * Connector → platform: the agent's output for an execution. Handed off
- * raw — no cadence, no content policy, no chunking. A platform that
- * wants those composes `@agentick/formatters` + `splitMessage`.
- */
+// ============================================================================
+// Outbound
+// ============================================================================
+
+/** The agent's output for one completed turn, handed to {@link ConnectorSpec.deliver}. */
 export interface OutboundDelivery {
   readonly sessionId: string;
-  /** Concatenated assistant text (`SendResult.response`). */
+  /** Concatenated assistant text. */
   readonly response: string;
-  /** Full assistant content blocks (`SendResult.output`). */
+  /** Full assistant content blocks. */
   readonly output: readonly ContentBlock[];
 }
 
-/** Connector → platform: present a confirmation/elicitation to the user. */
+/** A confirmation/elicitation the agent wants answered, handed to {@link ConnectorSpec.confirm}. */
 export interface ConfirmationPrompt {
   readonly sessionId: string;
-  /** Correlation id the reply must echo back via {@link ConnectorHandle.respondConfirmation}. */
+  /** Correlation id the reply must echo back via `ctx.confirmed(...)`. */
   readonly correlationId: string;
   /** Human-readable prompt. */
   readonly message: string;
   /** Elicitation mode. `"url"` prompts carry a {@link url}. */
   readonly mode: "form" | "url";
-  /** Present for `"url"` mode — the URL the user should open. */
   readonly url?: string;
 }
 
-/** Platform → connector: the user replied to a pending confirmation. */
+/** The user's reply to a pending confirmation, pushed via `ctx.confirmed(...)`. */
 export interface ConfirmationReply {
   readonly correlationId: string;
-  /** The user's raw reply text (parsed to yes/no by the connector). */
+  /** Raw reply text; parsed to yes/no by the connector. */
   readonly text: string;
 }
 
 // ============================================================================
-// Platform adapter + handle
+// The spec
 // ============================================================================
 
-/**
- * The handle the connector hands a platform at `start()`. The platform
- * pushes events IN through it. `emitInbound` is the required ingress
- * path; `respondConfirmation` is used only by platforms that opt into
- * confirmations.
- */
-export interface ConnectorHandle {
-  /** Platform → connector: an external event arrived. REQUIRED path. */
-  emitInbound(message: InboundMessage): void;
-  /** Platform → connector: the user answered a pending confirmation. */
-  respondConfirmation(reply: ConfirmationReply): void;
-  /** Platform reports its own connection status to the connector. */
-  reportStatus(status: ConnectorStatus, error?: Error): void;
+export type ConnectorStatus = "disconnected" | "connecting" | "connected" | "error";
+
+/** What `start` receives: the verbs a source pushes events through. */
+export interface ConnectorContext {
+  /** An external event arrived. The one required path. */
+  inbound(message: InboundMessage): void;
+  /** The user answered a pending confirmation. */
+  confirmed(reply: ConfirmationReply): void;
+  /** Report source health (surfaced in diagnostics). */
+  status(status: ConnectorStatus, error?: Error): void;
+  /** Escape hatch: the gateway's extension surface (`apps()`, `as()`). */
+  readonly gateway: GatewayInstallerHost;
 }
 
-/**
- * A thin platform adapter. It knows how to talk to its wire; it knows
- * nothing about sessions or elicitation. `ConnectorBridge` (v1) is gone
- * (ADR 58 fork 4).
- *
- * **`start` / `stop` are required; `deliver` / `presentConfirmation` are
- * OPTIONAL.** A one-way ingress source implements only `start` / `stop`
- * (using the handle's `emitInbound`). Implementing `deliver` opts into
- * outbound; implementing `presentConfirmation` opts into confirmations.
- */
-export interface ConnectorPlatform {
-  /** Platform name, for diagnostics. */
-  readonly name?: string;
-  /** Optional self-reported health. */
-  readonly status?: ConnectorStatus;
-  /** Begin operation. The connector supplies the {@link ConnectorHandle}. */
-  start(handle: ConnectorHandle): void | Promise<void>;
-  /** Tear down. Called from the gateway extension's `onClose`. */
-  stop(): void | Promise<void>;
+/** `start` may return a teardown, `useEffect`-style. */
+export type ConnectorTeardown = void | (() => void | Promise<void>);
+
+export interface ConnectorSpec {
+  /** Connector name — diagnostics + extension slot routing. */
+  readonly name: string;
   /**
-   * OPTIONAL. Connector → platform: hand off the agent's output for a
-   * completed execution. Omit for a one-way ingress-only connector.
+   * Which hosted app this connector drives. Defaults to the gateway's sole
+   * app (resolved lazily — apps may register after the connector installs).
+   */
+  readonly app?: string;
+  /**
+   * Default session id when events don't route themselves
+   * (`InboundMessage.sessionId`). Defaults to `connector:<name>`.
+   */
+  readonly session?: string;
+  /**
+   * Ephemeral mode: each inbound is `app.runOnce` — create, send once,
+   * dispose — for one-way processors (classifiers, webhook handlers) that
+   * hold no conversation. The run's result goes straight to {@link deliver}
+   * when one is defined.
+   */
+  readonly ephemeral?: boolean;
+  /**
+   * Allowed `senderId`s. When set, unlisted (or absent) senders are dropped.
+   * A whitelist gate, not identity.
+   */
+  readonly allowlist?: readonly string[];
+  /**
+   * Begin operation: subscribe your source and push events through
+   * `ctx.inbound`. Return a teardown to run at gateway close.
+   */
+  start(ctx: ConnectorContext): ConnectorTeardown | Promise<ConnectorTeardown>;
+  /**
+   * OPTIONAL — implement to receive the agent's output for each completed
+   * turn. Omit for a one-way ingress connector. Raw hand-off: cadence,
+   * chunking, and formatting are yours to compose (`@agentick/formatters`).
    */
   deliver?(delivery: OutboundDelivery): void | Promise<void>;
   /**
-   * OPTIONAL. Connector → platform: present a confirmation/elicitation.
-   * Implementing this opts into confirmation routing; omit to skip it.
+   * OPTIONAL — implement to present confirmations/elicitations to the user;
+   * route their answer back via `ctx.confirmed`. Omit to skip confirmation
+   * routing entirely.
    */
-  presentConfirmation?(prompt: ConfirmationPrompt): void | Promise<void>;
-}
-
-// ============================================================================
-// defineConnector spec
-// ============================================================================
-
-export interface DefineConnectorSpec {
-  /** Connector name (diagnostics + extension slot routing). */
-  readonly name: string;
-  /** The platform adapter this connector drives. */
-  readonly platform: ConnectorPlatform;
-  /** Behavior config — target app/session + allowlist gate. */
-  readonly config?: ConnectorConfig;
+  confirm?(prompt: ConfirmationPrompt): void | Promise<void>;
 }
