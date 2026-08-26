@@ -187,6 +187,21 @@ export interface ConnectorContext extends Observability, Ops {
 /** `start` may return a teardown, `useEffect`-style. */
 export type ConnectorTeardown = void | (() => void | Promise<void>);
 
+/**
+ * Spec-level send defaults — the channel's standing policy, resolved per
+ * inbound and layered UNDER the event's own `InboundMessage.send`. Sync
+ * resolver only: deciding needs no I/O by design (do lookups in `start`
+ * before calling `inbound`).
+ */
+export type ConnectorSendDefaults = Omit<SendInput, "messages">;
+
+/**
+ * Spec-level session defaults: the session-opening contribution plus an
+ * optional default `id`. Layered UNDER the event's `sessionId` / `session`
+ * (`metadata` merges one level; the rest is event-wins per key).
+ */
+export type ConnectorSessionDefaults = InboundSessionInit & { readonly id?: string };
+
 export interface ConnectorSpec {
   /** Connector name — registry key + diagnostics. Unique per gateway. */
   readonly name: string;
@@ -196,10 +211,23 @@ export interface ConnectorSpec {
    */
   readonly app?: string;
   /**
-   * Default session id when events don't route themselves
-   * (`InboundMessage.sessionId`). Defaults to `connector:<name>`.
+   * The channel's session policy — statically, or resolved per inbound (the
+   * resolver sees the event, including its authenticated `identity`, so
+   * per-principal policy is expressible). A plain string is shorthand for
+   * `{ id }` — the default session id when events don't route themselves.
+   * Falls back to one session per connector, `connector:<name>`.
    */
-  readonly session?: string;
+  readonly session?:
+    | string
+    | ConnectorSessionDefaults
+    | ((msg: InboundMessage) => ConnectorSessionDefaults);
+  /**
+   * The channel's send policy — statically, or resolved per inbound. Merged
+   * per key with the event's `send` winning, EXCEPT `tools`, which
+   * concatenate (channel tools first, event extras after). `messages` stays
+   * the connector's own and is not expressible here.
+   */
+  readonly send?: ConnectorSendDefaults | ((msg: InboundMessage) => ConnectorSendDefaults);
   /**
    * Ephemeral mode: each inbound is `app.runOnce` — create, send once,
    * dispose — for one-way processors (classifiers, webhook handlers) that

@@ -209,3 +209,29 @@ describe("connector — the gateway policy seam (ADR 104 §5)", () => {
     off();
   });
 });
+
+describe("connector — spec-level session/send policy (layered under the event)", () => {
+  it("the channel's session policy lands on the record; the event's specifics merge over it", async () => {
+    const probe = connectorProbe();
+    const { app } = await buildStack(
+      probe,
+      { session: { title: "Channel chat", metadata: { channel: "probe" } } },
+      [{ type: "text", text: "reply" }],
+    );
+
+    probe.emit({
+      messages: "hello",
+      sessionId: "s-policy",
+      session: { metadata: { threadId: 7 } },
+    });
+
+    await waitFor(() => (probe.delivered.length > 0 ? true : undefined), {
+      description: "turn delivered",
+      timeoutMs: 3000,
+    });
+
+    const record = await app.getSessionRecord("s-policy");
+    expect(record?.title).toBe("Channel chat");
+    expect(record?.metadata).toMatchObject({ channel: "probe", threadId: 7 });
+  });
+});

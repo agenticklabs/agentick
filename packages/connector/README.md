@@ -85,6 +85,36 @@ an image block with a `reference` source (a claim-check your tools resolve
 later), a document as a file block. The connector adds only `source`
 provenance; it never buffers media bytes.
 
+## Channel policy — spec-level `session` and `send`
+
+The spec is where the channel's STANDING policy lives; the event carries only
+its own specifics. Both `session` and `send` take a value or a **sync**
+resolver of the inbound (which carries the authenticated `identity`, so
+per-principal policy is one closure away):
+
+```ts
+defineConnector({
+  name: "sms",
+  session: { title: "Text conversation", metadata: { channel: "sms" } },
+  send: { onBusy: "queue" }, // texts queue, they don't steer
+  start({ inbound }) {
+    onText((t) =>
+      inbound({
+        messages: t.body,
+        sessionId: `sms:${t.conversationId}`,
+        session: { metadata: { conversationId: t.conversationId } }, // this event's specifics
+      }),
+    );
+  },
+});
+```
+
+Layering: the event wins per key, `metadata` merges one level, and `send.tools`
+concatenate (channel tools first) — so `send: (msg) => ({ tools: toolsFor(msg.identity) })`
+is how a channel hands its models channel verbs, per principal. Resolvers are
+synchronous by design: deciding needs no I/O — do lookups in `start` before
+calling `inbound`.
+
 ## Acting as your users
 
 By default a connector's sessions belong to the trusted host. When events come
@@ -248,7 +278,8 @@ expect(probe.delivered[0]!.response).toBe("reply");
 | `stream(t)`              | _Optional._ Receive each connector-initiated turn live (`events`, `text()`, `result`, `origin` — the inbound that started it). |
 | `confirm(p)`             | _Optional._ Present confirmations; answer via `ctx.confirmed`.                                                                 |
 | `app`                    | Target app id. Default: the gateway's sole app, resolved lazily.                                                               |
-| `session`                | Default session id. Default: `connector:<name>`.                                                                               |
+| `session`                | Channel session policy — id string, defaults object, or sync resolver of the inbound.                                          |
+| `send`                   | Channel send policy (`onBusy`, `tools`, …) — object or sync resolver of the inbound.                                           |
 | `ephemeral`              | `runOnce` per event instead of a held session.                                                                                 |
 
 `ctx` also carries `writable(defaults?)` (the pipe-friendly twin of `inbound`),

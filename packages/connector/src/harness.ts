@@ -32,6 +32,8 @@ import type {
   ConfirmationReply,
   ConnectorContext,
   ConnectorHandle,
+  ConnectorSendDefaults,
+  ConnectorSessionDefaults,
   ConnectorSpec,
   ConnectorStatus,
   ConnectorsHarnessProtocol,
@@ -39,6 +41,7 @@ import type {
   EventBus,
   GatewayInstallerHost,
   InboundMessage,
+  InboundSessionInit,
   MessageInbox,
   Operation,
   OperationJournal,
@@ -115,9 +118,56 @@ function normalizeMessages(msg: InboundMessage): readonly SendMessageInput[] {
   );
 }
 
+/** The resolved routing decision for one inbound — spec policy layered under the event. */
+export interface InboundPlan {
+  readonly sessionId: string;
+  readonly sessionInit: InboundSessionInit;
+  readonly send: ConnectorSendDefaults;
+}
+
+/**
+ * Layer the spec's standing policy under the event's specifics (ADR 104):
+ * `sessionId` — event, then spec's default id, then one-session-per-connector;
+ * `sessionInit` — event wins per key, `metadata` merges one level;
+ * `send` — event wins per key, EXCEPT `tools`, which concatenate (channel
+ * tools first). Resolvers are synchronous by design — deciding needs no I/O.
+ */
+export function planInbound(spec: ConnectorSpec, msg: InboundMessage): InboundPlan {
+  const rawSession =
+    typeof spec.session === "function"
+      ? spec.session(msg)
+      : typeof spec.session === "string"
+        ? { id: spec.session }
+        : (spec.session ?? {});
+  const { id, ...specInit } = rawSession as ConnectorSessionDefaults;
+  const sendDefaults = (typeof spec.send === "function" ? spec.send(msg) : spec.send) ?? {};
+
+  const metadata =
+    specInit.metadata !== undefined || msg.session?.metadata !== undefined
+      ? { ...specInit.metadata, ...msg.session?.metadata }
+      : undefined;
+  const tools =
+    sendDefaults.tools !== undefined || msg.send?.tools !== undefined
+      ? [...(sendDefaults.tools ?? []), ...(msg.send?.tools ?? [])]
+      : undefined;
+
+  return {
+    sessionId: msg.sessionId ?? id ?? `connector:${spec.name}`,
+    sessionInit: {
+      ...specInit,
+      ...msg.session,
+      ...(metadata !== undefined ? { metadata } : {}),
+    },
+    send: {
+      ...sendDefaults,
+      ...msg.send,
+      ...(tools !== undefined ? { tools } : {}),
+    },
+  };
+}
+
 interface ConnectorEntry {
   readonly spec: ConnectorSpec;
-  readonly defaultSessionId: string;
   status: ConnectorStatus;
   error?: Error;
   started: boolean;
@@ -279,7 +329,6 @@ export class ConnectorsHarness
     const self = this;
     const entry: ConnectorEntry = {
       spec,
-      defaultSessionId: spec.session ?? `connector:${spec.name}`,
       status: "disconnected",
       started: false,
       subscriptions: [],
@@ -520,12 +569,13 @@ export class ConnectorsHarness
   private async routeInbound(entry: ConnectorEntry, msg: InboundMessage): Promise<void> {
     const { spec } = entry;
     const messages = normalizeMessages(msg);
+    const plan = planInbound(spec, msg);
     const door = this.resolveDoor(spec, msg);
 
     if (spec.ephemeral) {
       const { result, sessionId } = await door.runOnce({
-        send: { ...msg.send, messages },
-        ...(msg.session?.metadata !== undefined ? { metadata: msg.session.metadata } : {}),
+        send: { ...plan.send, messages },
+        ...(plan.sessionInit.metadata !== undefined ? { metadata: plan.sessionInit.metadata } : {}),
       });
       // No held session to watch on the bus — hand the result off inside
       // this op (the delivery is part of handling this inbound). A
@@ -542,9 +592,9 @@ export class ConnectorsHarness
       return;
     }
 
-    const sessionId = msg.sessionId ?? entry.defaultSessionId;
+    const { sessionId } = plan;
     const session =
-      door.getSession(sessionId) ?? (await door.createSession({ sessionId, ...msg.session }));
+      door.getSession(sessionId) ?? (await door.createSession({ sessionId, ...plan.sessionInit }));
     entry.managedSessions.add(session.id);
 
     // TODO(#302: per-message actor stamping) — interceptIngress will carry
@@ -552,7 +602,7 @@ export class ConnectorsHarness
     // session-opening half today.
     const handle = await session.send({
       ...(spec.stream ? { stream: true } : {}),
-      ...msg.send,
+      ...plan.send,
       messages,
     });
 
