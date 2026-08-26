@@ -4,15 +4,15 @@
 
 A connector binds the outside world — a chat platform, a webhook, a message
 queue, a cron tick — to an agent running on your gateway. Inbound events become
-agent turns; the agent's replies flow back out. One flat spec, one
-`GatewayExtension`, no new subsystem: under the hood it's just a session.
+agent turns; the agent's replies flow back out. One flat spec, one first-class
+slot, no new subsystem: under the hood it's just a session.
 
 ```ts
 import { createGateway } from "@agentick/gateway";
 import { defineConnector } from "@agentick/connector";
 
 const gateway = await createGateway({
-  extensions: [
+  connectors: [
     defineConnector({
       name: "telegram",
       start({ inbound }) {
@@ -23,6 +23,8 @@ const gateway = await createGateway({
     }),
   ],
 });
+
+gateway.connectors.get("telegram")?.status; // "connected"
 ```
 
 That's a complete two-way Telegram bridge. Each chat gets its own durable
@@ -52,7 +54,7 @@ export function telegram(config: { token: string; allowFrom?: string[] }) {
 }
 
 // wiring
-extensions: [telegram({ token: process.env.TELEGRAM_TOKEN!, allowFrom: ["8842"] })],
+connectors: [telegram({ token: process.env.TELEGRAM_TOKEN! })],
 ```
 
 ## The mental model
@@ -71,7 +73,10 @@ Three ideas, and you know the whole package:
    same conversation. Route per chat/thread/user by stamping
    `inbound({ sessionId })`; omit it for one long-lived session per connector.
 
-`start` may return a teardown (`useEffect`-style); it runs at gateway close.
+Connectors are a gateway **built-in**: `gateway.connectors` is the harness that
+runs them, sources `start` when the gateway `listen()`s, and they stop FIRST at
+`close()` — ingress opens and shuts with the deployment. `start` may return a
+teardown (`useEffect`-style); it runs at stop.
 
 `messages` is the same currency `session.send` takes — full `SendMessageInput`s
 (role, content blocks, per-message metadata), with a plain string as shorthand
@@ -170,6 +175,32 @@ Source in, agent out — both directions are standard web streams. (Two chunks
 racing into one session don't collide: the second **steers** into the in-flight
 turn, exactly like a user sending two quick messages.)
 
+## On the op spine
+
+Every hop a connector takes is an **operation** — `connectors:inbound`,
+`connectors:deliver`, `connectors:start` — journaled, spanned, and visible on
+the gateway bus like any other command. The trace stitches source → turn →
+delivery, and `ctx` carries the same facets a tool handler gets: `log`,
+`trace`, `metrics`, and `run` (mint your own journaled step around a bindings
+write or a claim-check fetch).
+
+Because the harness sits on the gateway's live interceptor cascade, **policy is
+middleware, not spec surface** — allowlists, rate limits, and dedupe are one
+`guard()` away, typed per verb:
+
+```ts
+gateway.guard({
+  connectorsInbound: ({ connector, message }) =>
+    allowlist.permits(connector, message.identity)
+      ? undefined // proceed
+      : { kind: "veto", reason: "not allowed" },
+});
+```
+
+A vetoed inbound never reaches the app, and the veto is journaled like every
+other outcome. (`onBeforeConnectorsInbound` / `onAfterConnectorsDeliver` hooks
+exist too — the full ADR 80 surface.)
+
 ## Replies that need a human
 
 Implement `confirm` and the agent's confirmations (tool approvals,
@@ -200,7 +231,7 @@ import { connectorProbe } from "@agentick/connector/testing";
 
 const probe = connectorProbe();
 const gateway = await createGateway({
-  extensions: [defineConnector({ name: "test", ...probe.spec })],
+  connectors: [defineConnector({ name: "test", ...probe.spec })],
 });
 // …createApp, then:
 probe.emit({ messages: "hello" });
@@ -221,7 +252,8 @@ expect(probe.delivered[0]!.response).toBe("reply");
 | `ephemeral`              | `runOnce` per event instead of a held session.                                         |
 
 `ctx` also carries `writable(defaults?)` (the pipe-friendly twin of `inbound`),
-`confirmed(reply)`, `status(s)`, and `gateway` (the escape hatch: `apps()`, `as()`).
+`confirmed(reply)`, `status(s)`, `gateway` (the escape hatch: `apps()`, `as()`),
+and the operation facets — `log` / `trace` / `metrics` / `run`.
 
 | `ctx.inbound({ … })` |                                                                    |
 | -------------------- | ------------------------------------------------------------------ |
@@ -233,14 +265,12 @@ expect(probe.delivered[0]!.response).toBe("reply");
 
 ## Reaching connectors from the host
 
-Every connector self-registers — declaring one IS registering it. The typed
-accessor gives host code status and **proactive outbound** (a notification
-with no agent turn behind it):
+`gateway.connectors` is the harness: `get` / `list` / `status` for diagnostics,
+`register` / `unregister` for dynamic membership, and **proactive outbound** (a
+notification with no agent turn behind it) through a handle's `deliver`:
 
 ```ts
-import { connectors } from "@agentick/connector";
-
-connectors(gateway).get("telegram")?.deliver({
+gateway.connectors.get("telegram")?.deliver({
   sessionId: "tg:8842",
   response: "Heads up — your 9am visit was rescheduled.",
 });
@@ -253,7 +283,8 @@ connectors(gateway).get("telegram")?.deliver({
 - **Identity vs provenance.** `identity` is _who acts_ (verified, opens the
   session as that principal); `source` is _where it came from_ (stamped
   metadata). Sender gating (allowlists) is deliberately NOT API surface — it's
-  one `if` in your `start()`, where your source's address semantics live.
+  a `gateway.guard()` on `connectors:inbound`, where the rest of your policy
+  already lives.
 - **Per-message actor stamping** (a second user speaking mid-session) waits on
   interceptIngress (#302); `identity` covers the session-opening half today.
 - **No model-facing send tool, deliberately.** A `send_via_connector` tool
@@ -265,4 +296,4 @@ connectors(gateway).get("telegram")?.deliver({
   registry's `deliver` is host-facing on purpose: notifications, not
   conversational acts.
 
-_ADR 58 (connectors) · ADR 100 (the identity door)_
+_ADR 58 (connectors) · ADR 100 (the identity door) · ADR 104 (the gateway built-in)_

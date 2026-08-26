@@ -1,7 +1,7 @@
 {
   "name": "@agentick/connector",
   "version": "1.0.0-next.161",
-  "description": "Connector base — bind a chat surface (Telegram, iMessage, …) to an agent session as one server-side GatewayExtension. Inbound platform messages → session.send; agent output → platform-native delivery; tool confirmations → the elicitation channel.",
+  "description": "Connectors — bind an external event source (Telegram, iMessage, webhooks, queues) to an agent through the gateway's built-in connectors harness. Inbound events → session.send / app.runOnce on the op spine; agent output → platform-native delivery; tool confirmations → the elicitation channel.",
   "keywords": [
     "agent",
     "agentick",
@@ -79,19 +79,12 @@
   },
   "dependencies": {
     "@agentick/formatters": "workspace:*",
-    "@agentick/spec": "workspace:*",
-    "@agentick/utils": "workspace:*"
-  },
-  "devDependencies": {
-    "@agentick/compiler-react": "workspace:*",
-    "@agentick/elicitation": "workspace:*",
-    "@agentick/gateway": "workspace:*",
-    "@agentick/model": "workspace:*",
-    "@agentick/model-executor": "workspace:*",
     "@agentick/runtime": "workspace:*",
-    "@types/react": "^19.2.5",
-    "react": "^19.0.0"
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0"
   },
+  "devDependencies": {},
   "engines": {
     "node": ">=20.19"
   }
