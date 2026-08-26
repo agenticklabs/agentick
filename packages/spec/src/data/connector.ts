@@ -131,6 +131,14 @@ export interface ConfirmationReply {
 export interface StreamingTurn {
   readonly sessionId: string;
   readonly executionId: string;
+  /**
+   * The inbound event that started this turn — the streaming twin of
+   * ephemeral mode's per-event `deliver` reply-to. A connector whose outbound
+   * destination is per-event (a thread, a call, a webhook reply-to) routes
+   * the stream from here (`origin.source`, `origin.session`, …) instead of
+   * re-deriving it from `sessionId`.
+   */
+  readonly origin: InboundMessage;
   /** Every {@link StreamEvent} of the turn. */
   readonly events: ReadableStream<StreamEvent>;
   /**

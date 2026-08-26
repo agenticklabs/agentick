@@ -87,7 +87,11 @@ describe("connector — streaming", () => {
       },
     });
 
-    ctx.inbound({ messages: "what is the answer" });
+    ctx.inbound({
+      messages: "what is the answer",
+      sessionId: "turn-1",
+      source: { test: true } as never,
+    });
 
     await waitFor(() => (texts.length > 0 ? true : undefined), {
       description: "streamed text collected",
@@ -96,6 +100,10 @@ describe("connector — streaming", () => {
 
     expect(texts[0]).toBe("the answer is 42");
     expect(turns[0]!.executionId).toBeTruthy();
+    // The turn carries its originating inbound — per-event stream routing
+    // (a thread, a call) reads from here instead of re-deriving by sessionId.
+    expect(turns[0]!.origin.sessionId).toBe("turn-1");
+    expect(turns[0]!.origin.source).toEqual({ test: true });
     await expect(turns[0]!.result).resolves.toMatchObject({ response: "the answer is 42" });
   });
 

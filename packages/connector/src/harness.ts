@@ -561,6 +561,7 @@ export class ConnectorsHarness
       const turn: StreamingTurn = {
         sessionId: session.id,
         executionId: handle.executionId,
+        origin: msg,
         events,
         text: () => textStream(events),
         result: handle.result,

@@ -240,16 +240,16 @@ expect(probe.delivered[0]!.response).toBe("reply");
 
 ## API
 
-| `defineConnector({ … })` |                                                                                        |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| `name`                   | Connector name — diagnostics + extension routing.                                      |
-| `start(ctx)`             | **Required.** Subscribe your source; push via `ctx.inbound`. May return a teardown.    |
-| `deliver(d)`             | _Optional._ Receive each completed turn's raw output.                                  |
-| `stream(t)`              | _Optional._ Receive each connector-initiated turn live (`events`, `text()`, `result`). |
-| `confirm(p)`             | _Optional._ Present confirmations; answer via `ctx.confirmed`.                         |
-| `app`                    | Target app id. Default: the gateway's sole app, resolved lazily.                       |
-| `session`                | Default session id. Default: `connector:<name>`.                                       |
-| `ephemeral`              | `runOnce` per event instead of a held session.                                         |
+| `defineConnector({ … })` |                                                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                   | Connector name — diagnostics + extension routing.                                                                              |
+| `start(ctx)`             | **Required.** Subscribe your source; push via `ctx.inbound`. May return a teardown.                                            |
+| `deliver(d)`             | _Optional._ Receive each completed turn's raw output.                                                                          |
+| `stream(t)`              | _Optional._ Receive each connector-initiated turn live (`events`, `text()`, `result`, `origin` — the inbound that started it). |
+| `confirm(p)`             | _Optional._ Present confirmations; answer via `ctx.confirmed`.                                                                 |
+| `app`                    | Target app id. Default: the gateway's sole app, resolved lazily.                                                               |
+| `session`                | Default session id. Default: `connector:<name>`.                                                                               |
+| `ephemeral`              | `runOnce` per event instead of a held session.                                                                                 |
 
 `ctx` also carries `writable(defaults?)` (the pipe-friendly twin of `inbound`),
 `confirmed(reply)`, `status(s)`, `gateway` (the escape hatch: `apps()`, `as()`),
