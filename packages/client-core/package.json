@@ -1,6 +1,6 @@
 {
   "name": "@agentick/client-core",
-  "version": "1.0.0-next.159",
+  "version": "1.0.0-next.160",
   "description": "Canonical TypeScript implementation of the agentick `ClientProtocol`. Runs in Node, browser, Bun, Deno, and edge runtimes. Wraps any `ClientTransport` (in-process, WebSocket, Streamable HTTP, Unix socket) and exposes `GatewayHandle` / `AppHandle` / `SessionHandle` views over the wire.",
   "keywords": [
     "agent",
