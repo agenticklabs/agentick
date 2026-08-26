@@ -29,6 +29,33 @@ That's a complete two-way Telegram bridge. Each chat gets its own durable
 session (history, tools, memory — everything a session has); each reply is the
 agent's finished turn.
 
+## Configuration is just a function
+
+A configurable connector is a factory returning `defineConnector` — no config
+schema, no registration API, just arguments:
+
+```ts
+// telegram.ts
+export function telegram(config: { token: string; allowFrom?: string[] }) {
+  const bot = new Bot(config.token);
+  return defineConnector({
+    name: "telegram",
+    allowlist: config.allowFrom,
+    start({ inbound }) {
+      bot.on("message", (m) =>
+        inbound({ text: m.text, sessionId: `tg:${m.chat.id}`, senderId: String(m.from.id) }),
+      );
+      void bot.start();
+      return () => bot.stop();
+    },
+    deliver: ({ sessionId, response }) => bot.api.sendMessage(chatOf(sessionId), response),
+  });
+}
+
+// wiring
+extensions: [telegram({ token: process.env.TELEGRAM_TOKEN!, allowFrom: ["8842"] })],
+```
+
 ## The mental model
 
 Three ideas, and you know the whole package:
@@ -201,6 +228,21 @@ expect(probe.delivered[0]!.response).toBe("reply");
 | `source`             | Provenance, stamped at `metadata.source` on the user message.      |
 | `senderId`           | Checked against `allowlist` when one is set.                       |
 
+## Reaching connectors from the host
+
+Every connector self-registers — declaring one IS registering it. The typed
+accessor gives host code status and **proactive outbound** (a notification
+with no agent turn behind it):
+
+```ts
+import { connectors } from "@agentick/connector";
+
+connectors(gateway).get("telegram")?.deliver({
+  sessionId: "tg:8842",
+  response: "Heads up — your 9am visit was rescheduled.",
+});
+```
+
 ## Design notes
 
 - **No delivery riders in the base.** Cadence buffering, content policy, rate
@@ -210,5 +252,13 @@ expect(probe.delivered[0]!.response).toBe("reply");
   metadata). `senderId`/`allowlist` is a gate, neither of the above.
 - **Per-message actor stamping** (a second user speaking mid-session) waits on
   interceptIngress (#302); `identity` covers the session-opening half today.
+- **No model-facing send tool, deliberately.** A `send_via_connector` tool
+  would let a model in one session write into another session's external
+  conversation while that session's transcript records nothing — the channel
+  and its durable record fork. The model-tier primitive for reaching a
+  connector-bound conversation is _messaging that session_; its reply then
+  flows out through the connector's own outbound, transcript intact. The
+  registry's `deliver` is host-facing on purpose: notifications, not
+  conversational acts.
 
 _ADR 58 (connectors) · ADR 100 (the identity door)_

@@ -43,6 +43,15 @@ export type {
 // exported for authors composing their own event pipelines.
 export { textStream } from "./text-stream.js";
 
+// The host-facing registry: every defineConnector self-registers;
+// `connectors(gateway).get(name)` reaches it (status + proactive deliver).
+export {
+  connectors,
+  CONNECTORS_NAMESPACE,
+  type ConnectorHandle,
+  type ConnectorsRegistry,
+} from "./registry.js";
+
 // Thin confirmation helpers — pure functions, exported for connector authors.
 export {
   parseTextConfirmation,

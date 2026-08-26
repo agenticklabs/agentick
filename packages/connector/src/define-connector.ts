@@ -30,6 +30,7 @@ import type {
 import { extractText } from "@agentick/spec";
 
 import { formatConfirmationMessage, parseTextConfirmation } from "./confirmations.js";
+import { CONNECTORS_NAMESPACE, type ConnectorsBridge, type ConnectorHandle } from "./registry.js";
 import type {
   ConfirmationPrompt,
   ConfirmationReply,
@@ -303,9 +304,34 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
 
       const teardown: ConnectorTeardown = await spec.start(ctx);
       if (currentStatus === "connecting") currentStatus = "connected";
-      void currentStatus; // reserved for a future status-projection surface
+
+      // Self-register into the `connectors` bridge (first connector creates
+      // it) — the host-facing registry `connectors(gateway)` reads.
+      let bridge = installer.getNamespace<ConnectorsBridge>(CONNECTORS_NAMESPACE);
+      if (!bridge) {
+        bridge = new Map();
+        installer.registerNamespace(CONNECTORS_NAMESPACE, bridge);
+      }
+      const handle: ConnectorHandle = {
+        name,
+        get status() {
+          return currentStatus;
+        },
+        deliver: async ({ sessionId, response, output }) => {
+          if (!spec.deliver) {
+            throw new Error(`connector "${name}" is ingress-only (no deliver)`);
+          }
+          await spec.deliver({
+            sessionId,
+            response,
+            output: output ?? [{ type: "text", text: response }],
+          });
+        },
+      };
+      bridge.set(name, handle);
 
       installer.onClose(async () => {
+        bridge.delete(name);
         for (const unsub of subscriptions) unsub();
         pendingConfirmations.clear();
         if (typeof teardown === "function") await teardown();

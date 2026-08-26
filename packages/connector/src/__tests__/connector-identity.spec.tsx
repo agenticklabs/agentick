@@ -123,3 +123,45 @@ describe("connector — identity + session init + ephemeral", () => {
     expect(app.getSession(probe.delivered[0]!.sessionId)).toBeUndefined();
   });
 });
+
+describe("connector — registry", () => {
+  it("self-registers; host deliver flows; ingress-only throws", async () => {
+    const delivered: string[] = [];
+    let ingressOnlyHandleErr: Error | undefined;
+    const gateway = await createGateway({
+      extensions: [
+        defineConnector({
+          name: "notify",
+          start: () => undefined,
+          deliver: ({ response }) => {
+            delivered.push(response);
+          },
+        }),
+        defineConnector({ name: "intake", start: () => undefined }),
+      ],
+    });
+    gateways.push(gateway);
+    await gateway.listen();
+
+    const { connectors } = await import("../registry.js");
+    const registry = connectors(gateway);
+    expect(
+      registry
+        .list()
+        .map((c) => c.name)
+        .sort(),
+    ).toEqual(["intake", "notify"]);
+    expect(registry.get("notify")?.status).toBe("connected");
+
+    await registry.get("notify")!.deliver({ sessionId: "s1", response: "heads up" });
+    expect(delivered).toEqual(["heads up"]);
+
+    await registry
+      .get("intake")!
+      .deliver({ sessionId: "s1", response: "x" })
+      .catch((e) => {
+        ingressOnlyHandleErr = e;
+      });
+    expect(ingressOnlyHandleErr?.message).toContain("ingress-only");
+  });
+});
