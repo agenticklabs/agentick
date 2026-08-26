@@ -158,9 +158,16 @@ export function defineConnector(spec: ConnectorSpec): GatewayExtension {
             send: { ...msg.send, messages: [message] },
             ...(msg.session?.metadata !== undefined ? { metadata: msg.session.metadata } : {}),
           });
-          // No held session to watch on the bus — hand the result off directly.
-          if (spec.deliver && result.output.length > 0) {
-            await spec.deliver({ sessionId, response: result.response, output: result.output });
+          // No held session to watch on the bus — hand the result off
+          // directly. A per-event deliver (the event's reply-to) wins.
+          const sink = msg.deliver ?? spec.deliver?.bind(spec);
+          if (sink && (result.output.length > 0 || result.data !== undefined)) {
+            await sink({
+              sessionId,
+              response: result.response,
+              output: result.output,
+              ...(result.data !== undefined ? { data: result.data } : {}),
+            });
           }
           return;
         }

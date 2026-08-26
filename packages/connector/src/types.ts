@@ -65,6 +65,12 @@ export interface InboundMessage {
    * connector's own and cannot be overridden here.
    */
   readonly send?: Omit<SendInput, "messages">;
+  /**
+   * Per-event delivery override — route THIS event's result back to its
+   * origin (a webhook's reply-to, a classifier's persist). Ephemeral mode
+   * only; takes precedence over {@link ConnectorSpec.deliver}.
+   */
+  readonly deliver?: (delivery: OutboundDelivery) => void | Promise<void>;
 }
 
 // ============================================================================
@@ -78,6 +84,12 @@ export interface OutboundDelivery {
   readonly response: string;
   /** Full assistant content blocks. */
   readonly output: readonly ContentBlock[];
+  /**
+   * The validated structured output, when the send declared one
+   * (`InboundMessage.send.output`). Ephemeral deliveries only — the bus-side
+   * path never sees it.
+   */
+  readonly data?: unknown;
 }
 
 /** A confirmation/elicitation the agent wants answered, handed to {@link ConnectorSpec.confirm}. */
