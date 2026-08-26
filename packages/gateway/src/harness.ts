@@ -114,6 +114,7 @@ import {
 } from "@agentick/spec";
 import { remoteTrace } from "./remote-trace.js";
 import { createWireExtensionRegistry } from "./wire-registry.js";
+import { ConnectorsHarness } from "@agentick/connector";
 import { unconfiguredAuthorizer } from "./authorizers.js";
 import { createCommandsListHandler, createDynamicCommandResolver } from "./dynamic-commands.js";
 import {
@@ -295,6 +296,16 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions<unknown, "gate
   readonly tools?: ReadonlyArray<ToolDeclaration>;
 
   /**
+   * Connectors (ADR 104) — external event sources bound to hosted apps,
+   * run by the gateway's built-in `connectors` harness. The ADR 42 slot
+   * trichotomy: a `ConnectorSpec[]` shorthand (the advertised form), a
+   * `{ connectors: [...] }` config, or a pre-built `Connectors` instance.
+   * Specs register at construction and START at `listen()` — ingress opens
+   * when the gateway opens — and stop FIRST at `close()`.
+   */
+  readonly connectors?: import("@agentick/spec").ConnectorsSlot;
+
+  /**
    * Adopter-supplied wire extensions (ADR 46) installed on this
    * gateway. Each contributes a JSON-RPC namespace (`crm/*`,
    * `myOrg/*`, ...) that the wire dispatcher can route to. Package
@@ -411,6 +422,16 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * was omitted — the fan-out is then a clean no-op.
    */
   private readonly serverTransports: readonly ServerTransport[];
+
+  /**
+   * The built-in connectors harness (ADR 104) — always present, empty when
+   * no connectors are configured. Constructed as this gateway's own child
+   * (substrate + live interceptor cascade flow in at construction) unless
+   * the adopter handed a pre-built instance via the `connectors:` slot.
+   */
+  readonly connectors: import("@agentick/spec").Connectors;
+  /** Set when THIS gateway constructed the harness — it then owns `close()`. */
+  private readonly ownedConnectors: ConnectorsHarness | undefined;
 
   /**
    * Gateway-extension bridges (ADR 50) — the `gateway.bridges.<name>`
@@ -600,6 +621,37 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     this.telemetryReady = this.initTelemetryExport(normalized);
 
     this.cascadeExtensions = cascade;
+
+    // ADR 104 — the built-in connectors harness, a constructed CHILD: the
+    // gateway's substrate flows in positionally and the interceptor cascade
+    // arrives live, so `gateway.guard()` / `use()` reach connector commands.
+    {
+      const slot = options.connectors;
+      const self = this;
+      const host: GatewayInstallerHost = {
+        gatewayId: this.scopeId,
+        metadata: this.metadata,
+        apps: () => Array.from(self._apps.values()),
+        as: (identity) => self.as(identity),
+      };
+      if (slot !== undefined && !Array.isArray(slot) && !("connectors" in slot)) {
+        // Instance case — adopter-owned; the gateway drives lifecycle
+        // (start/stop) but not construction/close. (Cast: `Array.isArray`
+        // doesn't narrow a `readonly T[]` union member out.)
+        this.connectors = slot as import("@agentick/spec").Connectors;
+        this.ownedConnectors = undefined;
+      } else {
+        const harness = new ConnectorsHarness(this.journal, this.bus, this.inbox, {
+          gateway: host,
+          inheritedInterceptors: this.resolvedInterceptors(),
+          interceptorParent: this,
+        });
+        const specs = Array.isArray(slot) ? slot : (slot?.connectors ?? []);
+        for (const spec of specs) harness.adopt(spec);
+        this.connectors = harness;
+        this.ownedConnectors = harness;
+      }
+    }
 
     // Build the wire-extension registry. Framework-supplied extensions
     // register FIRST — adopter attempts to claim `gateway` / `app` /
@@ -1584,6 +1636,9 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   private async listenBody(): Promise<void> {
     await this.gatewayReady;
     await Promise.all(this.serverTransports.map((t) => t.listen(this)));
+    // Connectors start once the gateway is open (ADR 104) — sources begin
+    // pushing only when the deployment can route them.
+    await this.connectors.start();
   }
 
   private async closeBody(drain: boolean): Promise<void> {
@@ -1597,6 +1652,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // `ServerTransport.close(opts?: { drain })` or add a `drain()` verb, and
     // pass `drain` through here.
     void drain;
+    // Stop connectors before anything else (ADR 104): they are the
+    // self-driving ingress edge, so quiescing them first means no new
+    // inbounds race the teardown below. Mirror of `listen`, which starts
+    // them last.
+    try {
+      await this.connectors.stop();
+    } catch {
+      // Best effort — a source's teardown failure must not block close.
+    }
     // Close server transports FIRST (ADR 84 §2) — before any app teardown.
     // Transports are the ingress edge: an inbound frame routes through
     // `dispatchRequest(this, …)` into an app/session. Tearing an app down while
@@ -1626,6 +1690,17 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       }
     }
     this._apps.clear();
+
+    // The owned connectors harness closes after apps (its sessions are
+    // theirs) and before extensions. An adopter-supplied instance is not
+    // ours to close.
+    if (this.ownedConnectors) {
+      try {
+        await this.ownedConnectors.close();
+      } catch {
+        // best effort
+      }
+    }
 
     // Gateway-extension `onClose` handlers, reverse install order
     // (ADR 50) — after apps close, before the cluster/internal handlers.

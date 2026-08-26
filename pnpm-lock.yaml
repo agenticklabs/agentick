@@ -729,37 +729,18 @@ importers:
       '@agentick/formatters':
         specifier: workspace:*
         version: link:../formatters
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
-    devDependencies:
-      '@agentick/compiler-react':
-        specifier: workspace:*
-        version: link:../compiler-react
-      '@agentick/elicitation':
-        specifier: workspace:*
-        version: link:../elicitation
-      '@agentick/gateway':
-        specifier: workspace:*
-        version: link:../gateway
-      '@agentick/model':
-        specifier: workspace:*
-        version: link:../model
-      '@agentick/model-executor':
-        specifier: workspace:*
-        version: link:../model-executor
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages/credentials:
     dependencies:
@@ -896,6 +877,9 @@ importers:
       '@agentick/cluster':
         specifier: workspace:*
         version: link:../cluster
+      '@agentick/connector':
+        specifier: workspace:*
+        version: link:../connector
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -912,6 +896,9 @@ importers:
       '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
+      '@agentick/elicitation':
+        specifier: workspace:*
+        version: link:../elicitation
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -921,6 +908,12 @@ importers:
       '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
 
   packages/knobs:
     dependencies:
@@ -1518,6 +1511,9 @@ importers:
       '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
+      '@agentick/tool':
+        specifier: workspace:*
+        version: link:../tool
       '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../tool-executor

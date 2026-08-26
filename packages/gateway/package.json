@@ -53,6 +53,7 @@
   "dependencies": {
     "@agentick/app": "workspace:*",
     "@agentick/cluster": "workspace:*",
+    "@agentick/connector": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/utils": "workspace:*",
@@ -60,9 +61,12 @@
   },
   "devDependencies": {
     "@agentick/compiler-react": "workspace:*",
+    "@agentick/elicitation": "workspace:*",
     "@agentick/model-executor": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
-    "@agentick/timeline": "workspace:*"
+    "@agentick/timeline": "workspace:*",
+    "@types/react": "^19.2.5",
+    "react": "^19.0.0"
   },
   "engines": {
     "node": ">=20.19"
