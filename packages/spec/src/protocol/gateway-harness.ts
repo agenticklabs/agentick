@@ -37,6 +37,7 @@ import type {
 } from "./app-harness.js";
 import type { IngressIdentity } from "../wire/authorizer.js";
 import type { IdentityScoped } from "./identity.js";
+import type { Connectors } from "./connectors-harness.js";
 import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
 import type { CursorPage, PageRequest } from "./paging.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
@@ -247,6 +248,15 @@ export interface GatewayHarnessProtocol {
    * from here on stamping + policy are the framework's job.
    */
   as(identity: IngressIdentity): IdentityScopedGateway;
+
+  // ─── Connectors (ADR 104) ───────────────────────────────────────
+
+  /**
+   * The built-in connectors harness — external event sources bound to hosted
+   * apps. Always present (empty when no connectors are configured). Populated
+   * via `createGateway({ connectors: [...] })` or `connectors.register(spec)`.
+   */
+  readonly connectors: Connectors;
 
   /** Enumerate all registered Apps. */
   apps(): readonly AppHarnessProtocol[];

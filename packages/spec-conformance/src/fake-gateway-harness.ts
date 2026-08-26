@@ -27,6 +27,7 @@
  */
 
 import type {
+  Connectors,
   AppHarnessProtocol,
   ConnectionInfo,
   DestroySessionInput,
@@ -63,6 +64,19 @@ const EMPTY_EVENTS: AsyncIterable<ProtocolEvent> = {
   async *[Symbol.asyncIterator]() {},
 };
 
+/** Inert `gateway.connectors` — no connectors registered, verbs are no-ops. */
+export function emptyConnectors(): Connectors {
+  return {
+    register: () => Promise.resolve(),
+    unregister: () => Promise.resolve(),
+    get: () => undefined,
+    list: () => [],
+    status: () => undefined,
+    start: () => Promise.resolve(),
+    stop: () => Promise.resolve(),
+  };
+}
+
 export function fakeGatewayHarness(
   options: FakeGatewayHarnessOptions = {},
 ): GatewayHarnessProtocol {
@@ -80,6 +94,7 @@ export function fakeGatewayHarness(
 
     app,
     apps: () => hosted,
+    connectors: options.connectors ?? emptyConnectors(),
     as:
       options.as ??
       ((identity: IngressIdentity): IdentityScopedGateway => ({

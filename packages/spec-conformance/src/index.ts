@@ -15,7 +15,11 @@ export { runAgentickErrorConformance, type AgentickErrorConformanceFactory } fro
 export { fakeToolHandlerCtx, type FakeToolHandlerCtxOverrides } from "./fake-tool-handler-ctx.js";
 
 // GatewayHarnessProtocol fixture — the typed alternative to casting a double
-export { fakeGatewayHarness, type FakeGatewayHarnessOptions } from "./fake-gateway-harness.js";
+export {
+  fakeGatewayHarness,
+  emptyConnectors,
+  type FakeGatewayHarnessOptions,
+} from "./fake-gateway-harness.js";
 
 // Observability facet (ADR 64/78) — cross-surface ctx conformance
 export { runObservabilityCtxConformance, type ObservabilityCtxFactory } from "./observability.js";
