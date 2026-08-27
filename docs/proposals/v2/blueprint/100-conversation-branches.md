@@ -1,186 +1,186 @@
-# ADR 100 — Conversation branches: forks and reply threads (`branchOf`)
+# ADR 100 — Session branching: `from` + `internal` (rev 2)
 
-**Status:** Ratified · 2026-08-25 (design conversation, Ryan) · not yet built —
-sequenced after the next clean publish cut
-**Builds on:** ADR 48 (Layered isolation — principal descent), ADR 49
-(create-or-resume), ADR 51 (Invocation & authorization), ADR 92 §4
-(`session:spawn`), checkpointing §branch (`BranchCapable`), `session:persist`
-(create early, persist late — the earn command)
-**Touches:** `@agentick/spec` (`SessionRecord.branchOf`, `CreateSessionInput`,
-wire params, `SessionFilter.root`, `replySessionId()`), `@agentick/session`
-(genesis branch hydration), `@agentick/app` (create door threading),
-`@agentick/gateway` (same-principal source guard), `@agentick/client-core`
-(`SessionHandle.reply` / `.fork` sugar)
-**Adopter alignment:** knowify's `sessions` schema already stores branches
-(`parent_id` + `branched_at_seq`, ancestry-stitched reads); it gains a
-`branch_kind` column and an ancestry audit (§8)
+**Status:** Ratified · 2026-08-27 (workshopped across three sessions, Ryan) ·
+supersedes rev 1, its provenance amendment, and the "Open revision" draft in
+full — the two-edge taxonomy (`branchOf`/`parentSessionId`/`kind`), derived
+reply ids, and the `thread`/`peer`/`class` enums are all dead; the ledger at
+the bottom records why.
+**Builds on:** Backlog F (internal visibility — `docs/proposals/v2/internal-visibility.md`),
+C2 fork machinery (checkpointing §5 — snapshot + branch fan-out + restore),
+ADR 48 (principal descent), ADR 49 (create-or-resume), ADR 51 (invocation),
+ADR 92 §4 (`session:spawn`), `session:persist` (create early, persist late)
+**Sequencing:** Phase 0 now (reconcile + this bake); Phase 1 builds after
+Backlog F completes and the clean next.155 cut — ships as next.156.
 
-## Decision
+## The model
 
-A session can **branch** from a message in another session. The branch is a
-real session — own id, own turns, the full machinery — whose timeline begins
-as the source conversation up to the anchor message, then continues on its
-own. One new record slot expresses it:
+Sessions relate through **one edge** and **one disposition**. Everything else
+— "conversation", "worker", "thread", "fork", "reply" — is README vocabulary,
+derived, stored nowhere.
 
 ```ts
-branchOf?: {
-  readonly sessionId: string;   // the source conversation
-  readonly messageId: string;   // the anchor message (resolved to seq at genesis)
-  readonly kind: "reply" | "fork";
+// the floor — the complete stored delta of this feature is the `from` bag
+internal: boolean        // Backlog F's axis — true: plumbing, false: principal-facing
+
+from?: {                 // absent ⇒ root
+  session: string        // spawned from
+  entry: string          // at this timeline entry
+  seq: number            // the entry's position — resolved once at genesis
+  inherited: boolean     // took the state (C2 branch fan-out — timeline, knobs, state)
+  anchored: boolean      // stays at the entry it came from
 }
+
+// creator = origin stamps (originExecutionId / originCallId), present iff an
+// execution made it. Existing; unchanged.
 ```
 
-`kind` is an **explicit discriminator, never a field-combination signature**.
-Reply and fork share the same anchor and the same mechanism; what differs is
-declared product intent — subordination versus independence — and structure
-cannot tell you intent. Encoding the distinction in presence-combinations
-(`parent_id` set but `branchOf` absent, etc.) is the implicit-enum disease
-this blueprint line has repeatedly paid to remove; it does not come back here.
+`inherited` and `anchored` are the same category of descriptor — birth-declared,
+immutable adjectives about the branch's standing relationship to its origin:
+what it carried away, and whether it left.
 
-## The taxonomy — two edges, three relations
+## Every case
 
-| Relation                   | Encoding                                              | List posture                           | Isolation                                           |
-| -------------------------- | ----------------------------------------------------- | -------------------------------------- | --------------------------------------------------- |
-| **Delegation** (sub-agent) | `parentSessionId` + origin edges; never `branchOf`    | hidden (`root: true` excludes)         | child of the parent's bus/scope; principal descends |
-| **Fork**                   | `branchOf { …, kind: "fork" }`; no `parentSessionId`  | its own root row                       | peer — the user's own scope                         |
-| **Reply thread**           | `branchOf { …, kind: "reply" }`; no `parentSessionId` | not a root — surfaced under its parent | peer — the user's own scope                         |
+|                                                                  | `internal` | `inherited` | `anchored` | origin stamps      |
+| ---------------------------------------------------------------- | ---------- | ----------- | ---------- | ------------------ |
+| root session                                                     | false      | —           | —          | —                  |
+| `fork(e?)` — new direction                                       | false      | true        | false      | user: — / agent: ✓ |
+| `reply(e)` — side-thread on an entry                             | false      | true        | **true**   | user: — / agent: ✓ |
+| `spawn(agent)` — worker                                          | **true**   | false       | false      | ✓                  |
+| `spawn(agent, { branch: e })` — worker continuing the transcript | **true**   | true        | false      | ✓                  |
 
-A record never carries both edges. A branch gets **no** `parentSessionId`:
-its subordination (for replies) is a _rendering_ fact carried by `kind`, not
-a scoping fact — same user, same principal, same bus posture as any of their
-conversations. The session tree remains pure delegation.
+Two late-arriving requirements fold in with zero new fields: user-vs-agent
+creation is origin-stamp presence; "a message has one reply chain but many
+branches" is a _button convention_ (chip present → open, absent → create),
+exactly as Slack ships it — never a structural constraint, never a derived id.
 
-`SessionFilter.root` changes meaning: **root = no `parentSessionId` AND not
-`kind: "reply"`**. Forks list as roots. One filter, no second dimension for
-callers to remember to combine.
-
-## Branching is not spawning
-
-The deepest distinction is **what each inherits**: a branch inherits
-_transcript_ (the user's continuity); a spawn inherits _authority_
-(principal, scope) and composes its own context. That asymmetry is why the
-edges cannot be unified.
-
-|            | Branch (`branchOf`)                                 | Spawn (`parentSessionId`)                     |
-| ---------- | --------------------------------------------------- | --------------------------------------------- |
-| Relates    | conversations, anchored at a _message_              | work, anchored at a _call_                    |
-| Created by | a person's gesture ("reply here", "fork from here") | an execution delegating                       |
-| Inherits   | the source transcript up to the anchor              | authority; context is composed by the spawner |
-| Results go | to the user, in the branch's transcript             | back into the spawning turn                   |
-| Lifecycle  | independent                                         | subordinate (abort cascades)                  |
-
-The test when unsure: ask what the new session is _for_. A person talks in a
-branch; an agent works in a spawn. There is no session that is both, and no
-third kind.
-
-**Naming law:** `fork` means _branch a conversation_ — this ADR's sense —
-everywhere it appears. The backgroundable-execution family (the exploratory
-"spawns surface as tasks" direction) keeps the name `spawn` exclusively. One
-word, one meaning.
-
-## Reply identity — one thread per message
-
-A reply thread's identity IS its anchor message (the Slack `thread_ts`
-lesson). The framework expresses this as a _naming convention over
-create-or-resume_, not a verb:
-
-- `replySessionId(sessionId, messageId)` — a pure derivation (uuidv5-class)
-  in `@agentick/spec`, because both ends must agree on it.
-- Every caller derives the same id; ADR 49's create-or-resume makes the first
-  tap create the thread and every later tap join it. No get-or-create verb,
-  no lookup round-trip, no race.
-
-Forks deliberately do NOT derive: forking twice is two forks. Fresh id per
-call. The asymmetry is the semantics.
-
-## Client sugar
+## Verbs — symmetric on both poles
 
 ```ts
-// client-core SessionHandle — thin: mint/derive the id, call the create door,
-// return the handle. Synchronous, lazy-create, like client.session().
-reply(messageId: string): SessionHandle;   // anchor REQUIRED, id DERIVED
-fork(messageId?: string): SessionHandle;   // anchor OPTIONAL (default: the tip), id FRESH
+// SessionHarness (server: hosts, connectors, agents mid-turn) and the client
+// handle carry the SAME verbs. The agent-side path stamps origin; the wire
+// path cannot.
+session.reply(entry)                → create({ from: { session: this, entry, inherited: true,  anchored: true  } })
+session.fork(entry?)                → create({ from: { session: this, entry: entry ?? tip, inherited: true, anchored: false } })
+session.spawn(agent)                → create({ internal: true, from: { session: this, entry: tip, inherited: false, anchored: false } })  // + origin stamps, as today
+session.spawn(agent, { branch: e }) → create({ internal: true, from: { session: this, entry: e, inherited: true,  anchored: false } })
+session.branch(opts)                → the explicit form
+
+// the one door underneath everything:
+app.createSession({ sessionId, internal?, from? })
 ```
 
-No server-harness sugar initially. The queued second consumer is the Slack
-connector (`thread_ts` ↔ reply thread is 1:1 via `replySessionId`, dissolving
-its binding state); host-side `session.reply()` lands if and when it earns
-itself there (three-consumers rule).
+**Sugar is symmetric, the op is singular:** both poles' verbs lower to the one
+`create_session` operation — hooks, journal, and the security guard live there
+exactly once. The verbs are thin sugars, deliberately NOT ops (a sugar
+envelope would double-wrap the create; same reasoning `abort()` is not an op).
+Fresh ids everywhere; ids are strings; the framework mandates no format.
 
-## Amendment — 2026-08-25: creator provenance is an axis, not a kind
+## Four laws
 
-"User-created fork" vs "agent-created fork" is PROVENANCE, orthogonal to
-relation — never a third `kind`. The existing origin edges carry it:
+1. **State** — `inherited` ⇒ the child's store-backed scopes read as the
+   source's up to `seq`, then its own. This IS the C2 branch fan-out (timeline
+   - knobs + state), not a timeline-only copy: a forked conversation keeps its
+     knob values. The store satisfies the _invariant_ its own way — the bundled
+     store copies at genesis; a durable adapter may stitch at read.
+2. **Lists** — the principal-facing list = `internal: false` and not
+   `anchored`. Anchored sessions render under their anchor entry; internal
+   sessions render nowhere. (This is Backlog F's deferred increment 2 — the
+   principal-gated delivery edge — at session granularity. One law, owned
+   there.)
+3. **Persistence** — `internal: true` ⇒ row at genesis (lineage is not
+   speculative); otherwise create early, persist late: no row until the first
+   turn earns it via `session:persist`. An abandoned reply thread leaves
+   nothing.
+4. **Security** — the wire admits `from` only when the caller's principal owns
+   `from.session` (without this, `from` is a cross-tenant state read — the
+   load-bearing line). `internal` dispositions follow Backlog F's door rules;
+   origin stamps are never wire-settable — lineage is the edge's to assert.
 
-- **User-created branch**: `branchOf` set; no origin edges (wire door, a
-  person's gesture).
-- **Agent-created branch**: `branchOf` set PLUS `originExecutionId` /
-  `originCallId` stamped — provenance WITHOUT `parentSessionId`. "An
-  execution created this conversation" is a birth fact, not a lifecycle
-  fact: no scope subordination, no delegation edge, invariant 4 untouched.
+## Queries
 
-The UI reads two axes with two fields: `kind` decides where it renders
-(thread chip vs root row); origin-presence decides how it is badged
-("explored by assistant" vs plain). Four cells, no new enum.
+```ts
+list({ internal: false, anchored: false, principal }); // the conversation list
+list({ from: X }); // the session graph — X's tree, one level, spawn points included
+list({ from: X, internal: true, status: "running" }); // X's running workers
+list({ from: X, anchored: true }); // threads hanging off X
+list({ from: X, internal: false, anchored: false }); // forks of X
+```
 
-The "sub-agent fork" temptation resolves by the standing test — what is
-the session FOR. An agent forking so the USER can read/continue the
-alternative → branch (`kind: "fork"`, agent provenance). An agent wanting
-history as its own working context → spawn with composed context; it
-never touches `branchOf`. "Spawn a sub-agent as a branch" remains
-deliberately inexpressible.
+`SessionStoreQuery` grows the dims (`from`, `anchored`, `internal`); `root`'s
+old meaning is subsumed by the first line. Adapters columnize the bag —
+`from_session`, `from_seq`, `inherited`, `anchored`, `internal` — btree, never
+jsonb-in-a-WHERE.
 
-## The timeline contract — invariant, not mechanism
+## Derived, never stored
 
-**A branch session's timeline reads as the source's entries up to the anchor,
-then its own.** How a store satisfies that is the adapter's choice: the
-bundled in-memory store copies at genesis; a durable adapter may stitch at
-read (knowify's ancestry reconstruction already does exactly this — no
-duplication). Genesis resolves the anchor `messageId` to the source's `seq`
-once and records both.
+```ts
+relation(record); // "conversation" | "fork" | "reply" | "worker" | "forked-worker"
+// a pure fold over internal + from, for lists, UI, logs
+```
 
-Context-inheritance v1 is the full trunk prefix. Summary-instead-of-prefix is
-a later refinement and slots into the existing branch hooks; it changes no
-surface in this ADR.
+## Reconciliations (Phase 0 obligations)
 
-## Invariants
-
-1. **Same-principal source guard (load-bearing).** A wire `create_session`
-   carrying `branchOf` is admitted only when the caller's principal owns the
-   source session. Without this, `branchOf` is a cross-tenant timeline-read
-   primitive. Enforced at the gateway door beside the ADR 48 stamp.
-2. **Persist late, unchanged.** A branch is created live and earns its row via
-   `session:persist` on its first turn. An abandoned reply thread leaves
-   nothing behind. No special casing.
-3. **Depth is app policy, not framework surface.** The edge is depth-agnostic;
-   knowify caps replies at depth 1 by offering no reply affordance inside a
-   thread. Capability firm, opinion flippable.
-4. **A record never carries both `branchOf` and `parentSessionId`.** The
-   create door rejects the combination.
+1. **Backlog F** — `internal` is THEIR field; this ADR consumes it and
+   contributes law 2+3 as its session-granularity semantics. Sync with the
+   owning session before build: if the stamping phase's semantics diverge from
+   "excluded from principal lists, eager at genesis", theirs win and the laws
+   re-read against them.
+2. **Existing `session.fork()` (C2)** — the worker-flavored same-image copy is
+   absorbed as `spawn`'s plumbing (spawn + branch fan-out + restore). The name
+   `fork` is re-minted as the conversation verb above. One word, one meaning,
+   both poles. `ForkInput`/`SpawnInput` reshape accordingly.
+3. **`parentSessionId` → `from`** — the widest sweep in the plan.
+   Subordination consumers (abort-cascade, principal descent, spawnPath) keep
+   their semantics: cascade walks the LIVE spawn registry as today (lifecycle
+   was never a durable-record fact); the durable edge they read becomes
+   `from.session` where they read the record at all. Lands as its own commit
+   with the unfiltered-grep ritual.
 
 ## Adopter alignment (knowify)
 
-The `sessions` schema predates this ADR with the storage half already built:
-`parent_id` + `branched_at_seq`, `SessionRepository.spawn/branch` doors, and
-`TimelineService` stitching `(parent[..seq] ++ own)` via the ancestry walk —
-e2e-pinned. Alignment is three moves, not a rebuild:
+Storage half largely pre-built (`parent_id`, `branched_at_seq`,
+ancestry-stitched reads, e2e-pinned). Alignment: one migration adding
+`from_session`, `from_seq`, `inherited`, `anchored`, `internal` (mapping
+existing `parent_id`/`branched_at_seq` data); `KnowifySessionStore` round-trips
+the bag to columns; `KnowifySessionIndex` list predicates per law 2; the
+stitcher re-keys to **stitch iff `inherited`** — which also retires the
+ancestry-audit finding (v2 workers without inheritance no longer stitch the
+parent's whole history). Slack `thread_ts` ↔ anchored-session mapping is the
+optional tail. The panel UI (reply button = open-if-exists, thread chips, fork
+gesture) blocks on Ryan's design spec — the arc's long pole.
 
-1. Add `branch_kind` (`'reply' | 'fork' | null`) — the explicit discriminator
-   mirroring `branchOf.kind`. Delegation rows: `parent_id` set, seq null,
-   kind null. Branch rows: `parent_id` = source, seq = anchor, kind set.
-2. `KnowifySessionStore` round-trips `record.branchOf` ↔ the three columns;
-   `KnowifySessionIndex` excludes `kind = 'reply'` from the root list.
-3. **Ancestry audit:** the stitcher treats `branched_at_seq: null` as "no
-   upper bound", so a v2 _delegation_ child's timeline read would stitch in
-   the parent's entire history — dead weight at best under v2, where spawned
-   agents own their context. Stitch only when `branch_kind` is set.
+## Plan
 
-## Deferred
+| Phase | What                                                                                                                                                                                                                                                     | When                                                  |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **0** | Backlog F sync · fork()/spawn reconciliation decision · this bake                                                                                                                                                                                        | now                                                   |
+| **1** | Framework: spec (bag, dims, wire) → session (genesis fan-out, the `from` sweep, harness verbs) → app (doors) → gateway (guard) → client-core (verbs, `relation()`) → contract spec per law + conformance + adversarial pass. Agents per package, judged. | after Backlog F + clean .155 · ships .156 · ~2–3 days |
+| **2** | Knowify: migration · store/index · stitcher · panel UI (blocked on design spec) · Slack tail                                                                                                                                                             | ~1–2 days + UI                                        |
 
-- **Spawns-surface-as-tasks** — exploratory, NOT ratified (recorded on the
-  board with both ledgers). Orthogonal to this ADR; the naming law above is
-  the only coupling.
-- **Summary-instead-of-prefix** branch context.
-- **Host-side reply/fork sugar** — trigger: the Slack connector consumer.
-- **Reply-thread UI** (affordance, thread chips, in-transcript anchors) —
-  knowify design spec, Ryan's.
+**Risk register:** the `from` sweep (blast radius: spawn-hardening, resume,
+destroy cascade, wire records, knowify `parent_id`) — own commit, own greps;
+Backlog F semantic drift (Phase 0 sync closes it); the C2 absorption touching
+`ForkInput` call sites.
+
+## The ledger — killed in the workshop, with cause of death
+
+- **Two-edge taxonomy + invariant 4** (rev 1) — fused edge-with-classification;
+  the forked worker falsified the invariant.
+- **`branchOf` / `kind: thread|peer` bag** — "thread" was never a kind of
+  session; it's a kind of attachment (`anchored`).
+- **`class: conversation|worker|thread`** — product words on the floor;
+  collapsed into Backlog F's `internal` + `anchored`.
+- **Derived reply ids** (`deriveReplyId`, uuidv5/v8) — solved a dedup race the
+  reply button solves by reading the chip; identity-by-arithmetic traded
+  simplicity for cleverness. Apps wanting hard rendezvous can mint
+  deterministic ids themselves; ids are strings.
+- **`kind: 'spawn'|'fork'|'reply'` enum** — one enum serving two readers;
+  needed presence-combos for the overlap case.
+- **`origin: "user"|"agent"` field** — redundant with origin-stamp presence;
+  redundant pairs drift.
+- **`threadKey`** — identity mechanism moonlighting as list posture.
+- **Relations table** — structure for structure's sake at two edges; revisit
+  at arena scale if edges multiply.
+- **Spawns-surface-as-tasks** — still EXPLORATORY, unratified, both ledgers on
+  the board; only its naming law survives here (`fork` = conversation,
+  `spawn` = delegation, exclusively).
