@@ -114,9 +114,13 @@ first (Ryan: "not having a spawn/fork tool is a big loss"):
 
 - SPAWN tool — new sub-agent session (machinery exists: SpawnInput, spawnPath,
   depth guard). Delegate multi-call work so the parent context stays clean.
-- FORK tool — clone the CURRENT session's context into a child. THE design
-  decision of this arc: what a fork clones (timeline? tools? memory scope? just
-  system + task?). Likely greenfield vs spawn — confirm.
+- FORK tool — ⚠️ NAMING RECONCILED w/ ADR 100 (2026-08-25): `fork` = branch a
+  CONVERSATION (user gesture, transcript inheritance); the DELEGATION family uses
+  `spawn` EXCLUSIVELY. So "clone the current session's context into a child WORKER"
+  is NOT a fork here — it's a spawn-with-transcript-seed: `branchOf` (prefix) +
+  `parentSessionId` (subordinate) BOTH, per ADR 100's open revision (invariant 4
+  relaxed; transcript ⊥ delegation). This arc ships the SPAWN tool (fresh or
+  seeded); the conversation-`fork`/`reply` verbs are ADR 100's, client-side.
 - message_session tool — deliver a message to another session by id (works for
   sub-agents too); the inter-session channel we use ourselves.
 - timeline_search + list_sessions tools — ride D's session/search seam + the
@@ -326,6 +330,21 @@ carry usage rollups.
 
 ## Standing context
 
+2026-08-27 — ADR 100 REV 2 RATIFIED (supersedes rev 1 + amendment +
+open-revision draft): session branching = ONE edge + ONE disposition.
+`from {session, entry, seq, inherited, anchored}` + Backlog F's
+`internal`. conversation/worker/thread/fork/reply are DERIVED vocabulary
+(relation()), stored nowhere. Verbs symmetric both poles (reply/fork/
+spawn/branch — thin sugars, NOT ops; the create op is singular). Derived
+reply ids KILLED (button convention, Slack-style). Existing C2 fork()
+absorbed into spawn plumbing; `fork` re-minted as the conversation verb.
+Four laws: inherited=C2 branch fan-out; lists=!internal && !anchored;
+internal⇒eager else persist-late; wire admits from only if caller owns
+from.session. Phase 0: Backlog F sync + fork reconciliation. Phase 1
+ships next.156 after F + clean .155 (the parentSessionId→from sweep is
+the risk center). Phase 2 knowify (migration, stitch-iff-inherited, UI
+blocked on Ryan's design spec).
+
 2026-08-25 — RATIFIED: conversation branches (ADR 100,
 blueprint/100-conversation-branches.md). `branchOf {sessionId, messageId,
 kind: reply|fork}` — explicit discriminator, never field combos; session
@@ -337,7 +356,12 @@ copy-vs-stitch; same-principal source guard is load-bearing; naming law:
 fork=conversation, spawn=work. Build sequenced after the clean next.155
 cut. Knowify alignment: branch_kind column + ancestry audit (stitch only
 when kind set). Spawns-as-tasks stays EXPLORATORY — both ledgers, not
-ratified, falsifiable trigger recorded.
+ratified, falsifiable trigger recorded. ⚠️ OPEN REVISION (2026-08-25):
+dimensions are orthogonal — `branchOf` (transcript) ⊥ `parentSessionId`
+(delegation), ALLOWED TOGETHER (forked sub-agent = both); invariant 4
+relaxed; identity split into `threadKey` (fresh vs derived, so multi-reply-
+per-message is possible); `origin: user|agent` added; `kind` becomes a
+derived label. Revise ADR 100 before build. See its "Open revision" §.
 
 2026-08-25 — DEFERRED ARC (Ryan): CLIENT-SIDE HOOK SURFACE. Clients get
 `hook({ onAfterSessionPersist })` with the SAME minted names as the server
