@@ -179,6 +179,55 @@ destroy cascade, wire records, knowify `parent_id`) — own commit, own greps;
 Backlog F semantic drift (Phase 0 sync closes it); the C2 absorption touching
 `ForkInput` call sites.
 
+## Build record — Phase 1 (2026-08-28, feat/adr100-branching)
+
+Built by four agents over two waves, judged and committed by the
+coordinator; every suite green, workspace typecheck 112/112. Rulings made
+during the build, all Ryan-ratified unless marked coordinator:
+
+1. **`appId` is optional on `app/create_session` when `from` is present** —
+   the gateway resolves the app from the source's record (`appForSession`);
+   a named `appId` must match. Cross-app branching is thereby inexpressible.
+   The three refusals (absent source, unowned source, wrong app) are ONE
+   throw site — indistinguishable by construction, never an existence oracle.
+2. **The `as()` door runs law 4** — same guard, same placement as the wire.
+3. **Visibility cascades (OR-down)** — a branch of an internal session is
+   internal. Plumbing never sprouts a client-visible conversation.
+4. **`SessionFrom.entryId` is optional** — absent on the record ⇒ the source
+   had no anchorable entry, `seq: -1` (below every store's floor). Absent at
+   the DOOR ⇒ the source's tip, resolved at genesis.
+5. **Branches survive their source** — a non-internal branch takes no live
+   parent edge: no `_children`, no cascade, no depth ceiling, no spawnPath.
+   The door ENFORCES this (a supplied parent edge on a non-internal child is
+   dropped), so no principal-facing session can be conscripted into a
+   teardown cascade. Origin stamps travel regardless — provenance is not
+   ownership.
+6. **`SpawnInput.branch: entryId | true`** — inheritance no longer requires a
+   nameable entry; `true` inherits to the tip (a source with knob state and
+   no messages still hands it down — pinned).
+
+Coordinator rulings (enforcing ratified law, recorded for the wash-up):
+
+- **Uniform anchors** — an unnamed anchor is ALWAYS the door's to resolve;
+  no verb resolves a tip. Settled by the pole argument: the client cannot
+  know the tip, so verb-time pinning split one verb's meaning by pole — "a
+  rule one pole cannot structurally honor is not a rule." Side effect: the
+  hot spawn path no longer flushes + reads the whole log.
+- **Subordination keys on the RESOLVED DISPOSITION, not the verb** — which
+  is what makes rulings 3 and 5 one rule (a fork of plumbing is internal,
+  hence subordinate).
+- **Non-oracle refusals** at every guard; **cold-source branching refused
+  this phase** (`TODO(adr100-cold-branch)` — the arc's one deliberate
+  narrowing; likely fix moves cold-source resolution into session genesis).
+- Client ids mint via the house generator (`session:` prefix, shape-parity
+  with the server door); the create floats per the established handle
+  pattern, failure resurfacing on first use.
+
+Known gaps, stated: cold-source branching (above); the tip anchor is the
+last MESSAGE entry, so an inherited copy excludes a trailing turn boundary
+(documented, pinned); `openSession` resolves a single app implicitly while
+the appId-less plain create does not — an asymmetry noted, not resolved.
+
 ## The ledger — killed in the workshop, with cause of death
 
 - **Two-edge taxonomy + invariant 4** (rev 1) — fused edge-with-classification;
