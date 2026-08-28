@@ -91,6 +91,8 @@ import type {
   SessionCloseReason,
   SessionError,
   SessionExecutionHandle,
+  SessionFrom,
+  SessionFromInput,
   SessionHarnessProtocol,
   SessionRecord,
   SessionRunOutcome,
@@ -99,6 +101,8 @@ import type {
   SessionStore,
   SessionSubstrateParent,
   ForkInput,
+  BranchInput,
+  ReplyInput,
   SpawnContext,
   SpawnInput,
   StoreCtx,
@@ -123,6 +127,7 @@ import {
   channelEventName,
   DEFAULT_JOURNALING_POLICY,
   DEFAULT_TERMINAL_TOOL_NAME,
+  BranchSourceEntryNotFoundError,
   ExecutionFailed,
   foldUsageRollup,
   HandlerError,
@@ -526,8 +531,18 @@ export interface SessionHarnessOptions<P = unknown> {
    * Sessions without a spawnContext throw when `spawn()` is called.
    */
   readonly spawnContext?: SpawnContext<P>;
-  /** Parent session id when this session is itself a spawned child. */
+  /**
+   * The LIVE parent session (SP6 / ADR 69) — subordination, not lineage: it is
+   * what an escalation forwards one hop up and what the app's spawn registry
+   * tracks. Set for a spawned child. The DURABLE edge is {@link from}.
+   */
   readonly parentSessionId?: string;
+  /**
+   * Where this session branched from (ADR 100) — the durable edge, resolved
+   * COMPLETE (`seq` included) by whoever held the source. `inherited` drives
+   * the genesis branch fan-out below; the whole bag lands on the record.
+   */
+  readonly from?: SessionFrom;
   /**
    * Durable session registry (E11). When injected, the session mirrors its
    * metadata into this store off the critical path — an initial record at
@@ -674,6 +689,27 @@ function runOutcomeOf(stopReason: SendResult["stopReason"]): SessionRunOutcome {
     return "failed";
   }
   return "succeeded";
+}
+
+/**
+ * What a verb declares about the branch it is making, before the anchor is
+ * resolved: `internal` is its own disposition (ORed with the source's), the
+ * rest is the {@link SessionFrom} bag minus what only the timeline can answer.
+ */
+interface BranchEdge {
+  readonly entryId?: string;
+  readonly inherited: boolean;
+  readonly anchored: boolean;
+  readonly internal: boolean;
+}
+
+/**
+ * The addressable id of a timeline entry — a message's own id. A turn boundary
+ * has none, so it can never be a branch anchor: a conversation branches at
+ * something someone said.
+ */
+function messageIdOf(entry: TimelineEntry): string | undefined {
+  return entry.kind === "message" ? entry.message.id : undefined;
 }
 
 // ============================================================================
@@ -1045,7 +1081,9 @@ export class SessionHarness<P = unknown>
       onStatusTransition: (status, outcome) => this.publishStatusTransition(status, outcome),
       ...omitUndefined({
         appId: options.appId,
-        parentSessionId: options.parentSessionId,
+        // ADR 100 — the durable branch edge (the live parent rides
+        // `parentSessionId`, which is a different question).
+        from: options.from,
         // ADR 48 — persist ownership on the durable record (resume index).
         principal: options.principal,
         // Backlog F — the session's durable `internal` (top rung of the stamp spine).
@@ -1247,28 +1285,37 @@ export class SessionHarness<P = unknown>
     // rather than the timeline alone. Build-then-hydrate is therefore the whole
     // of "resume": evict/restart/crash converge on this line.
     //
-    // **Spawn-inherit skips it.** A `spawn()`ed child takes its parent's IMAGE
-    // and owns no durable scope of its own yet, so a hydrator would run against
-    // a partition nothing wrote. A `fork()` is the exception that proves it —
-    // the fork path BRANCHES the parent's scopes onto the child's and then
-    // hydrates over the copy (checkpointing §5), which is why the ADR 93 fork
-    // law retired with the blob transport. The session's own record hydrates
-    // unconditionally: a child's id is new, so its read finds nothing and the
+    // **An INHERITED branch (ADR 100 law 1) branches, then hydrates over the
+    // copy** (checkpointing §5): every `BranchCapable` bridge copies the
+    // source's scope onto this session's at its own store layer, and the
+    // hydrate fan-out opens this session on that copy. A non-inherited child
+    // (a plain `spawn`) owns no durable scope yet, so a hydrator would run
+    // against a partition nothing wrote — it skips. The session's own record
+    // hydrates unconditionally either way: a new id reads nothing back and the
     // step degenerates to the E11 construction upsert.
-    const inheritsParentImage =
-      options.parentSessionId !== undefined || (options.spawnPath?.length ?? 0) > 0;
-    this._genesisReady = Promise.all([
-      this.runtime.hydrate(),
-      inheritsParentImage
-        ? Promise.resolve()
-        : this.hydrateCheckpointBridges(this.checkpointCtxFrom(this.storeCtx())),
-    ])
+    const inheritsSourceImage =
+      options.from !== undefined ||
+      options.parentSessionId !== undefined ||
+      (options.spawnPath?.length ?? 0) > 0;
+    const genesisScopes = (): Promise<void> => {
+      const hydrate = (): Promise<void> =>
+        this.hydrateCheckpointBridges(this.checkpointCtxFrom(this.storeCtx()));
+      const source = options.from;
+      if (source?.inherited === true) {
+        return this.branchCheckpointBridges(source).then(hydrate);
+      }
+      return inheritsSourceImage ? Promise.resolve() : hydrate();
+    };
+    this._genesisReady = Promise.all([this.runtime.hydrate(), genesisScopes()])
       .then(seedCreateInputValues)
       .then(() => {
-        // `eager` — the caller wants the row at genesis: same command, same
-        // hooks, same event as the run-earned path. Adoption (resume) is
-        // already durable, so the guard makes this a no-op there.
-        if (options.eager === true) this.earnRecord();
+        // The row at genesis: `eager` because the caller asked, INTERNAL
+        // because lineage is not speculative (ADR 100 law 3 — create-early /
+        // persist-late spares an abandoned conversation a blank row, and
+        // plumbing is not a conversation). Same command, same hooks, same
+        // event as the run-earned path; adoption (resume) is already durable,
+        // so the guard makes this a no-op there.
+        if (options.eager === true || options.internal === true) this.earnRecord();
       });
 
     // Eagerly mount — the compiler exposes `.ready` for its own
@@ -1819,16 +1866,18 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Copy `fromSessionId`'s durable scopes onto THIS session's own — the fork
-   * transport (checkpointing §5). Each {@link BranchCapable} bridge copies at
-   * its own store layer; no value crosses the seam, and the caller hydrates
-   * afterwards to open the child on the copy.
-   *
-   * Called on the CHILD by the parent's {@link fork} (private access across
-   * instances of one class), because the scopes being written are the child's.
+   * Copy the source's durable scopes onto THIS session's own — the branch
+   * transport (checkpointing §5), run in genesis for an inherited branch. Each
+   * {@link BranchCapable} bridge copies at its own store layer, bounded
+   * INCLUSIVELY by the anchor (ADR 100 law 1); no value crosses the seam, and
+   * genesis hydrates over the copy.
    */
-  private async branchCheckpointBridges(fromSessionId: string): Promise<void> {
-    const ctx: BranchCtx = { ...this.checkpointCtxFrom(this.storeCtx()), fromSessionId };
+  private async branchCheckpointBridges(from: SessionFrom): Promise<void> {
+    const ctx: BranchCtx = {
+      ...this.checkpointCtxFrom(this.storeCtx()),
+      fromSessionId: from.sessionId,
+      toSeq: from.seq,
+    };
     for (const bridge of Object.values(this.bridges)) {
       if (isBranchCapable(bridge)) await bridge.branch(ctx);
     }
@@ -2285,8 +2334,10 @@ export class SessionHarness<P = unknown>
    * {@link SpawnContextChildInput.parentOpId} for why it cannot ride the
    * FiberRef).
    *
-   * `fork()` inherits the envelope transitively — a fork IS a spawn plus a
-   * restore, and each of the three is its own record.
+   * A spawn is ALWAYS internal (ADR 100 reconciliation 1) — there is no
+   * non-internal spawn, and an agent-created session a person can see is a
+   * {@link fork} or a {@link reply}. `SpawnInput.branch` continues the parent's
+   * transcript from an entry; without it the worker starts clean.
    */
   async spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
     return runHarnessProtocol(
@@ -2305,18 +2356,48 @@ export class SessionHarness<P = unknown>
     );
   }
 
-  /** The `session:command:spawn` BODY — the pre-promotion `spawn` verbatim. */
+  /** The `session:command:spawn` BODY — a worker, always internal (ADR 100). */
   private async spawnBody(
     input: SpawnInput<P>,
     parentOpId: string | undefined,
   ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
+    return this.createBranchSession(
+      input,
+      {
+        entryId: input.branch,
+        inherited: input.branch !== undefined,
+        anchored: false,
+        internal: true,
+      },
+      parentOpId,
+    );
+  }
+
+  /**
+   * The ONE construction path behind every branch verb (ADR 100): `spawn` for a
+   * worker, `fork` / `reply` / `branch` for a conversation. They differ only in
+   * the `from` bag and the `internal` disposition they hand in — the depth
+   * ceiling, lineage extension, principal descent, child tracking, and the
+   * app-layer create door are shared.
+   *
+   * An INHERITED branch takes {@link snapshot} FIRST: it is the flush barrier,
+   * so every store-backed bridge has drained and the scopes the new session
+   * branches from are complete as of this instant (checkpointing §5). The copy
+   * itself happens in the child's genesis, over the durable stores.
+   */
+  private async createBranchSession(
+    input: SpawnInput<P>,
+    edge: BranchEdge,
+    parentOpId: string | undefined,
+  ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
+    const verb = edge.internal ? "spawn" : "branch";
     if (this._closed) {
-      throw new SessionClosedError({ attemptedCommand: "spawn" }) satisfies SessionError;
+      throw new SessionClosedError({ attemptedCommand: verb }) satisfies SessionError;
     }
     if (this.spawnContext === undefined) {
       throw new ExecutionFailed({
         cause: new Error(
-          "spawn() requires a spawnContext — the session was constructed without an app-level parent",
+          `${verb}() requires a spawnContext — the session was constructed without an app-level parent`,
         ),
       }) satisfies SessionError;
     }
@@ -2329,8 +2410,21 @@ export class SessionHarness<P = unknown>
         maxDepth: this.maxSpawnDepth,
       }) satisfies SessionError;
     }
+    const from = await this.resolveBranchEdge(edge);
+    if (from.inherited) await this.snapshot();
     const childInput = {
+      // The LIVE parent edge — subordination, and the door's only way to reach
+      // the registry.
+      //
+      // TODO(adr100-branch-lifecycle): a BRANCH is subordinate to nothing (ADR
+      // 100), so minting this edge for `fork`/`reply` also enlists the new
+      // conversation in its source's teardown cascade. Pinned as-is because it
+      // is the pre-ADR-100 behavior, not because it is right; the fix makes
+      // this optional at the door and the conversation verbs omit it.
       parentSessionId: this.runtime.id,
+      // ADR 100 — the durable branch edge. This session names the anchor
+      // (it holds the timeline); the app resolves that anchor's `seq`.
+      from,
       // C2 — default a child to a same-image copy of this session. The
       // `SpawnContextChildInput.agent` boundary stays REQUIRED; the session
       // resolves the default (own agent root) before crossing it.
@@ -2346,9 +2440,14 @@ export class SessionHarness<P = unknown>
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
-        // Backlog F — a child inherits the parent's `internal`, or is declared
-        // internal explicitly; stamps the whole child spine.
-        internal: this.runtime.isInternal() || input.internal === true ? true : undefined,
+        // Backlog F — a child of an internal session is internal, and a spawn
+        // is internal by rule (ADR 100); stamps the whole child spine.
+        //
+        // TODO(adr100-fork-of-plumbing): the OR-down half is pending Ryan —
+        // `ForkInput`'s docblock reads "never internal" flatly, which would
+        // make this `edge.internal` alone and let plumbing sprout a
+        // client-visible conversation. One expression, one flip.
+        internal: this.runtime.isInternal() || edge.internal ? true : undefined,
         // SP6 + EX1 — fan our construction signal AND the spawning execution's
         // teardown signal into the child, as one merged construction signal.
         // The first makes a parent abort tear down the child's in-flight work
@@ -2434,40 +2533,91 @@ export class SessionHarness<P = unknown>
     };
   }
 
-  async fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {
-    // C2 — a fork is spawn(no send, own agent root) + branch + restore.
-    // `snapshot()` FIRST, because it is the flush barrier: every store-backed
-    // bridge drains to its store, so the scopes the child branches from are
-    // complete as of the fork instant (checkpointing §5). `spawn({})` defaults
-    // `agent` to `this.agentRoot` (same-image child) and returns the unbound
-    // child (no `send`).
-    await this.snapshot();
-    // C2 — a fork is a same-image copy: the branch fan-out copies every
-    // store-backed bridge's scope onto the child, but the record's adopter
-    // `metadata` bag rides no harness store. So when the caller does NOT
-    // override `metadata`, the fork inherits the PARENT's bag (this session
-    // knows its own metadata). An explicit `ForkInput.metadata` wins.
-    // (Spawn does NOT auto-inherit metadata — a spawned child is a NEW session;
-    // adopter-selective inheritance rides the `onSessionCreate` reshape arm.)
-    const parentMeta =
+  /**
+   * Fork this conversation — a new direction from one of its entries (ADR 100),
+   * anchored nowhere: it stands BESIDE its source in the conversation list.
+   * Defaults to the tip, which is the gesture the button makes.
+   */
+  fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {
+    return this.branch(input);
+  }
+
+  /**
+   * Reply to one entry — a side-thread that STAYS at the entry it came from
+   * (ADR 100), rendered under its anchor rather than beside it.
+   */
+  reply(entryId: string, input: ReplyInput = {}): Promise<SessionHarnessProtocol<P>> {
+    return this.branch({ ...input, entryId, anchored: true });
+  }
+
+  /**
+   * The explicit branch form the two sugars above lower to — and, like them,
+   * deliberately NOT an operation: the hooks, the journal entry, and the
+   * security guard live on the app's create door exactly once, and a sugar
+   * envelope would double-wrap it (the `abort()` precedent).
+   *
+   * The new session inherits this one's state as of the anchor (law 1 — the
+   * branch fan-out over timeline, knobs and state, run in its genesis), is
+   * never internal unless this session is (plumbing does not sprout a visible
+   * conversation), and is always returned unbound: the caller drives it.
+   */
+  async branch(input: BranchInput = {}): Promise<SessionHarnessProtocol<P>> {
+    // The branch fan-out copies every store-backed bridge's scope, but the
+    // record's adopter `metadata` bag rides no harness store — so an
+    // un-overridden branch inherits THIS session's bag. (A spawn does not: a
+    // worker is a new session, and adopter-selective inheritance rides the
+    // `onSessionCreate` reshape arm.)
+    const sourceMeta =
       Object.keys(this.metadata).length > 0
         ? (this.metadata as Readonly<Record<string, unknown>>)
         : undefined;
-    const child = (await this.spawn({
-      ...omitUndefined({
-        sessionId: input.sessionId,
-        metadata: input.metadata ?? parentMeta,
-        maxTicks: input.maxTicks,
-        // Backlog F — explicit fork-internal; `spawn` ORs in the parent's own.
-        internal: input.internal === true ? true : undefined,
-      }),
-    })) as SessionHarnessProtocol<P>;
-    // Branch THEN restore. The branch copies this session's durable scopes onto
-    // the child's at the store layer; the restore's hydrate fan-out opens the
-    // child on that copy.
-    if (child instanceof SessionHarness) await child.branchCheckpointBridges(this.runtime.id);
-    await child.restore();
-    return child;
+    const child = await this.createBranchSession(
+      omitUndefined({ sessionId: input.sessionId, metadata: input.metadata ?? sourceMeta }),
+      {
+        ...omitUndefined({ entryId: input.entryId }),
+        inherited: input.inherited ?? true,
+        anchored: input.anchored ?? false,
+        // A conversation branch is visible unless its SOURCE is plumbing —
+        // `createBranchSession` ORs this session's own disposition in.
+        internal: false,
+      },
+      undefined,
+    );
+    return child as SessionHarnessProtocol<P>;
+  }
+
+  /**
+   * Resolve a branch anchor against THIS session's timeline — the source is
+   * the only party that holds it, so naming the entry is its job (the app
+   * resolves that entry's `seq` and writes the complete
+   * {@link SessionRecord.from}).
+   *
+   * No `entryId` means the tip, the default gesture. A session with nothing on
+   * its timeline yet — a host spawning a worker before the first message — has
+   * no anchor at all, and says so rather than inventing one.
+   *
+   * @throws {BranchSourceEntryNotFoundError} the named entry is not here.
+   */
+  private async resolveBranchEdge(input: BranchEdge): Promise<SessionFromInput> {
+    const anchorable = (await this.bridges.timeline.history()).filter(
+      (e) => messageIdOf(e.entry) !== undefined,
+    );
+    const anchor =
+      input.entryId === undefined
+        ? anchorable[anchorable.length - 1]
+        : anchorable.find((e) => messageIdOf(e.entry) === input.entryId);
+    if (input.entryId !== undefined && anchor === undefined) {
+      throw new BranchSourceEntryNotFoundError({
+        sessionId: this.runtime.id,
+        entryId: input.entryId,
+      });
+    }
+    return omitUndefined({
+      sessionId: this.runtime.id,
+      entryId: anchor === undefined ? undefined : messageIdOf(anchor.entry),
+      inherited: input.inherited,
+      anchored: input.anchored,
+    }) as SessionFromInput;
   }
 
   /**

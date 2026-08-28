@@ -228,12 +228,14 @@ describe("internal visibility — the stamp spine (session side)", () => {
     await session.close();
   });
 
-  // Spawn/fork feed the SAME session rung as createSession({internal}) — the
-  // `SpawnInput.internal`/`ForkInput.internal` → child `SessionRecord.internal`
-  // path routes through `createSessionBody` (covered above); the spawn/fork
-  // INTEGRATION (parent → child record) needs the app harness.
-  it.todo("spawn({ internal }) marks the child session internal");
-  it.todo("a child of an internal parent inherits internal (spawn + fork)");
+  // The branch verbs feed the SAME session rung as createSession({ internal }):
+  // the disposition each verb declares (ADR 100 — always `true` off `spawn`,
+  // the source's own off `fork`/`reply`) reaches the child's
+  // `SessionRecord.internal` through `createSessionBody`, covered above. What
+  // each verb DECLARES is pinned in `branching.spec.ts`; the parent → child
+  // record integration needs the app harness.
+  it.todo("a spawned child's record is internal");
+  it.todo("a branch off an internal session inherits internal");
 
   // Streaming rung (the loop's sink-wrap + StreamEvent.internal + client stream render)
   // is the next increment — the live path, distinct from the durable stamp above.

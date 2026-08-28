@@ -13,10 +13,10 @@
  * ## Store-backed via a single-key {@link View} (convergence run 3)
  *
  * The projection machine is no longer hand-rolled. The durable-mirror fields
- * PLUS the captured identity (`createdAt`, `appId`,
- * `parentSessionId`) and the app-owned descriptive slots (`title`,
- * `description`, `metadata`) live IN ONE cached `SessionRecord`, held by a
- * `View.collection` keyed by session id — a SINGLE cache entry. This proves the
+ * PLUS the captured identity (`createdAt`, `appId`, `from`) and the app-owned
+ * descriptive slots (`title`, `description`, `metadata`) live IN ONE cached
+ * `SessionRecord`, held by a `View.collection` keyed by session id — a SINGLE
+ * cache entry. This proves the
  * generic {@link View} primitive covers the single-record cell with no
  * refinement: the three things this class used to hand-roll —
  *
@@ -101,6 +101,7 @@ import type {
   ExecutionTarget,
   ModelKey,
   ModelUsage,
+  SessionFrom,
   SessionRecord,
   SessionRunOutcome,
   SessionStatus,
@@ -144,10 +145,10 @@ const NULL_STORE: Store<SessionRecord, SessionStoreQuery, CollectionMutation<Ses
 
 /**
  * Construction slots for a {@link SessionRuntime}. The identity fields
- * (`createdAt` captured internally; `appId` / `parentSessionId`
- * passed) and the app-owned descriptive slots (`title` / `description` /
- * `metadata`) are folded into the cached `SessionRecord` alongside the runtime
- * accounting. `store` is the durable registry (or `undefined` → {@link
+ * (`createdAt` captured internally; `appId` / `from` passed) and the app-owned
+ * descriptive slots (`title` / `description` / `metadata`) are folded into the
+ * cached `SessionRecord` alongside the runtime accounting. `store` is the
+ * durable registry (or `undefined` → {@link
  * NULL_STORE}); `storeCtx` is the harness's scope carrier, threaded on every
  * write across the Effect→Promise boundary.
  */
@@ -158,7 +159,12 @@ export interface SessionRuntimeInit {
   /** The owning harness's {@link StoreCtx} carrier, evaluated per write. */
   readonly storeCtx: () => StoreCtx;
   readonly appId?: string;
-  readonly parentSessionId?: string;
+  /**
+   * Where this session branched from (ADR 100) — resolved COMPLETE (`seq`
+   * included) by whoever held the source, and folded verbatim into the record.
+   * Absent ⇒ a root session.
+   */
+  readonly from?: SessionFrom;
   /** Owning principal (ADR 48) — construction-bound; folded into every record write. */
   readonly principal?: string;
   /** Session is INTERNAL (backlog F) — the durable top rung; folded into the record. */
@@ -268,7 +274,7 @@ export class SessionRuntime {
         status: "idle",
         executionCount: 0,
         usage: { ...ZERO_USAGE },
-        parentSessionId: init.parentSessionId,
+        from: init.from,
         principal: init.principal,
         internal: init.internal,
         spawnPath: init.spawnPath,
