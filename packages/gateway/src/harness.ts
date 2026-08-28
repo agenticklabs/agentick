@@ -49,6 +49,7 @@ import type {
   CursorPage,
   GatewaySessionRecord,
   PageRequest,
+  SessionHarnessProtocol,
   SessionRecord,
   SessionStoreQuery,
   EventBus,
@@ -120,6 +121,7 @@ import { createCommandsListHandler, createDynamicCommandResolver } from "./dynam
 import {
   appWireExtension,
   gatewayWireExtension,
+  mayBranchFrom,
   sessionWireExtension,
   subscriptionsWireExtension,
 } from "./wire/index.js";
@@ -1119,7 +1121,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
           identity,
           createSession: (input: CreateSessionInput = {}) =>
             this.dispatchAsIdentity(identity, app, { ...input, appId }, ({ appId: _, ...params }) =>
-              app.as(identity).createSession(params as CreateSessionInput),
+              this.createSessionAsIdentity(app, identity, params as CreateSessionInput),
             ),
           runOnce: (input: RunOnceInput): Promise<RunOnceResult> =>
             this.dispatchAsIdentity(identity, app, { ...input, appId }, ({ appId: _, ...params }) =>
@@ -1128,6 +1130,32 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         };
       },
     };
+  }
+
+  /**
+   * The `as()` door's create terminal — `app.as(identity).createSession` behind
+   * ADR 100 law 4, the same guard the wire handler runs and the same refusal.
+   *
+   * A door that carries an identity carries the rule that identity is FOR. This
+   * one claims an identity the way the wire does, hands the input to the same
+   * app, and reaches `from` — the field whose whole risk is that it reads
+   * another principal's timeline, knobs and state into a session the caller
+   * then owns. Guarding one door and not the other would make ownership a
+   * property of which entry point a connector happened to use.
+   *
+   * Runs INSIDE the dispatch terminal, so it sees the params as the
+   * `onBeforeWireAppCreateSession` hooks left them and runs after the verb-scope
+   * gate — the wire path's order exactly.
+   */
+  private async createSessionAsIdentity<P>(
+    app: AppHarnessProtocol<P>,
+    identity: IngressIdentity,
+    input: CreateSessionInput<P>,
+  ): Promise<SessionHarnessProtocol<P>> {
+    if (input.from !== undefined && !(await mayBranchFrom(app, input.from, identity.principal))) {
+      throw WireRpcError.forbidden("app:create_session");
+    }
+    return app.as(identity).createSession(input);
   }
 
   /**

@@ -727,14 +727,14 @@ describe("gateway/list_sessions — the cross-app union", () => {
     await app.createSession({
       sessionId: "fork",
       eager: true,
-      from: { sessionId: "conversation", entryId: "e1", inherited: true, anchored: false },
+      from: { sessionId: "conversation", inherited: true, anchored: false },
     });
     await apart();
     await app.createSession({
       sessionId: "worker",
       eager: true,
       internal: true,
-      from: { sessionId: "conversation", entryId: "e1", inherited: false, anchored: false },
+      from: { sessionId: "conversation", inherited: false, anchored: false },
     });
 
     const conversations = await listGateway(gateway, {

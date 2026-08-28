@@ -161,20 +161,22 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
       options: mkAppOptions({ title: "Ernesto" }),
     });
     const source = await app.createSession({ title: "a real conversation", eager: true });
-    const at = (entryId: string) => ({ sessionId: source.id, entryId, inherited: true });
+    // No `entryId` on any of these: at the door that means the source's tip, and
+    // this source has not spoken yet. The dispositions are the subject here.
+    const branch = { sessionId: source.id, inherited: true };
     await app.createSession({
       title: "the same conversation, a new direction",
-      from: { ...at("e1"), anchored: false },
+      from: { ...branch, anchored: false },
       eager: true,
     });
     await app.createSession({
-      title: "a side-thread on an entry",
-      from: { ...at("e1"), anchored: true },
+      title: "a side-thread hanging off it",
+      from: { ...branch, anchored: true },
       eager: true,
     });
     await app.createSession({
       title: "the analyst's own work",
-      from: { sessionId: source.id, entryId: "e1", inherited: false, anchored: false },
+      from: { sessionId: source.id, inherited: false, anchored: false },
       internal: true,
       eager: true,
     });
@@ -199,7 +201,7 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
       new Map([
         ["a real conversation", "conversation"],
         ["the same conversation, a new direction", "fork"],
-        ["a side-thread on an entry", "reply"],
+        ["a side-thread hanging off it", "reply"],
         ["the analyst's own work", "worker"],
       ]),
     );

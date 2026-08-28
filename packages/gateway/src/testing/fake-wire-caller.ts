@@ -73,6 +73,16 @@ export function fakeWireCaller(options: FakeWireCallerOptions = {}): FakeWireCal
     gateway: {
       app: (appId: string) => apps.find((a) => a.id === appId),
       apps: () => apps,
+      // The real resolver's two passes, in its order: the live registries, then
+      // the durable stores — the second is what resolves a paged-out or closed
+      // session, which a live-only lookup reports as unknown.
+      appForSession: async (sessionId: string) => {
+        for (const app of apps) {
+          if (app.getSession(sessionId) !== undefined) return app;
+          if ((await app.getSessionRecord(sessionId)) !== undefined) return app;
+        }
+        return undefined;
+      },
     },
     principal: options.principal,
   };

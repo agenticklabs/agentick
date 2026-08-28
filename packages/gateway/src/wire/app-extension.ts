@@ -18,12 +18,15 @@
 
 import { omitUndefined } from "@agentick/utils";
 import {
+  type AppHarnessProtocol,
   AppNotFoundError,
   defineWireExtension,
+  type SessionFromInput,
   SessionNotFoundError,
   sessionKeysetPage,
   sortSessionRecords,
   type WireExtension,
+  type WireExtensionContext,
   WireRpcError,
 } from "@agentick/spec";
 
@@ -36,22 +39,48 @@ import {
   visibleTo,
 } from "./session-list.js";
 
+/**
+ * The app a branch lands in — its SOURCE's, because a branch lives where the
+ * conversation it came from lives. Resolved from `from.sessionId` so a client
+ * holding a session id can fork it without also carrying the app id (decided
+ * 2026-08-28); an `appId` the caller DID name is checked against the resolved
+ * one rather than trusted.
+ *
+ * Every miss is ONE refusal — no mounted app claims the source, the caller does
+ * not own it, or the app they named is not the one it lives in. Indistinguishable
+ * on purpose: resolution answers "which app hosts this id", so three separable
+ * failures would hand any caller a map of every session on the gateway. ADR 100
+ * law 4 covers the state read; this covers the address the read reveals.
+ */
+async function appForBranch(
+  ctx: WireExtensionContext,
+  from: SessionFromInput,
+  appId: string | undefined,
+): Promise<AppHarnessProtocol> {
+  const app = await ctx.gateway.appForSession(from.sessionId);
+  if (
+    app !== undefined &&
+    (appId === undefined || appId === app.id) &&
+    (await mayBranchFrom(app, from, ctx.principal))
+  ) {
+    return app;
+  }
+  throw WireRpcError.forbidden("app:create_session");
+}
+
 export const appWireExtension: WireExtension = defineWireExtension({
   name: "@agentick/gateway#app",
   namespace: "app",
   version: "1.0.0",
   methods: {
     "app/create_session": async ({ appId, sessionId, metadata, eager, from }, ctx) => {
-      const app = ctx.gateway.app(appId);
-      if (!app) throw new AppNotFoundError({ appId });
-      // ADR 100 law 4 — the wire admits `from` only from a caller who owns the
-      // SOURCE session, because `inherited` reads the source's timeline, knobs
-      // and state into a session the caller then owns. Refused before anything
-      // is created, and refused the same way for an absent source (see
-      // {@link mayBranchFrom}).
-      if (from !== undefined && !(await mayBranchFrom(app, from, ctx.principal))) {
-        throw WireRpcError.forbidden("app:create_session");
-      }
+      // A branch resolves its app from its source and is admitted only by the
+      // source's owner (ADR 100 law 4) — both inside {@link appForBranch},
+      // before anything is created. A plain create names its app or takes the
+      // miss it always has: there is no source to resolve from.
+      const app =
+        from !== undefined ? await appForBranch(ctx, from, appId) : ctx.gateway.app(appId ?? "");
+      if (!app) throw new AppNotFoundError({ appId: appId ?? "" });
       const session = await app.createSession({
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(metadata !== undefined ? { metadata } : {}),
