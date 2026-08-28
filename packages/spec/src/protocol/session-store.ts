@@ -68,9 +68,11 @@ export interface SessionFrom {
    */
   readonly entryId?: string;
   /**
-   * {@link entryId}'s position in the source timeline — resolved once, at
-   * genesis. `0` ⇔ no {@link entryId}: the empty prefix (seqs start at 1), so
-   * an inherited copy bounded by it copies nothing.
+   * {@link entryId}'s seq in the source timeline AS THE STORE REPORTS IT
+   * (the bundled store is 0-based) — resolved once, at genesis, and used as
+   * the INCLUSIVE inherit bound (`entry.seq <= seq`). `-1` ⇔ no
+   * {@link entryId}: below every store's floor, so an inherited copy bounded
+   * by it copies nothing.
    */
   readonly seq: number;
   /**

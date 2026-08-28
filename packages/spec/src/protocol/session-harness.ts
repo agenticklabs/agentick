@@ -1534,6 +1534,14 @@ export interface SpawnContextChildInput<P = unknown> {
    */
   readonly parentSessionId: string;
   /**
+   * The child's disposition, CALLER-DECLARED — the door stamps what it is
+   * handed and forces nothing (the same bag serves `spawn` and the
+   * conversation verbs, and the door cannot infer which). `session.spawn()`
+   * always passes `true`; `fork`/`reply` pass their source's own disposition
+   * down (plumbing branches stay plumbing).
+   */
+  readonly internal?: boolean;
+  /**
    * The durable branch edge (ADR 100) — composed by `session.spawn()`, which
    * is the layer that knows the entry it branched at (the tip, or the
    * `branch` entry when the spawn continues the transcript). Genesis resolves
