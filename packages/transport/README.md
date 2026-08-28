@@ -365,8 +365,10 @@ Every default is overridable — `allowedOrigins`, `allowedHosts`, `trustProxy`,
 | **Forwarded-header trust** | `X-Forwarded-Host`/`-Proto` honored only when `trustProxy` is set **and** the immediate peer is loopback.                               |
 | **Non-permissive CORS**    | `corsHeadersFor` echoes an allow-listed origin exactly.                                                                                 |
 
+`allowedOrigins` entries are exact origins (`https://app.example.com`) or **subdomain patterns** — one `*` confined to the leftmost hostname label: `https://*.staging.example.com`, prefix form `https://pr-*.staging.example.com`. The `*` never matches a dot (one label deep), scheme and port are exact, and patterns feed the origin checks only — never the `Host` allow-list, so the DNS-rebinding defense stays explicit. Admission through a pattern is bounded by DNS control of the parent domain — the preview-deploy shape — at the documented cost that a subdomain takeover on that zone becomes an allowlist bypass.
+
 > [!WARNING]
-> There is no code path that emits `Access-Control-Allow-Origin: *`, and that is deliberate rather than a default you can flip. A wildcard origin on a reachable agent server is the difference between a local tool and a remote shell.
+> A bare `"*"`, a wildcard outside the leftmost label, or a pattern with fewer than two literal labels after it (`https://*.com`) is **refused with a thrown error at construction** — never silently permissive. There is no code path that emits `Access-Control-Allow-Origin: *`: CORS echoes the request's exact origin even for a pattern match. A fully permissive origin on a reachable agent server is the difference between a local tool and a remote shell.
 
 A WebSocket upgrade is not vulnerable to classic CSRF, so the WS edge relies on the unforgeable `Origin` rather than the token.
 
@@ -455,7 +457,7 @@ runIngressAuthnConformance({
 
 ## Verified by
 
-- `src/__tests__/web-security.spec.ts` — every default and every override, allow **and** deny for each: loopback predicate across the whole `127.0.0.0/8` block, host allow-list rejecting a rebinding host and a missing `Host`, cross-site rejection admitting a non-browser caller while denying a foreign `Origin`, the CSRF token on mutations but not reads, forwarded-header trust denying a spoof from a non-loopback peer, and that no wildcard CORS code path exists.
+- `src/__tests__/web-security.spec.ts` — every default and every override, allow **and** deny for each: loopback predicate across the whole `127.0.0.0/8` block, host allow-list rejecting a rebinding host and a missing `Host`, cross-site rejection admitting a non-browser caller while denying a foreign `Origin`, the CSRF token on mutations but not reads, forwarded-header trust denying a spoof from a non-loopback peer, that no wildcard CORS header code path exists, and the subdomain-pattern grammar: one-label matching (never across a dot), exact scheme/port, CORS echoing the request's exact origin, patterns never widening the `Host` list, and every degenerate form (`*`, `https://*.com`, mid-hostname wildcards) refused at construction.
 - `src/__tests__/wire-extension-dispatch.spec.ts` — registry routing, `MethodNotFound` for unknown methods, handler exceptions becoming error responses, `_extensions/list` including the no-registry case, the bootstrap short-circuit landing before the registry lookup, `ctx.session`/`ctx.app` resolution from params, and `ctx.publish` rejecting undeclared notifications.
 - `src/__tests__/wire-dispatch-seam.spec.ts` — a gateway wire hook firing exactly once around dispatch, self-scoping by operation, and authorization rejecting **before** the seam.
 - `src/__tests__/wire-declarative-auth.spec.ts` — verb-scope default, `required: false` skipping policy, additive roles, the anti-bypass rule that a role alone never reaches the verb, and `required: false` failing to waive a session's structural ceiling.

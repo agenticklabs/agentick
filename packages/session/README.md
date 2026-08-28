@@ -923,3 +923,24 @@ const session = factory({
 - `src/__tests__/define-session.spec.ts` — the factory marker, delegation to the supplied callbacks, helpful errors from unconfigured verbs, and no-op handles resolving cleanly.
 - `src/__tests__/usage-cost.spec.tsx` — the accounting record end to end: a two-model session partitioned into two `byModel` buckets whose usage sums to the flat total, an unidentified model keyed `unknown` rather than dropped, and the honesty rule in four forms (an unpriced session rolling up `partial` and never a zero `complete`, a mixed run's amount being the priced subset only, a foreign-currency tick counted unpriced in the total yet fully priced in its own bucket, and a session with no usage carrying no `cost` key at all). Plus `cost` + `model` stamped on the assistant entry (and absent, not zero, when unpriced), `SendResult` lifting the loop's own rollup, the turn-boundary record carrying the session-folded one, `byModel` + `cost` surviving evict → resume off the durable record (a second turn summing onto the first's totals rather than restarting from zero), and the wire projection: a priced tick's `tick` event carrying `cost` + `model` computed from the target's declared rates, an unpriced one carrying no `cost` key. The metrics mirror gets its own suite against a spy meter: a priced tick recording the cost histogram in micro-units labelled by model + currency, one observation per tick and per model rather than a pre-aggregate, an unpriced tick counting `unpriced` and recording NO cost observation, a mixed run emitting both, token histograms carrying only the kinds actually reported (an unreported kind emitting nothing, not a zero), a tick with no usage emitting nothing at all, labels holding to the bounded set — never `rateRef`, never a session / execution / tick id — the same mirror landing on the REAL loop path (the `.fx` twin, not just the public facade), and a session with no meter wired emitting nothing while its durable accounting lands unchanged.
 - Spawn, fork and lifecycle operations are verified where both layers live, in [@agentick/app](../app): `spawn-hardening.spec.tsx` (the depth ceiling and `SpawnDepthExceededError`, `spawnPath` on the record / event scope / handle stream, parent close and abort disposing children), `fork.spec.tsx` (state copy, lineage, divergence), `lifecycle-operations.spec.tsx` (the linked spawn and child-create records, a guard vetoing at either layer, the bus-only close op and its `"evicted"` provenance from both the idle sweep and the memory cap), `set-model.spec.tsx` (the swap end-to-end through `createApp`), `session-principal-lifecycle.spec.tsx` (spawn and fork inheriting the principal), and `cascading-abort.spec.tsx` (`abort({ cascade: true })` over the live subtree deepest-first with nothing disposed, a plain abort leaving a session-scoped child alone but tearing down one spawned inside the aborted execution, and the `originExecutionId` edge `abortExecutionTree` walks). The wire gate engaging on the stamped principal is pinned in [@agentick/transport](../transport) (`session-principal.spec.ts`).
+
+## `session:persist` — the earn moment is a command
+
+`createSession` creates the **live** session; `session:persist` creates the
+**row**. The framework dispatches it at the earn moments — the first `running`
+transition, and genesis when `eager` — and a host can call `session.persist()`
+to earn a row on its own schedule. Because it is a declared command it is
+journaled, mints `onBeforeSessionPersist` / `onAfterSessionPersist`, and its
+terminal event carries the written record — the wire-visible "this
+conversation now exists" a connected thread list inserts from
+(`sessionPersistEventQuery()` in `@agentick/spec` builds the subscription).
+
+A guard veto on `onBeforeSessionPersist` keeps a session **ephemeral by
+policy**: fully live, permanently recordless — teardown writes nothing. A
+second dispatch re-upserts the same record harmlessly; the framework's own
+dispatch sites guard on durability, so it fires once per lifetime.
+
+Verified by `src/__tests__/session-persist-command.spec.ts`: dispatched once on
+first send and never re-dispatched; eager earns at genesis through the same
+command; resume adopts with no dispatch; the veto leaves a running session
+recordless; the terminal event carries the record.
