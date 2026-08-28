@@ -1,6 +1,6 @@
 {
   "name": "@agentick/code-host",
-  "version": "1.0.0-next.168",
+  "version": "1.0.0-next.169",
   "description": "Host-engine-adaptive subprocess Runtime for @agentick/code — spawns process.execPath (node or bun), ndjson control channel on a dedicated fd, bindings marshaled across the membrane, timeMs/outputBytes enforced everywhere and memoryMb where the engine honors a heap ceiling. Placement, not containment.",
   "keywords": [
     "agent",
