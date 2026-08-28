@@ -31,8 +31,8 @@ const session = await app.createSession({ internal: true });
 await session.send({ internal: true, messages: [{ role: "user", content: "…" }] });
 
 // A spawned / forked sub-agent — its whole session.
-await session.spawn({ internal: true, send: { messages } });
-const worker = await session.fork({ internal: true });
+await session.spawn({ send: { messages } }); // spawn IS internal — forced, not optional (ADR 100 rev 2)
+const worker = await session.spawn({}); // the C2 same-image copy is spawn plumbing now (ADR 100 rev 2)
 
 // A tool — its calls and results, wherever it is used.
 const debug = createTool({ name: "debug_info", internal: true, inputSchema, handler });

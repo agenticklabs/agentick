@@ -124,17 +124,28 @@ relation(record); // "conversation" | "fork" | "reply" | "worker" | "forked-work
 // a pure fold over internal + from, for lists, UI, logs
 ```
 
-## Reconciliations (Phase 0 obligations)
+## Reconciliations (Phase 0 — DECIDED 2026-08-27, Ryan)
 
-1. **Backlog F** — `internal` is THEIR field; this ADR consumes it and
-   contributes law 2+3 as its session-granularity semantics. Sync with the
-   owning session before build: if the stamping phase's semantics diverge from
-   "excluded from principal lists, eager at genesis", theirs win and the laws
-   re-read against them.
-2. **Existing `session.fork()` (C2)** — the worker-flavored same-image copy is
-   absorbed as `spawn`'s plumbing (spawn + branch fan-out + restore). The name
-   `fork` is re-minted as the conversation verb above. One word, one meaning,
-   both poles. `ForkInput`/`SpawnInput` reshape accordingly.
+1. **Backlog F** — `internal` is Backlog F's field; this ADR contributes law
+   2+3 as its session-granularity semantics (= F's deferred increment 2 at
+   session grain). Two rulings:
+   - **Spawn forces `internal: true`** — there is no non-internal spawn; a
+     visible agent-created session is `fork`/`reply` with origin stamps. The
+     optional `internal` on `spawn(...)` in `internal-visibility.md` is
+     removed.
+   - **Host-created internal sessions are eager** — `createSession({ internal:
+true })` writes its row at genesis like any plumbing; uniform rule, no
+     carve-out.
+2. **Existing `session.fork()` (C2)** — absorbed as `spawn`'s plumbing; the
+   name `fork` re-minted as the conversation verb. Caller inventory (unfiltered
+   grep, both repos): the only real framework consumer is `@agentick/skills`
+   (skill runs execute in a same-image throwaway child) → migrates to the
+   `spawn(…, { branch: tip })` spelling, internal by rule 1. Knowify's
+   `session-service.fork(sessionId, seq, { title })` is CONVERSATION-fork
+   demand → lands on the new verb. Remainder: protocol passthroughs
+   (`define-session`) and specs, which reshape mechanically. C2's
+   snapshot-first flush barrier moves into the inherited-create genesis path
+   (checkpointing §5) — recorded so the rename does not lose it.
 3. **`parentSessionId` → `from`** — the widest sweep in the plan.
    Subordination consumers (abort-cascade, principal descent, spawnPath) keep
    their semantics: cascade walks the LIVE spawn registry as today (lifecycle
