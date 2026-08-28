@@ -266,8 +266,13 @@ export interface SessionHarnessOptions<P = unknown> {
    * compiler-agnostic.
    */
   readonly agent: unknown;
-  /** Initial component props (optional). */
-  readonly props?: P;
+  /**
+   * Opaque per-mount input for the root of the agent tree, forwarded
+   * verbatim to `compiler.mount({ rootInput })` — like `agent`, the
+   * session never interprets it. The app maps
+   * `CreateSessionInput.initialProps` here.
+   */
+  readonly rootInput?: unknown;
   /**
    * Optional per-session substrate overrides. Each accepts a
    * pre-built instance (sharing with the app) or a factory
@@ -1275,6 +1280,7 @@ export class SessionHarness<P = unknown>
           mountId: this.mountId,
           sessionId: options.sessionId,
           element: options.agent,
+          ...(options.rootInput !== undefined ? { rootInput: options.rootInput } : {}),
           bridges: this.bridges,
         }),
       )

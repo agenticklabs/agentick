@@ -501,9 +501,25 @@ export class CompilerHarness
     // host-config error callbacks can write `renderError` on it. The
     // state object is constructed first, then the compiler is
     // attached.
+    // This compiler's interpretation of the opaque `rootInput`: partial root
+    // props, cloneElement-merged over the element's own (rootInput wins per
+    // key). Non-object input or a non-element root (fragment, array) has no
+    // props seam — an authoring error worth surfacing, not swallowing.
+    let element = input.element as ReactNode;
+    if (input.rootInput !== undefined) {
+      if (typeof input.rootInput !== "object" || input.rootInput === null) {
+        throw new Error(`mount ${input.mountId}: rootInput must be a props object`);
+      }
+      if (!React.isValidElement(element)) {
+        throw new Error(
+          `mount ${input.mountId}: rootInput supplied but the root is not a single element`,
+        );
+      }
+      element = React.cloneElement(element, input.rootInput);
+    }
     const state: MountState = {
       mountId: input.mountId,
-      element: input.element as ReactNode,
+      element,
       bridges: input.bridges,
       container,
       compiler: null as unknown as Compiler,

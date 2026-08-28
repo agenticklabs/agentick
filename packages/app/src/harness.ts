@@ -624,7 +624,7 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
    * `session.maxConsecutiveFailedTicks`.
    */
   readonly maxConsecutiveFailedTicks?: number;
-  /** Default initial props. Equivalent to `session.props`. */
+  /** Default initial props. Equivalent to `session.rootInput`. */
   readonly initialProps?: P;
   /** Default initial knobs. Equivalent to `session.initialKnobs`. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
@@ -2942,9 +2942,9 @@ export class AppHarness<P = unknown>
           ? { narrate: this.sessionDefaults.narrate }
           : {}),
       ...(input.initialProps !== undefined
-        ? { props: input.initialProps }
-        : this.sessionDefaults.props !== undefined
-          ? { props: this.sessionDefaults.props }
+        ? { rootInput: input.initialProps }
+        : this.sessionDefaults.rootInput !== undefined
+          ? { rootInput: this.sessionDefaults.rootInput }
           : {}),
       ...(input.initialKnobs !== undefined
         ? { initialKnobs: input.initialKnobs }
@@ -4026,8 +4026,8 @@ function mergeSessionDefaults<P>(
   ) {
     merged.maxConsecutiveFailedTicks = options.maxConsecutiveFailedTicks;
   }
-  if (fromLong.props === undefined && options.initialProps !== undefined) {
-    merged.props = options.initialProps;
+  if (fromLong.rootInput === undefined && options.initialProps !== undefined) {
+    merged.rootInput = options.initialProps;
   }
   if (fromLong.initialKnobs === undefined && options.initialKnobs !== undefined) {
     merged.initialKnobs = options.initialKnobs;

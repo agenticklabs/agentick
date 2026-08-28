@@ -94,6 +94,14 @@ export interface MountInput extends MountScopedInput {
    */
   readonly element: unknown;
 
+  /**
+   * Opaque per-mount input for the root of the mounted tree — the carrier
+   * of `CreateSessionInput.initialProps`: one app-level root element,
+   * per-session variation. The compiler impl defines its interpretation,
+   * exactly as it does for `element`.
+   */
+  readonly rootInput?: unknown;
+
   readonly sessionId: string;
   /**
    * Per-render facts the tree reads synchronously while producing the IR
