@@ -416,7 +416,7 @@ export interface CostAttributionRecord {
  * Is `record` inside `rootId`'s spawn tree — the root itself, or any
  * descendant at any depth?
  *
- * Depth-agnostic on purpose. `parentSessionId` answers "direct children";
+ * Depth-agnostic on purpose. `from.sessionId` answers "direct children";
  * an agent tree is not one level deep, and a rollup that stops at one is
  * silently missing the grandchildren's money.
  */

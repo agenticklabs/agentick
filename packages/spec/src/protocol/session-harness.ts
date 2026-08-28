@@ -660,8 +660,9 @@ export interface RunnerBindable {
    * Optional sibling to {@link bindRunner} — inject an ISOLATED send
    * capability (three-audiences-plan §C split, item 3). Where `bindRunner`
    * routes a send into the CURRENT session, an isolation runner routes it
-   * into a fresh {@link SessionHarnessProtocol.fork} (a same-image,
-   * copied-state child) disposed after the run settles. The skills harness
+   * into a throwaway worker — {@link SessionHarnessProtocol.spawn} with
+   * `branch` at the tip, a same-image child carrying the transcript —
+   * disposed after the run settles. The skills harness
    * uses it for `skills.run(name, { isolate: true })`. A harness with NO
    * isolation runner bound falls back to whatever it did before (skills:
    * throw `SkillIsolationUnavailable`).
@@ -1153,23 +1154,22 @@ export interface SessionHarnessProtocol<P = unknown> {
   spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
 
   /**
-   * Fork this session into a same-image child with a full copy of its state.
+   * Fork this conversation — a new direction from one of its entries (ADR
+   * 100). The new session INHERITS this one's state as of that entry
+   * (timeline, knobs, state) and is not anchored: it stands beside its source
+   * in the conversation list rather than under it.
    *
-   * A fork is a {@link spawn} (no send) of the parent's OWN agent root —
-   * `SpawnInput.agent` defaults to the parent's root — over a BRANCHED copy of
-   * the parent's durable scopes: {@link snapshot} flushes, every
-   * `BranchCapable` bridge copies the parent's scope onto the child's at its
-   * own store layer, then {@link restore} opens the child on that copy. The
-   * child gets its own `sessionId` and spawn lineage (`spawnPath`), and is
-   * ALWAYS returned unbound — a fork never auto-sends; the caller drives it.
+   * Sugar over the app's create door with
+   * `from: { sessionId: this.id, entryId, inherited: true, anchored: false }`
+   * — deliberately not an operation of its own, so the hooks, the journal
+   * entry, and the security guard live on `create_session` exactly once.
    *
-   * Post-fork the two sessions diverge: a mutation on one (a knob set, a new
-   * timeline entry) does NOT reflect on the other. This is the isolation
-   * primitive `skills.run(name, { isolate: true })` routes through.
+   * Always returned unbound: a fork never auto-sends, the caller drives it.
+   * Post-fork the two sessions diverge — a knob set or a new entry on one does
+   * not reflect on the other.
    *
-   * @throws {SessionError} — `SessionClosedError` if the parent is shutting
-   *   down; `SpawnDepthExceededError` at the spawn-depth ceiling; impl-specific
-   *   failures otherwise.
+   * @throws {SessionError} — `SessionClosedError` if this session is shutting
+   *   down; impl-specific failures otherwise.
    */
   fork(input?: ForkInput): Promise<SessionHarnessProtocol<P>>;
 
@@ -1340,32 +1340,31 @@ export interface SpawnInput<P = unknown> {
    */
   readonly originCallId?: string;
   /**
-   * Declare the CHILD session internal (backlog F — internal-visibility.md).
-   * ORed with the parent's own `internal`, so an internal parent's whole spawn
-   * subtree is internal by default; set here to mark a child internal under a
-   * non-internal parent. Stamped onto the child's {@link SessionRecord.internal}.
+   * Continue the parent's TRANSCRIPT from this entry — the worker inherits
+   * the parent's timeline, knobs and state up to it (ADR 100's
+   * `spawn(agent, { branch: e })` row). Omit for a worker that starts clean
+   * with only what its send carries.
    */
-  readonly internal?: boolean;
+  readonly branch?: string;
 }
 
 /**
- * Input for {@link SessionHarnessProtocol.fork}. A fork carries no agent
- * root (a fork is by definition a same-image child of its parent) and no
- * initial send (a fork is always returned unbound — the caller drives it).
+ * Input for {@link SessionHarnessProtocol.fork} — the CONVERSATION verb
+ * (ADR 100). A fork carries no agent root (it is a same-image branch of its
+ * source) and no initial send (it is always returned unbound — the caller
+ * drives it), and is never internal: an agent-created session a person can
+ * see is a fork or a reply, and a session they cannot see is a spawn.
  */
 export interface ForkInput {
-  /** Stable child session id. Generated if omitted. */
-  readonly sessionId?: string;
-  /** Caller metadata stored on the child's registry entry. */
-  readonly metadata?: Readonly<Record<string, unknown>>;
-  /** Override the parent's max tick bound for the forked child. */
-  readonly maxTicks?: number;
   /**
-   * Declare the forked child internal (backlog F). ORed with the parent's
-   * `internal` (a fork of an internal session is internal). Stamped onto the
-   * child's {@link SessionRecord.internal}.
+   * Branch at this timeline entry. Defaults to the source's tip — "fork from
+   * here", the gesture the button makes.
    */
-  readonly internal?: boolean;
+  readonly entryId?: string;
+  /** Stable id for the new session. Generated if omitted. */
+  readonly sessionId?: string;
+  /** Caller metadata stored on the new session's registry entry. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 // ============================================================================
@@ -1510,8 +1509,9 @@ export interface SpawnContextChildInput<P = unknown> {
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   readonly maxTicks?: number;
   /**
-   * The child's resolved `internal` disposition (backlog F) — `spawn()` computes
-   * `parent.internal || input.internal` and threads it here; stamped onto the
+   * The child's `internal` disposition (backlog F). Always `true` off
+   * `spawn()` — there is no non-internal spawn (ADR 100 reconciliation 1); a
+   * visible agent-created session is a fork or a reply. Stamped onto the
    * child's harness + `SessionRecord`, so its whole spine is internal.
    */
   readonly internal?: boolean;

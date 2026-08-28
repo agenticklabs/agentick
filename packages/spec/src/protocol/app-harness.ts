@@ -29,7 +29,12 @@ import type { IngressIdentity } from "../wire/authorizer.js";
 import type { IdentityScoped } from "./identity.js";
 import type { ModelFacts } from "../data/model-facts.js";
 import type { SessionStatus } from "./hook-bridges.js";
-import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
+import type {
+  SessionFrom,
+  SessionFromInput,
+  SessionRecord,
+  SessionStoreQuery,
+} from "./session-store.js";
 import type { CursorPage, PageRequest } from "./paging.js";
 import type { ExecutorFactory, ExecutorProtocol, LanguageModelExecutor } from "./executor.js";
 import type { EventBus, EventBusFactory, SubscribeOptions } from "./bus.js";
@@ -169,10 +174,18 @@ export interface CreateSessionInput<P = unknown> {
    */
   readonly initialState?: Readonly<Record<string, unknown>>;
   /**
-   * Parent session id when this session is itself a spawned child.
-   * Wired by the spawn flow; rarely supplied directly by adopters.
+   * Where this session comes from (ADR 100) — the ONE door every branch goes
+   * through. `session.fork` / `reply` / `spawn` are thin sugars that fill this
+   * bag; a host fills it directly. Omit for a root session.
+   *
+   * `seq` is not accepted: genesis resolves `from.entryId` to its position in
+   * the source timeline and writes {@link SessionRecord.from} with it.
+   *
+   * SECURITY (ADR 100 law 4): the wire admits `from` only when the caller's
+   * principal owns `from.sessionId`. `inherited` is a cross-session state
+   * READ, so an unowned source is a data leak, not a bad parameter.
    */
-  readonly parentSessionId?: string;
+  readonly from?: SessionFromInput;
 }
 
 /**
@@ -334,14 +347,15 @@ export interface SessionEntry {
   readonly title?: string;
   readonly description?: string;
   /**
-   * The parent session, when this one was SPAWNED. Absent on a root.
+   * Where this session came from (ADR 100) — the durable {@link SessionFrom}
+   * bag, projected verbatim. Absent on a root.
    *
-   * A client filters roots with `SessionFilter.root`, but a client that lists
-   * everything still has to tell them apart — to nest a sub-session under the turn
-   * that opened it, or to mark a row as an agent's own work rather than a
-   * conversation.
+   * The whole bag rather than just the source id, because rendering the row
+   * needs the rest of it: an anchored session hangs under `from.entryId` in
+   * the source's transcript, and a fork of a conversation is a conversation —
+   * which a bare parent id cannot say.
    */
-  readonly parentSessionId?: string;
+  readonly from?: SessionFrom;
 }
 
 export type SessionListEntry = SessionEntry;
@@ -350,27 +364,26 @@ export interface SessionFilter {
   readonly status?: SessionStatus | ReadonlyArray<SessionStatus>;
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
-   * `true` lists only ROOT sessions — what a conversation list wants.
-   *
-   * A spawned child is a real session with a real durable record, so without this a
-   * sub-agent's working session appears in the user's thread list beside
-   * conversations they actually had. Named `root` rather than expressed as
-   * `parentSessionId: null` because a wire filter is read by callers who did not
-   * write it, and an accidental `null` silently narrowing a list to roots is a
-   * worse failure than one extra field.
+   * Sessions branched from exactly this one — the session GRAPH, one level,
+   * and what a thread view asks for once a conversation is open. Forks,
+   * replies, and workers alike; narrow with the two dispositions below.
    */
-  readonly root?: boolean;
+  readonly fromSessionId?: string;
   /**
-   * Children of exactly this session — the other half of the tree, and what a
-   * session-GRAPH view asks for once a thread is open.
+   * Match `from.anchored`. `false` also matches a session with no `from`.
    *
-   * The store has had this dimension all along; the wire did not project it, so a
-   * client could exclude sub-sessions from a list but never enumerate the ones
-   * belonging to a turn. Contradictory with `root: true` (nothing has both no
-   * parent and a specific one) — supplying both matches nothing rather than
-   * silently preferring one.
+   * A conversation list wants `{ internal: false, anchored: false }` (ADR 100
+   * law 2): anchored sessions render under their anchor entry, internal ones
+   * render nowhere. That composed predicate is what the deleted `root` filter
+   * was reaching for and got wrong — a fork of a conversation has a `from` and
+   * still belongs in the list.
    */
-  readonly parentSessionId?: string;
+  readonly anchored?: boolean;
+  /**
+   * Match `internal`. `false` also matches a record that never stamped it.
+   * A client asks for `true` only to see plumbing on purpose (a debug view).
+   */
+  readonly internal?: boolean;
 }
 
 // ============================================================================
@@ -703,7 +716,7 @@ export interface AppHarnessProtocol<P = unknown> {
    * suits a one-shot fan-out over a registry snapshot. A subscriber filtering a
    * live event stream has the opposite problem — one session id per event,
    * arriving continuously — so it walks UP instead: from the session, follow
-   * the `parentSessionId` chain and answer `true` at the first ancestor (the
+   * the live parent chain and answer `true` at the first ancestor (the
    * session itself included) whose `originExecutionId` is the target. Same
    * predicate, same edges, O(depth) per call and no snapshot.
    *
@@ -730,7 +743,7 @@ export interface AppHarnessProtocol<P = unknown> {
 
   /**
    * Is `sessionId` inside the live spawn tree rooted at `rootSessionId`? The
-   * same O(depth) `parentSessionId` climb {@link executionTreeContains} makes,
+   * same O(depth) parent climb {@link executionTreeContains} makes,
    * asking the OTHER membership question — and the difference between them is
    * not a detail, it is the whole point of having both.
    *
@@ -994,8 +1007,8 @@ export interface AppHarnessProtocol<P = unknown> {
    *   - **reshape** — return a `CreateSessionInput` to REPLACE the input the
    *     rest of construction sees (fold-forward: later handlers and the
    *     session build both observe the reshaped value). This is the adopter
-   *     seam for selective spawn inheritance — read `parentSessionId`, look up
-   *     the parent record, inject chosen `metadata` keys into the child.
+   *     seam for selective spawn inheritance — read `from.sessionId`, look up
+   *     the source record, inject chosen `metadata` keys into the child.
    *   - **pass** — return `void` to leave the input untouched.
    *
    * Handlers run in registration order; a reshape from one is visible to the

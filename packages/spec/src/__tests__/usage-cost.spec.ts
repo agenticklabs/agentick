@@ -472,7 +472,7 @@ describe("per-model rollups", () => {
   });
 
   it("attributes an agent tree at QUERY time, at any depth", () => {
-    // root ← child ← grandchild. `parentSessionId` would stop at `child`
+    // root ← child ← grandchild. `from.sessionId` would stop at `child`
     // and silently lose the grandchild's money.
     const tree = rollupTree(
       [

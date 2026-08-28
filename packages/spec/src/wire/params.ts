@@ -19,6 +19,7 @@ import type { ModelFacts } from "../data/model-facts.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
 import type { DestroySessionResult, SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { SessionStatus } from "../protocol/hook-bridges.js";
+import type { SessionFromInput } from "../protocol/session-store.js";
 import type {
   GatewayDestroySessionResult,
   GatewaySessionEntry,
@@ -134,6 +135,26 @@ export interface AppCreateSessionParams extends WireRequestParams {
    * first message and needs it enumerable / readable immediately.
    */
   readonly eager?: boolean;
+  /**
+   * Where the new session comes from (ADR 100) — the door's bag, `seq`
+   * excluded (genesis resolves it from `entryId`).
+   *
+   * Admitted ONLY when the caller's principal owns `from.sessionId` (ADR 100
+   * law 4, enforced at the gateway handler): `inherited` reads the source's
+   * timeline, knobs and state, so an unowned source is a cross-tenant state
+   * read rather than a bad parameter.
+   *
+   * Origin stamps (`originExecutionId` / `originCallId`) are deliberately NOT
+   * here — lineage is the edge's to assert, never the caller's.
+   */
+  readonly from?: SessionFromInput;
+  // TODO(adr100-internal-wire): `internal` is host-door-only today — Backlog F
+  // wired it through `createSession` and `send` and never projected it onto any
+  // wire params type. ADR 100 law 4 says internal dispositions follow "Backlog
+  // F's door rules" without saying what those are on the wire. OPEN: may a wire
+  // caller declare a session internal (a client opening its own plumbing
+  // session), or is `internal` server-declared like `principal` and
+  // `requiredScopes`? Left off the wire until decided.
 }
 
 export interface AppCreateSessionResult {
