@@ -90,6 +90,11 @@ export interface SessionFrom {
  * The `from` a create DOOR accepts — {@link SessionFrom} minus `seq`, which
  * genesis resolves from `entryId` and writes onto the record.
  */
+/**
+ * The DOOR shape — no `seq` (genesis resolves it). `entryId` absent at the
+ * door means "the source's tip, as of genesis"; on the RECORD, absent means
+ * the source had no entries. Two layers, two meanings, one resolution site.
+ */
 export type SessionFromInput = Omit<SessionFrom, "seq">;
 
 /**
