@@ -49,6 +49,7 @@ import type { MessageInbox, Unsubscribe } from "./inbox.js";
 import type { ToolsHandle } from "./tool-executor.js";
 import type { OperationJournal } from "./journal.js";
 import type { EscalationInterceptor } from "./escalation.js";
+import type { SessionFromInput } from "./session-store.js";
 
 // ============================================================================
 // SessionSubstrateParent — forward-reference shell for factories
@@ -1174,6 +1175,21 @@ export interface SessionHarnessProtocol<P = unknown> {
   fork(input?: ForkInput): Promise<SessionHarnessProtocol<P>>;
 
   /**
+   * The reply verb (ADR 100): a side-thread anchored at `entryId` — a fork
+   * whose `from` is `anchored: true`, rendered under its anchor and excluded
+   * from the conversation list. One thread per entry is the BUTTON's
+   * convention (open-if-exists), never a structural constraint here.
+   */
+  reply(entryId: string, input?: ReplyInput): Promise<SessionHarnessProtocol<P>>;
+
+  /**
+   * The explicit branch form the gestures collapse to (ADR 100) — `reply` and
+   * `fork` are three defaults over this. Prefer the gestures; reach for this
+   * when a caller needs a combination they do not expose.
+   */
+  branch(input: BranchInput): Promise<SessionHarnessProtocol<P>>;
+
+  /**
    * The model this session is about to call, and what is known about it —
    * resolved against the session's LIVE target with the full precedence fold
    * (adopter registry > the target's self-description > seed).
@@ -1355,6 +1371,22 @@ export interface SpawnInput<P = unknown> {
  * drives it), and is never internal: an agent-created session a person can
  * see is a fork or a reply, and a session they cannot see is a spawn.
  */
+/** Input for {@link SessionHarnessProtocol.reply} — {@link ForkInput} minus the anchor (it is the argument). */
+export type ReplyInput = Omit<ForkInput, "entryId">;
+
+/**
+ * Input for {@link SessionHarnessProtocol.branch} — the explicit form.
+ * `anchored` defaults `false`; `inherited` defaults `true` (a branch that
+ * inherits nothing is a spawn concern, but the door does not forbid it).
+ */
+export interface BranchInput {
+  readonly entryId?: string;
+  readonly anchored?: boolean;
+  readonly inherited?: boolean;
+  readonly sessionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
 export interface ForkInput {
   /**
    * Branch at this timeline entry. Defaults to the source's tip — "fork from
@@ -1493,7 +1525,24 @@ export interface SpawnContext<P = unknown> {
 }
 
 export interface SpawnContextChildInput<P = unknown> {
+  /**
+   * The LIVE parent edge — the registry entry, the inbox climb, and the abort
+   * cascade, all of which are lifecycle facts about a subordinate child rather
+   * than a projection of the durable record. Distinct from {@link from} on
+   * purpose: a branch (fork / reply) records where it came from and is
+   * subordinate to nothing, so `from` must never mint this edge.
+   */
   readonly parentSessionId: string;
+  /**
+   * The durable branch edge (ADR 100) — composed by `session.spawn()`, which
+   * is the layer that knows the entry it branched at (the tip, or the
+   * `branch` entry when the spawn continues the transcript). Genesis resolves
+   * `entryId` to its `seq` and writes {@link SessionRecord.from}.
+   *
+   * Absent when there is no entry to branch at — a spawn off a parent whose
+   * timeline is still empty.
+   */
+  readonly from?: SessionFromInput;
   readonly agent: unknown;
   readonly sessionId?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -1508,13 +1557,6 @@ export interface SpawnContextChildInput<P = unknown> {
   readonly initialProps?: P;
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   readonly maxTicks?: number;
-  /**
-   * The child's `internal` disposition (backlog F). Always `true` off
-   * `spawn()` — there is no non-internal spawn (ADR 100 reconciliation 1); a
-   * visible agent-created session is a fork or a reply. Stamped onto the
-   * child's harness + `SessionRecord`, so its whole spine is internal.
-   */
-  readonly internal?: boolean;
   /**
    * The child's spawn lineage (SP5) — the parent's own `spawnPath`
    * extended with the parent's session id, root-first. Its length is the

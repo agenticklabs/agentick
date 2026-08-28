@@ -61,9 +61,17 @@ import type { StoreCtx } from "./store-ctx.js";
 export interface SessionFrom {
   /** The session it branched from. */
   readonly sessionId: string;
-  /** The timeline entry it branched at. */
-  readonly entryId: string;
-  /** {@link entryId}'s position in the source timeline — resolved once, at genesis. */
+  /**
+   * The timeline entry it branched at. ABSENT when the source had no entries
+   * (a spawn off a fresh session): the edge still records lineage, anchored to
+   * nothing. Entry ids are message ids — boundary entries cannot anchor.
+   */
+  readonly entryId?: string;
+  /**
+   * {@link entryId}'s position in the source timeline — resolved once, at
+   * genesis. `0` ⇔ no {@link entryId}: the empty prefix (seqs start at 1), so
+   * an inherited copy bounded by it copies nothing.
+   */
   readonly seq: number;
   /**
    * It took the source's state up to {@link seq} — timeline AND knobs AND

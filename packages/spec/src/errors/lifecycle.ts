@@ -62,6 +62,22 @@ export type AppErrorChannel = SessionNotFoundError | AppClosedError | AppExecuti
 // GatewayError — gateway-level lifecycle failures
 // ============================================================================
 
+/**
+ * ADR 100 — genesis received `from.entryId` that does not exist in the source
+ * session's timeline. Branch genesis fails rather than guessing an anchor.
+ */
+export class BranchSourceEntryNotFoundError extends AppError {
+  readonly _tag = "BranchSourceEntryNotFoundError" as const;
+  readonly sessionId: string;
+  readonly entryId: string;
+  constructor(args: { readonly sessionId: string; readonly entryId: string }) {
+    super(`branch source entry ${args.entryId} not found in session ${args.sessionId}`);
+    this.sessionId = args.sessionId;
+    this.entryId = args.entryId;
+  }
+}
+registerAgentickError("BranchSourceEntryNotFoundError", BranchSourceEntryNotFoundError);
+
 export abstract class GatewayError extends AgentickError {}
 
 export class GatewayClosedError extends GatewayError {
@@ -366,7 +382,8 @@ export type SessionErrorChannel =
   | KnobError
   | ChannelError
   | ExecutionFailed
-  | NoModelForExecutionError;
+  | NoModelForExecutionError
+  | BranchSourceEntryNotFoundError;
 
 // ============================================================================
 // StateApplyError — state-restore failures (composite union)

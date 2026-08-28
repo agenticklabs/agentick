@@ -148,13 +148,12 @@ export interface AppCreateSessionParams extends WireRequestParams {
    * here — lineage is the edge's to assert, never the caller's.
    */
   readonly from?: SessionFromInput;
-  // TODO(adr100-internal-wire): `internal` is host-door-only today — Backlog F
-  // wired it through `createSession` and `send` and never projected it onto any
-  // wire params type. ADR 100 law 4 says internal dispositions follow "Backlog
-  // F's door rules" without saying what those are on the wire. OPEN: may a wire
-  // caller declare a session internal (a client opening its own plumbing
-  // session), or is `internal` server-declared like `principal` and
-  // `requiredScopes`? Left off the wire until decided.
+  /*
+   * No `internal` here: it is server-declared, like `principal` (decided
+   * 2026-08-28). A caller able to hide its own session from the client surface
+   * could hide it from whoever reads that surface. Hosts and the spawn flow
+   * set it through `CreateSessionInput`.
+   */
 }
 
 export interface AppCreateSessionResult {

@@ -356,6 +356,16 @@ export interface SessionEntry {
    * which a bare parent id cannot say.
    */
   readonly from?: SessionFrom;
+  /**
+   * The session is INTERNAL (backlog F) — plumbing, not a conversation. Absent
+   * IS not-internal.
+   *
+   * Projected beside {@link from} because a view that lists more than the
+   * conversation list has to classify what came back: the two together are what
+   * `relation()` folds, and `SessionFilter.internal` is only useful to a caller
+   * that can then tell the rows apart.
+   */
+  readonly internal?: boolean;
 }
 
 export type SessionListEntry = SessionEntry;

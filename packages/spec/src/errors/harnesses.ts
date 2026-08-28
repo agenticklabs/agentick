@@ -1156,21 +1156,22 @@ export class SkillsBackendError extends SkillsError {
 registerAgentickError("SkillsBackendError", SkillsBackendError);
 
 /**
- * `skills.run(name, { isolate: true })` — the isolated (fork) execution site
- * is not yet available. C-core (three-audiences-plan §C split) ships
- * `skills.run` INLINE only; the fork enabler (`session.fork()` + the session
- * retaining its own agent root so `SpawnInput.agent` can default) is the C2
- * follow-up. Thrown eagerly rather than silently degrading to an inline run —
- * an adopter who asked for isolation must not get non-isolated execution.
+ * `skills.run(name, { isolate: true })` — no isolated execution site. The
+ * isolation runner (a send routed into `session.spawn({ branch: tip })`, the
+ * throwaway worker disposed after the run) is bound by the composition root at
+ * session install; a harness constructed outside a session, or one whose host
+ * never bound it, has nowhere to run. Thrown eagerly rather than silently
+ * degrading to an inline run — an adopter who asked for isolation must not get
+ * non-isolated execution.
  */
 export class SkillIsolationUnavailable extends SkillsError {
   readonly _tag = "SkillIsolationUnavailable" as const;
   readonly skillName: string;
   constructor(args: { readonly skillName: string; readonly cause?: unknown }) {
     super(
-      `skill ${args.skillName}: isolated run (isolate: true) is not yet available — ` +
-        `the session.fork() enabler ships in C2 (three-audiences-plan §C split, item 3). ` +
-        `Run inline (omit isolate) for now.`,
+      `skill ${args.skillName}: isolated run (isolate: true) has no isolation runner bound — ` +
+        `the composition root binds one at session install (a send routed into ` +
+        `session.spawn({ branch: tip })). Run inline (omit isolate) without one.`,
       { cause: args.cause },
     );
     this.skillName = args.skillName;

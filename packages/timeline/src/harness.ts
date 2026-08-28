@@ -794,7 +794,11 @@ export class TimelineHarness
    */
   async branch(ctx: BranchCtx): Promise<void> {
     if ((await this.store.read(this.scopeId, ctx.storeCtx)).length > 0) return;
-    const source = await this.store.read(timelineScopeKey(ctx.fromSessionId), ctx.storeCtx);
+    const whole = await this.store.read(timelineScopeKey(ctx.fromSessionId), ctx.storeCtx);
+    // ADR 100 law 1 — the anchor bounds the inherited prefix. The read tier
+    // has no seq column, so the bound applies by position: entries are
+    // append-ordered and seqs are 1-based-dense in every store this reads.
+    const source = ctx.toSeq === undefined ? whole : whole.slice(0, ctx.toSeq);
     if (source.length === 0) return;
     await this.store.append(this.scopeId, source, ctx.storeCtx);
   }

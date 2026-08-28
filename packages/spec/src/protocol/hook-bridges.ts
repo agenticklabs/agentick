@@ -163,6 +163,12 @@ export function isCheckpointCapable(x: unknown): x is CheckpointCapable {
  */
 export interface BranchCtx extends HydrateCtx {
   readonly fromSessionId: string;
+  /**
+   * ADR 100 law 1's upper bound — copy the source SEQUENCE only up to this
+   * position (`entry.seq <= toSeq`). Absent ⇒ the whole scope. Snapshot-shaped
+   * scopes (knobs, state) ignore it: they are state-as-of, not sequences.
+   */
+  readonly toSeq?: number;
 }
 
 /**
