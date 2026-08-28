@@ -1,12 +1,14 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
   "plugins": ["typescript", "react", "vitest", "import"],
+  "jsPlugins": ["./lint/plugin.mjs"],
   "categories": {
     "correctness": "error",
     "suspicious": "warn",
     "perf": "warn"
   },
   "rules": {
+    "agentick/no-floating-run-promise": "error",
     "no-console": "off",
     "no-await-in-loop": "off",
     "no-unused-vars": [
