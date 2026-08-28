@@ -512,7 +512,7 @@ export class KnobsHarness
    * unconditionally rather than probe for subscribers.
    */
   private publishStateFrame(frame: KnobsStateFrame): void {
-    void Effect.runPromise(
+    this.runDetached(
       this.bus.append({
         id: generateId(),
         surface: "session",
@@ -528,7 +528,8 @@ export class KnobsHarness
         scope: this.parentScope ?? {},
         payload: frame,
       } as Parameters<typeof this.bus.append>[0]),
-    ).catch(() => undefined);
+      "knobs state frame",
+    );
   }
 
   // ─────────── Inbox routing ───────────

@@ -18,6 +18,7 @@ import {
   orderInterceptors,
   type Middleware,
   runHarnessProtocol,
+  runDetached,
   spanAttributes,
   generateId,
   withCallMiddleware,
@@ -2544,7 +2545,7 @@ export class SessionHarness<P = unknown>
           ),
         );
         return () => {
-          void Effect.runPromise(Fiber.interrupt(fiber));
+          runDetached(Fiber.interrupt(fiber));
         };
       },
       request: async <TReq, TResp>(
@@ -2591,7 +2592,7 @@ export class SessionHarness<P = unknown>
           ),
         );
         return () => {
-          void Effect.runPromise(Fiber.interrupt(fiber));
+          runDetached(Fiber.interrupt(fiber));
         };
         // sessionAddress acknowledged via the outer closure so the
         // lint doesn't flag it as unused when the parent uses it.
@@ -2651,7 +2652,7 @@ export class SessionHarness<P = unknown>
       watch("tool", TOOL_CLIENT_CALL_COMMAND),
     ];
     this.onClose(() => {
-      for (const fiber of fibers) void Effect.runPromise(Fiber.interrupt(fiber));
+      for (const fiber of fibers) runDetached(Fiber.interrupt(fiber));
     });
   }
 

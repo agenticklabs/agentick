@@ -26,6 +26,7 @@
  */
 
 import { Effect, Fiber, Stream } from "effect";
+import { runDetached } from "./run-detached.js";
 
 import type { EventBus, EventQuery, ProtocolEvent, Unsubscribe } from "@agentick/spec";
 
@@ -56,6 +57,6 @@ export function forkBusSubscription(
     ),
   );
   return () => {
-    void Effect.runPromise(Fiber.interrupt(fiber));
+    runDetached(Fiber.interrupt(fiber));
   };
 }

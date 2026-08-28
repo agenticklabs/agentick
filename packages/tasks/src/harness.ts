@@ -337,10 +337,11 @@ export class TasksHarness
   private closing = false;
 
   /**
-   * Resolves once hydration (orphan accounting, ADR 68) has run — chained
-   * AFTER {@link BaseHarness.ready}. Impl-specific (not on the protocol);
-   * tests + rehydration paths that must observe `interrupted` marking
-   * await this. For a fresh session the store is empty → a no-op.
+   * Resolves once hydration (orphan accounting, ADR 68) has run. An alias
+   * of {@link BaseHarness.ready} — hydration is chained INTO readiness via
+   * `afterReady`, so there is ONE readiness truth and no floating sibling
+   * promise to leak a registration failure as an unhandled rejection (#315).
+   * For a fresh session the store is empty → a no-op.
    */
   readonly hydrated: Promise<void>;
 
@@ -379,11 +380,9 @@ export class TasksHarness
     }
     this.buildElicit = options.buildElicit;
     this.defaultWake = options.defaultWake;
-    // Hydration reads the store AFTER inbox registration. `ready` is a
-    // readonly BaseHarness field (can't reassign), so this is a sibling
-    // barrier. TODO(#134-followup): fold into `ready` if BaseHarness gains
-    // a post-construction async hook.
-    this.hydrated = this.ready.then(() => this.hydrateOrphans());
+    // Hydration reads the store AFTER inbox registration.
+    this.afterReady(() => this.hydrateOrphans());
+    this.hydrated = this.ready;
   }
 
   // ─────────── submit ───────────
@@ -836,16 +835,22 @@ export class TasksHarness
     if (send === null) return; // callable form suppressed this wake
 
     const payload: SessionTaskWakePayload = { taskId: live.record.taskId, outcome, send };
-    // Fire-and-forget (tell). Swallow AddressNotFound / inbox-closed — a wake
-    // TODO(task-wake): narrow this catch — today it swallows ALL errors, not
-    // just the benign address-gone class; a real delivery bug is invisible.
-    // to an evicted or torn-down session is a benign drop, not an error.
-    void Effect.runPromise(
-      this.inbox.send(`session:${sessionId}`, {
-        type: SESSION_TASK_WAKE_MESSAGE_TYPE,
-        payload,
-      }),
-    ).catch(() => undefined);
+    // Fire-and-forget (tell). A wake to an evicted or torn-down session is a
+    // benign drop, not an error; anything else reaches the detached sink.
+    this.runDetached(
+      this.inbox
+        .send(`session:${sessionId}`, {
+          type: SESSION_TASK_WAKE_MESSAGE_TYPE,
+          payload,
+        })
+        .pipe(
+          Effect.catchTags({
+            AddressNotFound: () => Effect.void,
+            InboxClosed: () => Effect.void,
+          }),
+        ),
+      "task wake",
+    );
   }
 
   /** Bounded terminal metadata for a wake — identity + outcome, NEVER raw output. */
@@ -1202,18 +1207,17 @@ export class TasksHarness
    */
   private fanOutToSubstrate(event: TaskEvent): void {
     if (event.kind === "status") {
-      void Effect.runPromise(this.publishOnChannel(TASK_STATUS_CHANNEL, event.info)).catch(
-        () => undefined,
-      );
+      this.runDetached(this.publishOnChannel(TASK_STATUS_CHANNEL, event.info), "status fan-out");
       return;
     }
-    void Effect.runPromise(
+    this.runDetached(
       this.publishOnChannel(TASK_PROGRESS_CHANNEL, {
         taskId: event.taskId,
         progress: event.progress,
         ...omitUndefined({ total: event.total, message: event.message }),
       }),
-    ).catch(() => undefined);
+      "progress fan-out",
+    );
   }
 
   private publishOnChannel(channel: string, payload: unknown): Effect.Effect<void, unknown, never> {

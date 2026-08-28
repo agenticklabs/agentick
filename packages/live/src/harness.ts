@@ -437,7 +437,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
   }
 
   private publishOnChannel(channel: string, payload: unknown): void {
-    void Effect.runPromise(
+    this.runDetached(
       this.bus.append({
         id: generateId(),
         surface: "session",
@@ -447,6 +447,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
         scope: {},
         payload,
       } as Parameters<typeof this.bus.append>[0]),
-    ).catch(() => undefined);
+      `channel ${channel}`,
+    );
   }
 }

@@ -1032,7 +1032,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * after mutating the extension set.
    */
   emitCapabilitiesChanged(): void {
-    void Effect.runPromise(
+    this.runDetached(
       this.bus.append({
         id: `evt_${generateId()}`,
         surface: SURFACE,
@@ -1043,6 +1043,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         scope: { gatewayId: this.scopeId },
         payload: {},
       } as ProtocolEvent),
+      "capabilities-changed emit",
     );
   }
 
@@ -1058,7 +1059,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * credential never enters it (see {@link IngressAdmissionFailure}).
    */
   emitAdmissionFailure(failure: IngressAdmissionFailure): void {
-    void Effect.runPromise(
+    this.runDetached(
       this.bus.append({
         id: `evt_${generateId()}`,
         surface: SURFACE,
@@ -1069,6 +1070,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         scope: { gatewayId: this.scopeId, origin: "wire" },
         payload: { ...failure },
       } as ProtocolEvent),
+      "admission-failure emit",
     );
   }
 
@@ -1443,7 +1445,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     this._apps.set(appId, app);
 
     // Surface app construction on the gateway bus for observers.
-    void Effect.runPromise(
+    this.runDetached(
       this.bus.append({
         id: `evt_${generateId()}`,
         surface: SURFACE,
@@ -1454,6 +1456,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         scope: { gatewayId: this.scopeId, appId },
         payload: { metadata: input.metadata ?? {} },
       } as ProtocolEvent),
+      "app-created emit",
     );
 
     return app;

@@ -56,7 +56,7 @@ import type {
   StandardSchemaV1,
 } from "@agentick/spec";
 import { ELICIT_REQUEST_MESSAGE_TYPE } from "@agentick/elicitation";
-import { generateId } from "@agentick/runtime";
+import { generateId, runDetached } from "@agentick/runtime";
 import type { RequestResponseRegistry } from "@agentick/runtime";
 
 import type {
@@ -199,7 +199,7 @@ function emitRoutingWarning(
   // Fire-and-forget bus emit. Observability picks it up; the elicit
   // itself returns `{ action: "cancel" }` so the wire surface stays
   // clean.
-  void Effect.runPromise(
+  runDetached(
     deps.bus.append({
       id: generateId(),
       surface: "mcp",
@@ -213,9 +213,7 @@ function emitRoutingWarning(
         message: (request.params as { message?: string }).message ?? "",
       },
     } as Parameters<typeof deps.bus.append>[0]),
-  ).catch(() => {
-    // Substrate emit failures are not actionable here.
-  });
+  );
 }
 
 function stringifyError(err: unknown): string {

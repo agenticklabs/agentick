@@ -19,6 +19,7 @@ export {
   type LocalEventBusOptions,
 } from "./substrate/local-event-bus.js";
 export { LocalInbox, type LocalInboxOptions } from "./substrate/local-inbox.js";
+export { runDetached, defaultDetachedSink } from "./substrate/run-detached.js";
 export {
   ScopeNodeRegistry,
   type ScopeNodeBusInput,

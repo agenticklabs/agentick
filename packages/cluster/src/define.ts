@@ -16,6 +16,7 @@
 
 import { Effect } from "effect";
 import { generateId } from "@agentick/utils";
+import { runDetached } from "@agentick/runtime";
 
 import { consistentHashPartitioning } from "./builtins/consistent-hash-partitioning.js";
 import { jsonCodec } from "./builtins/json-codec.js";
@@ -276,7 +277,7 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
     // either: (a) ClusterPartitioning.onMembershipChange?(change),
     // or (b) require partitioning impls to always read live.
     const membershipUnsub = membership.onChange((change) => {
-      void Effect.runPromise(
+      runDetached(
         parent.bus.append({
           id: membershipDiagId(),
           surface: "cluster",

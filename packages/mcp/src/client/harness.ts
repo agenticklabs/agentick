@@ -1668,7 +1668,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       data: note.params.data,
     };
     this.logNotifier.notify(message);
-    void Effect.runPromise(
+    this.runDetached(
       this.bus.append({
         id: generateId(),
         surface: "mcp",
@@ -1677,9 +1677,8 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         timestamp: Date.now(),
         payload: { serverId: this.serverId, ...message },
       } as import("@agentick/spec").ProtocolEvent),
-    ).catch(() => {
-      // Substrate emit failures aren't actionable in a log fan-out.
-    });
+      "log fan-out",
+    );
   }
 
   private wireClientEvents(client: Client): void {
@@ -1712,7 +1711,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     // Fire-and-forget bus emit. The envelope name uses the harness's
     // surface + a state-change action so observers can subscribe with
     // `{ surface: "mcp", name: { exact: "mcp:<scopeId>:state" } }`.
-    void Effect.runPromise(
+    this.runDetached(
       this.bus.append({
         id: generateId(),
         surface: "mcp",
@@ -1721,6 +1720,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         timestamp: Date.now(),
         payload: { state, serverId: this.serverId },
       } as import("@agentick/spec").ProtocolEvent),
+      "state-change emit",
     );
   }
 }

@@ -78,6 +78,7 @@ import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { generateId } from "@agentick/utils";
 import { getBoundaryFacets, getContext, type RuntimeContext } from "./runtime-context.js";
 import { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
+import { runDetached } from "./run-detached.js";
 import {
   createCommandRunner,
   type CommandRunner,
@@ -587,14 +588,64 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
 
   /**
    * Resolves once the harness has finished its async construction tasks
-   * (inbox registration). Callers that need to send inbox messages to
-   * this harness immediately after construction MUST `await
-   * harness.ready` first — otherwise `inbox.send(address, ...)` may race
-   * against registration and fail with `AddressNotFound`.
+   * (inbox registration + any {@link afterReady} steps a subclass chained).
+   * Callers that need to send inbox messages to this harness immediately
+   * after construction MUST `await harness.ready` first — otherwise
+   * `inbox.send(address, ...)` may race against registration and fail with
+   * `AddressNotFound`.
    *
-   * Resolves immediately when `autoRegisterInbox: false`.
+   * Resolves immediately when `autoRegisterInbox: false` and nothing chained.
    */
-  readonly ready: Promise<void>;
+  get ready(): Promise<void> {
+    return this._ready;
+  }
+  private _ready!: Promise<void>;
+
+  /**
+   * Chain post-construction async work INTO {@link ready} — hydration,
+   * orphan accounting, anything that must complete before the harness is
+   * usable. ONE readiness truth: everything that awaits `ready` observes
+   * the chained step too, and the base owns the rejection fence, so a
+   * subclass cannot re-create the sibling-barrier bug (#315) where a
+   * hand-derived `ready.then(...)` floats unobserved and a registration
+   * failure becomes a process-fatal unhandled rejection.
+   *
+   * Call from the subclass constructor (or any time before consumers
+   * grab `ready`). Steps run in registration order.
+   */
+  protected afterReady(step: () => void | Promise<void>): void {
+    const next = this._ready.then(step);
+    // Same fence as the base assignment below: nothing guarantees a
+    // consumer ever awaits `ready`; real consumers still see the rejection.
+    next.catch(() => {});
+    this._ready = next;
+  }
+
+  /**
+   * Run a genuinely fire-and-forget Effect — a signal emit, a wake, an
+   * interrupt — with this harness's identity on the failure sink instead
+   * of the process's unhandled-rejection handler. The instance door to
+   * the runtime's {@link runDetached}; readiness is NEVER detached work —
+   * that's {@link afterReady}.
+   */
+  protected runDetached<A, E>(effect: Effect.Effect<A, E, never>, context?: string): void {
+    runDetached(effect, (error) => {
+      console.error(
+        `[agentick] detached effect failed on ${this.surface}:${this.scopeId}` +
+          (context !== undefined ? ` (${context})` : ""),
+        error,
+      );
+      // Best-effort structured mirror for bus/telemetry subscribers; its own
+      // failure must not recurse — a forked fiber failure never rejects.
+      void Effect.runFork(
+        this.emitLog(this.parentScope ?? {}, "error", {
+          message: "detached effect failed",
+          ...(context !== undefined ? { context } : {}),
+          error: String(error),
+        }),
+      );
+    });
+  }
 
   /**
    * Register a PURE-JS async middleware (tier 2) around this harness's ops —
@@ -1150,7 +1201,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       // Register is async — cluster impls may negotiate across nodes.
       // Local impls resolve immediately. Either way, `ready` is the
       // deterministic readiness handle.
-      this.ready = Effect.runPromise(
+      this._ready = Effect.runPromise(
         this.inbox.register(this.address, (msg) => this.dispatchMessage(msg)),
       ).then((unsub) => {
         this.inboxUnsubscribe = unsub;
@@ -1162,9 +1213,9 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       // unhandled rejection from a promise the process was never asked to
       // observe. Mark the rejection handled; real consumers still see it —
       // `.catch` returns a NEW promise and leaves this one's rejection intact.
-      this.ready.catch(() => {});
+      this._ready.catch(() => {});
     } else {
-      this.ready = Promise.resolve();
+      this._ready = Promise.resolve();
     }
   }
 

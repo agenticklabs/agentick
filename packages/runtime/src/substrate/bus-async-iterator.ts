@@ -18,6 +18,7 @@
  */
 
 import { Effect, Fiber, Stream } from "effect";
+import { runDetached } from "./run-detached.js";
 
 import type { EventBus, EventQuery, ProtocolEvent, SubscribeOptions } from "@agentick/spec";
 
@@ -87,7 +88,7 @@ export function busAsyncIterator(
       // Interrupt the producer fiber so it stops pushing events; let
       // the caller's `return()` resolve synchronously so awaiters of
       // the next-promise are released immediately.
-      void Effect.runPromise(Fiber.interrupt(fiber));
+      runDetached(Fiber.interrupt(fiber));
       drain();
       return Promise.resolve({ value: undefined as unknown as ProtocolEvent, done: true });
     },
