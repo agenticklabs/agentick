@@ -1,6 +1,6 @@
 {
   "name": "@agentick/compiler",
-  "version": "1.0.0-next.171",
+  "version": "1.0.0-next.172",
   "description": "Compiler-agnostic base for Agentick v2. Owns the callback-style `defineCompiler` factory and compiler-flavored utilities that don't depend on a specific JSX runtime. Concrete compilers (React, Angular, …) depend on this and ship as separate packages.",
   "keywords": [
     "agent",
