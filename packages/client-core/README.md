@@ -165,7 +165,7 @@ it, and a lookup after that builds a fresh handle.
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `client.gateway()`   | `listApps` · `getApp` · `listSessions` · `destroySession` · `app(id)` · `events`                                    |
 | `client.app(id)`     | `createSession` · `getSession` · `listSessions` · `destroySession` · `runOnce` · `close` · `session(id)` · `events` |
-| `client.session(id)` | `send` · `dispatch` · `abort` · `status` · `snapshot` · `rebind` · `close` · `events`                               |
+| `client.session(id)` | `send` · `dispatch` · `abort` · `reply` · `fork` · `branch` · `status` · `snapshot` · `rebind` · `close` · `events` |
 
 Every handle also carries `onLog`, `onProgress`, and `channelView` pre-bound to
 its own scope. The generic `client.onLog(scope, cb)` stays available for a scope
@@ -189,6 +189,66 @@ do {
   cursor = page.nextCursor;
 } while (cursor !== undefined);
 ```
+
+### Branching a conversation
+
+Three verbs on a session handle, mirroring the ones the server-side session
+carries:
+
+```ts
+const thread = session.reply("entry-42"); // a side thread under that entry
+const alt = session.fork("entry-42"); // a new direction from it
+const here = session.fork(); // …from wherever the conversation is now
+```
+
+Each returns the new session's handle **synchronously** — same lazy-create
+posture as `client.session(id)`, so you can send to it on the next line. The
+create is fired underneath; if it fails, the failure surfaces on the next verb
+you send to that handle rather than as a rejection from the call itself.
+
+A branched session carries a `from` bag: the session it came from, the entry it
+branched at, and two birth-declared adjectives. `inherited` says it took the
+source's state — timeline, knobs and state — up to that entry. `anchored` says
+it stays there, rendered under the entry as a side thread rather than beside the
+conversation it came from. `reply` is the anchored one; `fork` is not.
+
+`branch()` is the explicit form the two sugars lower to, for when you want a
+combination they don't spell — an uninherited side thread, a chosen id, your own
+metadata:
+
+```ts
+session.branch({ entryId: "entry-42", anchored: true, inherited: false });
+```
+
+None of the three is an operation of its own. They all lower to the one create
+door, which is where the hooks, the journal entry and the security guard live
+exactly once — so a host can reach the same thing directly:
+
+```ts
+await client.app("support-bot").createSession({
+  from: { sessionId: "sess-123", entryId: "entry-42", inherited: true, anchored: false },
+});
+```
+
+Three things you never pass. There is no `seq` — the server resolves the entry's
+position at genesis. There is no `entryId` when you mean "from here" — absent
+means the source's tip, resolved the same way. And there is no `appId` on a
+branch: a branch lives in its source's app, so the gateway reads it off the
+source record. The bag is admitted only when your principal owns
+`from.sessionId` — `inherited` reads the source's state, so an unowned source is
+a cross-tenant read, not a bad parameter.
+
+The conversation list is a composed predicate, not a roots-only flag, because a
+fork of a conversation is still a conversation:
+
+```ts
+const page = await client.gateway().listSessions({ internal: false, anchored: false });
+for (const row of page.sessions) render(row, relation(row)); // "conversation" | "fork" | …
+```
+
+`relation()` folds `internal` + `from` into the word for a row —
+`"conversation"`, `"fork"`, `"reply"`, `"worker"`, `"forked-worker"`. Derived on
+read; nothing stores it.
 
 ### Is it running right now?
 

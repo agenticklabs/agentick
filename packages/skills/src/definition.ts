@@ -114,10 +114,11 @@ export interface SkillsHydrateCtx<TStore extends SkillsStore = SkillsStore> exte
 
 /**
  * The genesis seam (ADR 93): produce the skills the session opens with. Runs on
- * CREATE and RESUME, never on FORK / SPAWN-inherit (a fork inherits the parent's
- * image; re-running genesis would duplicate or diverge it). Runs after identity
- * stamping and before first render — and a rejection FAILS session creation with
- * `SkillsHydrateFailed` (no half-genesis session).
+ * CREATE and RESUME, never for an INHERITING child — a fork, a reply, or a
+ * spawn with `branch` (it inherits the source's image; re-running genesis would
+ * duplicate or diverge it). Runs after identity stamping and before first
+ * render — and a rejection FAILS session creation with `SkillsHydrateFailed`
+ * (no half-genesis session).
  *
  * The returned records are a SEED: never registered as ops, never written back
  * to the store.

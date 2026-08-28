@@ -58,10 +58,10 @@ export interface SkillRunOptions<T = unknown> {
   /** Per-run abort, threaded to the send. */
   readonly signal?: AbortSignal;
   /**
-   * Run the skill in isolation (a fork of the current session) instead of
-   * inline. NOT YET AVAILABLE — C-core is inline-only; `true` rejects with
-   * `SkillIsolationUnavailable` naming the C2 fork follow-up, never silently
-   * running inline.
+   * Run the skill in a throwaway worker branched off this session
+   * (`session.spawn({ branch: tip })`) instead of inline. Needs an isolation
+   * runner bound by the composition root; with none, `true` rejects with
+   * `SkillIsolationUnavailable` rather than silently running inline.
    */
   readonly isolate?: boolean;
 }
@@ -131,9 +131,9 @@ export interface SkillsHandle {
    * executes. With `opts.output`, the run rides the structured-output path and
    * returns typed, validated `data`.
    *
-   * Inline only in C-core — `opts.isolate: true` rejects with
-   * `SkillIsolationUnavailable` (the fork enabler is C2). A missing skill
-   * propagates `SkillNotFound` (via `require`). A run with `output` that races
+   * `opts.isolate: true` needs a bound isolation runner and rejects with
+   * `SkillIsolationUnavailable` without one. A missing skill propagates
+   * `SkillNotFound` (via `require`). A run with `output` that races
    * an in-flight execution QUEUES (the smart default resolves a structured send
    * to `onBusy: "queue"`), running fresh after quiescence. Called on a harness
    * with no bound runner (constructed outside a session): `SkillRunnerUnbound`.

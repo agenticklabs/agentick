@@ -78,6 +78,16 @@ export {
   type FilteredViewOptions,
 } from "./view-source.js";
 
+// ADR 100 — what a session IS, folded from `internal` + `from`. A list built
+// from `listSessions()` labels its rows with this; re-exported here so a client
+// reaches it without a second import.
+export {
+  relation,
+  type SessionFrom,
+  type SessionFromInput,
+  type SessionRelation,
+} from "@agentick/spec";
+
 // Re-export protocol types adopters need to write extensions, for the
 // "one import" ergonomic. Spec is the canonical source.
 export type {
