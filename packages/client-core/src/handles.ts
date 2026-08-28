@@ -206,17 +206,16 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
  * from the source record. The bag carries no `seq` and no `internal`: both are
  * server-resolved, and an absent `entryId` means the source's tip.
  *
- * The verbs return SYNCHRONOUSLY (the `client.session(id)` lazy-create
- * posture), so the create is fired and not awaited. Its rejection is swallowed
- * here and resurfaces on the next verb sent to the returned handle — an
- * unhandled rejection would take a process down over a failure the caller is
- * about to be told about anyway.
+ * Resolves once the create is acknowledged: until then the new session has no
+ * command surface, and a handle returned early would answer `method not found`
+ * to its first verb — every adopter was polling for the moment this promise
+ * now names.
  */
-function branchFrom(
+async function branchFrom(
   client: InternalClient,
   sourceSessionId: string,
   input: ClientBranchInput & { readonly anchored: boolean },
-): SessionHandle {
+): Promise<SessionHandle> {
   const sessionId = input.sessionId ?? `session:${generateId()}`;
   const from: SessionFromInput = {
     sessionId: sourceSessionId,
@@ -224,13 +223,11 @@ function branchFrom(
     anchored: input.anchored,
     ...(input.entryId !== undefined ? { entryId: input.entryId } : {}),
   };
-  void client
-    .request("app/create_session", {
-      sessionId,
-      from,
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-    })
-    .catch(() => {});
+  await client.request("app/create_session", {
+    sessionId,
+    from,
+    ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+  });
   return makeSessionHandle(client, sessionId);
 }
 
@@ -314,13 +311,13 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
       });
       return result.content;
     },
-    reply(entryId: string): SessionHandle {
+    reply(entryId: string): Promise<SessionHandle> {
       return branchFrom(client, sessionId, { entryId, anchored: true });
     },
-    fork(entryId?: string): SessionHandle {
+    fork(entryId?: string): Promise<SessionHandle> {
       return branchFrom(client, sessionId, { entryId, anchored: false });
     },
-    branch(input: ClientBranchInput): SessionHandle {
+    branch(input: ClientBranchInput): Promise<SessionHandle> {
       return branchFrom(client, sessionId, { ...input, anchored: input.anchored ?? false });
     },
     async abort(reason, opts) {

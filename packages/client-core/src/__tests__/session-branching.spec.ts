@@ -35,10 +35,10 @@ function firedFrom(request: ReturnType<typeof fakeClient>["request"]) {
 }
 
 describe("the conversation verbs — wire lowering", () => {
-  it("fork() with no anchor omits entryId AND appId — both server-resolved", () => {
+  it("fork() with no anchor omits entryId AND appId — both server-resolved", async () => {
     const { client, request } = fakeClient();
 
-    const forked = makeSessionHandle(client, "s-src").fork();
+    const forked = await makeSessionHandle(client, "s-src").fork();
 
     expect(request).toHaveBeenCalledTimes(1);
     const [, params] = request.mock.calls[0]!;
@@ -52,10 +52,10 @@ describe("the conversation verbs — wire lowering", () => {
     expect(firedFrom(request)).not.toHaveProperty("seq");
   });
 
-  it("fork(entryId) anchors the branch at that entry, still unanchored as a session", () => {
+  it("fork(entryId) anchors the branch at that entry, still unanchored as a session", async () => {
     const { client, request } = fakeClient();
 
-    makeSessionHandle(client, "s-src").fork("e-7");
+    await makeSessionHandle(client, "s-src").fork("e-7");
 
     expect(firedFrom(request)).toEqual({
       sessionId: "s-src",
@@ -65,10 +65,10 @@ describe("the conversation verbs — wire lowering", () => {
     });
   });
 
-  it("reply(entryId) is anchored — the side-thread that stays where it came from", () => {
+  it("reply(entryId) is anchored — the side-thread that stays where it came from", async () => {
     const { client, request } = fakeClient();
 
-    makeSessionHandle(client, "s-src").reply("e-7");
+    await makeSessionHandle(client, "s-src").reply("e-7");
 
     expect(firedFrom(request)).toEqual({
       sessionId: "s-src",
@@ -78,10 +78,10 @@ describe("the conversation verbs — wire lowering", () => {
     });
   });
 
-  it("branch(input) passes its dispositions through verbatim", () => {
+  it("branch(input) passes its dispositions through verbatim", async () => {
     const { client, request } = fakeClient();
 
-    const child = makeSessionHandle(client, "s-src").branch({
+    const child = await makeSessionHandle(client, "s-src").branch({
       entryId: "e-3",
       anchored: true,
       inherited: false,
@@ -97,10 +97,10 @@ describe("the conversation verbs — wire lowering", () => {
     });
   });
 
-  it("branch({}) defaults to inherited, unanchored — the same defaults the harness applies", () => {
+  it("branch({}) defaults to inherited, unanchored — the same defaults the harness applies", async () => {
     const { client, request } = fakeClient();
 
-    makeSessionHandle(client, "s-src").branch({});
+    await makeSessionHandle(client, "s-src").branch({});
 
     expect(firedFrom(request)).toEqual({
       sessionId: "s-src",
@@ -111,33 +111,36 @@ describe("the conversation verbs — wire lowering", () => {
 });
 
 describe("the conversation verbs — the handle they hand back", () => {
-  it("returns the new session's handle SYNCHRONOUSLY, and it is the memoized one", () => {
-    const { client } = fakeClient();
+  it("resolves the new session's handle once the create is ACKNOWLEDGED — not before", async () => {
+    const { client, request } = fakeClient();
+    let ack!: () => void;
+    request.mockReturnValueOnce(new Promise<void>((resolve) => (ack = resolve)));
+    let settled = false;
 
-    const forked = makeSessionHandle(client, "s-src").fork();
+    const pending = makeSessionHandle(client, "s-src").fork();
+    void pending.then(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
 
+    ack();
+    const forked = await pending;
     expect(typeof forked.id).toBe("string");
     expect(forked.id).not.toBe("s-src");
     expect(makeSessionHandle(client, forked.id)).toBe(forked);
   });
 
-  it("mints a fresh id per call", () => {
+  it("mints a fresh id per call", async () => {
     const { client } = fakeClient();
     const source = makeSessionHandle(client, "s-src");
 
-    expect(source.fork().id).not.toBe(source.fork().id);
+    expect((await source.fork()).id).not.toBe((await source.fork()).id);
   });
 
-  it("a failed create does not escape as an unhandled rejection", async () => {
+  it("a failed create REJECTS the verb with why", async () => {
     const { client, request } = fakeClient();
     request.mockRejectedValueOnce(new Error("nope"));
 
-    const forked = makeSessionHandle(client, "s-src").fork();
-
-    // The handle still comes back — the failure resurfaces on the next verb
-    // sent to it, not as a process-killing rejection from a synchronous call.
-    expect(forked.id).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(makeSessionHandle(client, "s-src").fork()).rejects.toThrow("nope");
   });
 });
 
@@ -202,7 +205,7 @@ describe("list dimensions", () => {
 });
 
 describe("relation() reaches a client through this package", () => {
-  it("folds every row of the ADR's table", () => {
+  it("folds every row of the ADR's table", async () => {
     expect(relation({})).toBe("conversation");
     expect(
       relation({

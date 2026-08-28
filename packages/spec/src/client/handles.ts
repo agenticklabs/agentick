@@ -296,15 +296,17 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
 
   /**
    * ADR 100 conversation verbs — the client half of the harness's
-   * `reply`/`fork`/`branch`. Each mints a fresh id, fires the create over the
-   * wire (`app/create_session` with the `from` bag — no `seq`, no `internal`:
-   * both server-resolved), and returns the new session's handle synchronously,
-   * lazy-create style. `fork()` with no `entryId` anchors at the source's tip
-   * — genesis resolves it, exactly as it resolves `seq`.
+   * `reply`/`fork`/`branch`. Each mints a fresh id and sends the create over
+   * the wire (`app/create_session` with the `from` bag — no `seq`, no
+   * `internal`: both server-resolved). Resolves with the new session's handle
+   * once the create is ACKNOWLEDGED — the handle is addressable the moment
+   * you hold it — and rejects with the create's failure. `fork()` with no
+   * `entryId` anchors at the source's tip — genesis resolves it, exactly as
+   * it resolves `seq`.
    */
-  reply(entryId: string): SessionHandle;
-  fork(entryId?: string): SessionHandle;
-  branch(input: ClientBranchInput): SessionHandle;
+  reply(entryId: string): Promise<SessionHandle>;
+  fork(entryId?: string): Promise<SessionHandle>;
+  branch(input: ClientBranchInput): Promise<SessionHandle>;
   /**
    * The model this session is about to call, and what is known about it —
    * window, output cap, pricing, capabilities.

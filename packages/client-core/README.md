@@ -196,15 +196,14 @@ Three verbs on a session handle, mirroring the ones the server-side session
 carries:
 
 ```ts
-const thread = session.reply("entry-42"); // a side thread under that entry
-const alt = session.fork("entry-42"); // a new direction from it
-const here = session.fork(); // …from wherever the conversation is now
+const thread = await session.reply("entry-42"); // a side thread under that entry
+const alt = await session.fork("entry-42"); // a new direction from it
+const here = await session.fork(); // …from wherever the conversation is now
 ```
 
-Each returns the new session's handle **synchronously** — same lazy-create
-posture as `client.session(id)`, so you can send to it on the next line. The
-create is fired underneath; if it fails, the failure surfaces on the next verb
-you send to that handle rather than as a rejection from the call itself.
+Each resolves with the new session's handle once the create is **acknowledged**
+— the handle is addressable the moment you hold it, so you can send to it on
+the next line. If the create fails, the call rejects with why.
 
 A branched session carries a `from` bag: the session it came from, the entry it
 branched at, and two birth-declared adjectives. `inherited` says it took the
