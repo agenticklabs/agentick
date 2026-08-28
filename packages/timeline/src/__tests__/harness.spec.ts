@@ -2,6 +2,7 @@
  * TimelineHarness — concrete tests + conformance run.
  */
 
+import type { StoreCtx } from "@agentick/spec";
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
@@ -309,24 +310,25 @@ describe("TimelineHarness — branch: the fork transport (checkpointing §5)", (
     await child.close();
   });
 
-  it("the definition's `branch` seam replaces the copy — a stitch-at-read store copies nothing", async () => {
-    const store = new MemoryTimelineStore();
-    const { harness: parent } = await makeHarness(timelineScopeKey("br7-parent"), { store });
-    await parent.append(messageEntry("p1", "one"));
-    await parent.persist();
-    await parent.close();
-
-    const seen: string[] = [];
-    const { harness: child } = await makeHarness(timelineScopeKey("br7-child"), {
-      store,
-      branch: async (ctx) => {
-        seen.push(ctx.fromLogKey, String(ctx.toSeq));
-      },
-    });
+  it("delegates to store.branch with the source key, its own scope and the bound — nothing else", async () => {
+    const calls: unknown[] = [];
+    class SpyStore extends MemoryTimelineStore {
+      override branch(
+        source: string,
+        target: string,
+        opts: { readonly toSeq?: number },
+        ctx: StoreCtx,
+      ) {
+        calls.push([source, target, opts]);
+        return super.branch(source, target, opts, ctx);
+      }
+    }
+    const store = new SpyStore();
+    const { harness: child } = await makeHarness(timelineScopeKey("br7-child"), { store });
     await child.branch(branchCtx("br7-parent", 0));
-    await child.hydrate();
-    expect(seen).toEqual([timelineScopeKey("br7-parent"), "0"]);
-    expect(await store.read(timelineScopeKey("br7-child"), stubStoreCtx())).toEqual([]);
+    expect(calls).toEqual([
+      [timelineScopeKey("br7-parent"), timelineScopeKey("br7-child"), { toSeq: 0 }],
+    ]);
     await child.close();
   });
 

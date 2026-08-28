@@ -24,7 +24,7 @@
  */
 
 import type { TimelineStore } from "@agentick/spec";
-import type { TimelineBrancher, TimelineHydrator } from "./definition.js";
+import type { TimelineHydrator } from "./definition.js";
 import { projectLog } from "./project.js";
 
 /**
@@ -107,36 +107,4 @@ export function hydrateProjected<
   TStore extends TimelineStore = TimelineStore,
 >(): TimelineHydrator<TStore> {
   return async (ctx) => projectLog(await ctx.store.read(ctx.sessionId ?? "", ctx));
-}
-
-/**
- * The DEFAULT brancher when a `store` is configured — the copy transport
- * (checkpointing §5): the source's inherited prefix is copied onto the branch's
- * own scope, so genesis hydrates the branch on its own rows.
- *
- * The bound is applied BY SEQ, through the store's own window (`query` with
- * `toSeq`), never by array position: a log's seqs need not start at 0 and its
- * `read` may be a window (compaction moves `baseSeq`; a durable adapter may be
- * 1-based), so index === seq is not a fact any store owes. `toSeq: -1` — no
- * anchor — inherits nothing.
- *
- * Idempotent by DESTINATION: a scope that already holds entries is left alone,
- * so a retried fork cannot double the log. A store that does not hold the
- * source scope copies nothing and resolves.
- */
-export function copyFromStore<
-  TStore extends TimelineStore = TimelineStore,
->(): TimelineBrancher<TStore> {
-  return async (ctx) => {
-    const own = ctx.sessionId ?? "";
-    if ((await ctx.store.read(own, ctx)).length > 0) return;
-    const source =
-      ctx.toSeq === undefined
-        ? await ctx.store.read(ctx.fromLogKey, ctx)
-        : ctx.toSeq < 0
-          ? []
-          : await ctx.store.query({ logKey: ctx.fromLogKey, toSeq: ctx.toSeq }, ctx);
-    if (source.length === 0) return;
-    await ctx.store.append(own, source, ctx);
-  };
 }

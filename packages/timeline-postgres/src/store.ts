@@ -49,6 +49,7 @@
  */
 
 import type { Pool as PgPool } from "pg";
+import { copyLogPrefix } from "@agentick/store";
 
 import type {
   LogHistoryOptions,
@@ -211,6 +212,15 @@ class PostgresTimelineStore implements TimelineStore {
   private toEntry(row: Record<string, unknown>): TimelineEntry {
     const schemaVer = Number(row[this.cols.schemaVer] ?? SCHEMA_VERSION);
     return this.codec.decode(row[this.cols.payload], schemaVer);
+  }
+
+  branch(
+    source: string,
+    target: string,
+    opts: { readonly toSeq?: number },
+    ctx: StoreCtx,
+  ): Promise<void> {
+    return copyLogPrefix(this, source, target, opts, ctx);
   }
 
   async read(sessionId: string, _ctx: StoreCtx): Promise<readonly TimelineEntry[]> {

@@ -55,6 +55,7 @@
  */
 
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyLogPrefix } from "@agentick/store";
 import { join } from "node:path";
 
 import type {
@@ -204,6 +205,15 @@ class FsTimelineStore implements TimelineStore {
       lines.length > 0 ? lines[lines.length - 1]!.seq + 1 : ((await this.readHwm(sessionId)) ?? 0);
     this.nextSeq.set(sessionId, next);
     return next;
+  }
+
+  branch(
+    source: string,
+    target: string,
+    opts: { readonly toSeq?: number },
+    ctx: StoreCtx,
+  ): Promise<void> {
+    return copyLogPrefix(this, source, target, opts, ctx);
   }
 
   read(sessionId: string, _ctx: StoreCtx): Promise<readonly TimelineEntry[]> {

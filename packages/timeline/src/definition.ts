@@ -47,6 +47,7 @@ import type {
   TimelineEntry,
   TimelineStore,
 } from "@agentick/spec";
+import { copyLogPrefix } from "@agentick/store";
 import type { HarnessInterceptors } from "@agentick/runtime";
 
 /**
@@ -89,36 +90,6 @@ export interface TimelineHydrateCtx<
 export type TimelineHydrator<TStore extends TimelineStore = TimelineStore> = (
   ctx: TimelineHydrateCtx<TStore>,
 ) => Promise<readonly TimelineEntry[]>;
-
-// ============================================================================
-// The branch seam
-// ============================================================================
-
-/**
- * The ctx a {@link TimelineBrancher} receives at a branch's genesis
- * (checkpointing §5, ADR 100): the hydrate ctx plus the source — its session,
- * its log key, and the INCLUSIVE seq bound of the inherited prefix
- * (`entry.seq <= toSeq`; absent ⇒ the whole source; `-1` ⇒ nothing).
- */
-export interface TimelineBranchCtx<
-  TStore extends TimelineStore = TimelineStore,
-> extends TimelineHydrateCtx<TStore> {
-  readonly fromSessionId: string;
-  /** The source's log key — what `ctx.store` reads it under. */
-  readonly fromLogKey: string;
-  readonly toSeq?: number;
-}
-
-/**
- * The branch seam: make the inherited prefix durable UNDER THIS log before
- * genesis hydrates it. The default, {@link copyFromStore}, copies the bounded
- * source window into the branch's own scope. A store that STITCHES at read —
- * a branch's rows are its own, and its reads walk the ancestry — supplies a
- * no-op here and lets its `read`/`history` do the inheriting.
- */
-export type TimelineBrancher<TStore extends TimelineStore = TimelineStore> = (
-  ctx: TimelineBranchCtx<TStore>,
-) => Promise<void>;
 
 // ============================================================================
 // The shaping seam
@@ -191,12 +162,6 @@ export interface TimelineDefinition<
    * the same object by construction.
    */
   hydrate?(ctx: TimelineHydrateCtx<TStore>): Promise<readonly TimelineEntry[]>;
-  /**
-   * The branch seam — see {@link TimelineBrancher}. Defaults to
-   * {@link copyFromStore} when a `store` is configured; a method signature for
-   * the same bivariance reason as `hydrate`.
-   */
-  branch?(ctx: TimelineBranchCtx<TStore>): Promise<void>;
   /**
    * Construction-bound default compaction (ADR 51 signal form). With this set,
    * `timeline.compact()` — the no-arg form, the one that can cross the
@@ -317,6 +282,13 @@ export interface TimelineStoreVerbs {
   ): Promise<readonly SeqTagged<TimelineEntry>[]>;
   /** OPTIONAL destructive retention — drop entries with absolute `seq < before.seq`. */
   prune?(logKey: string, before: { seq: number }, ctx: StoreCtx): Promise<number>;
+  /** The fork transport. Defaults to the plain-log copy (`copyLogPrefix`) over these verbs. */
+  branch?(
+    source: string,
+    target: string,
+    opts: { readonly toSeq?: number },
+    ctx: StoreCtx,
+  ): Promise<void>;
 }
 
 /**
@@ -348,6 +320,10 @@ export function defineTimelineStore(verbs: TimelineStoreVerbs): TimelineStore {
     backend,
     append: (logKey, entries, ctx) => verbs.append(logKey, entries, ctx),
     read: (logKey, ctx) => verbs.read(logKey, ctx),
+    branch: (source, target, opts, ctx) =>
+      verbs.branch !== undefined
+        ? verbs.branch(source, target, opts, ctx)
+        : copyLogPrefix(store, source, target, opts, ctx),
     keys: (ctx) => verbs.keys(ctx),
     delete: (logKey, ctx) => verbs.delete(logKey, ctx),
     // The seam READ — a projection of a log window shaped by a `LogQuery`. An

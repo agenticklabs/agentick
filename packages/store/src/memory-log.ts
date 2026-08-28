@@ -43,6 +43,7 @@ import type {
   SeqTagged,
   StoreCtx,
 } from "@agentick/spec";
+import { copyLogPrefix } from "./log-branch.js";
 
 /** Per-log record: the live entries plus the `seq` of `entries[0]`. */
 interface LogWindow<T> {
@@ -102,6 +103,15 @@ export class MemoryLog<T> implements LogStore<T> {
       out.push({ seq: rec.baseSeq + i, entry: rec.entries[i]! });
     }
     return Promise.resolve(out);
+  }
+
+  branch(
+    source: string,
+    target: string,
+    opts: { readonly toSeq?: number },
+    ctx: StoreCtx,
+  ): Promise<void> {
+    return copyLogPrefix(this, source, target, opts, ctx);
   }
 
   append(logKey: string, entries: readonly T[], _ctx: StoreCtx): Promise<readonly number[]> {

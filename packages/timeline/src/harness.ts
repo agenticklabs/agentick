@@ -48,13 +48,12 @@ import {
 import { LogView, type LogProjectionMeta } from "@agentick/store";
 
 import { MemoryTimelineStore, timelineScopeKey } from "./store.js";
-import { copyFromStore, hydrateFromStore } from "./hydrators.js";
+import { hydrateFromStore } from "./hydrators.js";
 import type {
   TimelineCompactCtx,
   TimelineCompactor,
   TimelineDefinition,
   TimelineHydrateCtx,
-  TimelineBrancher,
   TimelineHydrator,
 } from "./definition.js";
 import type {
@@ -345,8 +344,6 @@ export class TimelineHarness
    * bundled in-memory default has always done.
    */
   private readonly hydrator?: TimelineHydrator;
-  /** The branch seam — the definition's `branch`, defaulting to {@link copyFromStore} with a store. */
-  private readonly brancher?: TimelineBrancher;
 
   // ─── Declared commands (ADR 51) — assigned in the constructor ───
   private readonly appendCmd: Cmd<TimelineAppendInput, void>;
@@ -394,9 +391,6 @@ export class TimelineHarness
     this.hydrator =
       (options.hydrate as TimelineHydrator | undefined) ??
       (options.store !== undefined ? hydrateFromStore() : undefined);
-    this.brancher =
-      (options.branch as TimelineBrancher | undefined) ??
-      (options.store !== undefined ? copyFromStore() : undefined);
     // The two-tier / write-behind / compaction-target storage machine — keyed
     // by scopeId (= sessionId). The pump's raw store-write rejection is mapped
     // to the typed `TimelineWriteFailed` a session barrier catchTags (write-
@@ -784,25 +778,21 @@ export class TimelineHarness
   }
 
   /**
-   * {@link BranchCapable} — the fork transport (checkpointing §5), through the
-   * definition's branch seam. Default: {@link copyFromStore} — the source's
-   * inherited prefix (bounded by seq, ADR 100 law 1) is copied onto THIS
-   * harness's scope, so the subsequent `hydrate` opens the child on its own
-   * copy. A stitch-at-read adopter supplies a no-op and inherits through its
-   * reads. This is what retires the ADR-93 fork law: a child branches, then
-   * genesises over what the seam made durable.
-   *
-   * @see docs/proposals/v2/checkpointing.md §5
+   * {@link BranchCapable} — the fork transport (checkpointing §5). The
+   * framework's whole part: stamp the params and call the store. How a log
+   * inherits — copy a bounded prefix, record an edge and stitch on read — is
+   * the store's ({@link TimelineStore.branch}); no row passes through here.
+   * This is what retires the ADR-93 fork law: a child branches, then genesises
+   * over what its store made durable.
    */
   async branch(ctx: BranchCtx): Promise<void> {
-    const brancher = this.brancher;
-    if (brancher === undefined) return;
-    await brancher({
-      ...this.hydrateCtx(),
-      fromSessionId: ctx.fromSessionId,
-      fromLogKey: timelineScopeKey(ctx.fromSessionId),
-      ...(ctx.toSeq !== undefined ? { toSeq: ctx.toSeq } : {}),
-    });
+    if (this.store === undefined) return;
+    await this.store.branch(
+      timelineScopeKey(ctx.fromSessionId),
+      this.scopeId,
+      ctx.toSeq !== undefined ? { toSeq: ctx.toSeq } : {},
+      ctx.storeCtx,
+    );
   }
 
   /**

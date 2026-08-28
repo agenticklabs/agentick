@@ -199,6 +199,57 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         expect(await store.delete("s1", stubStoreCtx())).toBe(false);
       });
 
+      it("branch() makes the target inherit the source's prefix, INCLUSIVE at toSeq", async () => {
+        const store = await setup();
+        const [, sb] = await store.append(
+          "src",
+          [entry("a"), entry("b"), entry("c")],
+          stubStoreCtx(),
+        );
+        await store.branch("src", "child", { toSeq: sb! }, stubStoreCtx());
+        expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["a", "b"]);
+        // The source is untouched, and the child's own appends land after the prefix.
+        expect((await store.read("src", stubStoreCtx())).map(idOf)).toEqual(["a", "b", "c"]);
+        await store.append("child", [entry("d")], stubStoreCtx());
+        expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["a", "b", "d"]);
+      });
+
+      it("branch() without a bound inherits the whole source; toSeq -1 inherits nothing", async () => {
+        const store = await setup();
+        await store.append("src", [entry("a"), entry("b")], stubStoreCtx());
+        await store.branch("src", "whole", {}, stubStoreCtx());
+        expect((await store.read("whole", stubStoreCtx())).map(idOf)).toEqual(["a", "b"]);
+        await store.branch("src", "none", { toSeq: -1 }, stubStoreCtx());
+        expect(await store.read("none", stubStoreCtx())).toEqual([]);
+      });
+
+      it("branch() is idempotent by destination — a retried fork cannot double the log", async () => {
+        const store = await setup();
+        await store.append("src", [entry("a")], stubStoreCtx());
+        await store.branch("src", "child", {}, stubStoreCtx());
+        await store.branch("src", "child", {}, stubStoreCtx());
+        expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["a"]);
+        // An unknown source inherits nothing and resolves.
+        await store.branch("never", "orphan", {}, stubStoreCtx());
+        expect(await store.read("orphan", stubStoreCtx())).toEqual([]);
+      });
+
+      it.skipIf(capabilities?.prune === false)(
+        "branch() bounds by ABSOLUTE seq, not position — a pruned (windowed) source",
+        async () => {
+          const store = await setup();
+          if (!store.prune) return;
+          const [, , sc, sd] = await store.append(
+            "src",
+            [entry("a"), entry("b"), entry("c"), entry("d"), entry("e")],
+            stubStoreCtx(),
+          );
+          await store.prune("src", { seq: sc! }, stubStoreCtx()); // window now starts at c
+          await store.branch("src", "child", { toSeq: sd! }, stubStoreCtx());
+          expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["c", "d"]);
+        },
+      );
+
       const prune = capabilities?.prune;
       it.skipIf(prune === false)(
         "prune() erases entries below an ABSOLUTE seq and returns the count",

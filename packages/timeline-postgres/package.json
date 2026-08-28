@@ -50,6 +50,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/store": "workspace:*",
     "@agentick/timeline": "workspace:*",
     "pg": "^8.13.1"
   },

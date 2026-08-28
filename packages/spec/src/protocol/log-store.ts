@@ -167,6 +167,27 @@ export interface LogStore<T> extends Store<T, LogQuery, LogMutation<T>> {
   read(logKey: string, ctx: StoreCtx): Promise<readonly T[]>;
 
   /**
+   * Make `target` inherit `source`'s prefix — the fork transport (ADR 100 law
+   * 1, checkpointing §5), owned by the STORE: how a log inherits is a fact
+   * about how it is persisted. `toSeq` is the INCLUSIVE seq bound of the
+   * inherited prefix; absent ⇒ the whole source; `-1` ⇒ nothing. Idempotent by
+   * destination — a `target` that already holds entries is left alone, so a
+   * retried fork cannot double a log. A `source` the store does not hold
+   * inherits nothing and resolves.
+   *
+   * A plain log copies the bounded prefix (`copyLogPrefix` in
+   * `@agentick/store` is that implementation); a store with lineage of its own
+   * records the edge and stitches on read. The framework never sees the rows
+   * either way — it stamps the params and calls this before genesis.
+   */
+  branch(
+    source: string,
+    target: string,
+    opts: { readonly toSeq?: number },
+    ctx: StoreCtx,
+  ): Promise<void>;
+
+  /**
    * OPTIONAL cursored read (#187) — the additive extension the frozen `seq`
    * contract exists for. Returns the {@link LogHistoryOptions} window as
    * seq-tagged entries in ASCENDING seq order, at most `limit` of them taken

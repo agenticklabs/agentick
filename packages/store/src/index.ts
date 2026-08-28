@@ -48,6 +48,7 @@ export {
   type CollectionChangeEvent,
 } from "./memory-collection.js";
 export { MemoryLog, type MemoryLogConfig } from "./memory-log.js";
+export { copyLogPrefix } from "./log-branch.js";
 export { View, type ViewConfig } from "./view.js";
 export {
   LogView,
