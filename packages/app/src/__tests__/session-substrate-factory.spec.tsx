@@ -377,6 +377,31 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
     await app.closeApp();
   });
 
+  it("subordination keys on the DISPOSITION — a visible child gets no parent edge even if one is passed", async () => {
+    // ADR 100 ruling 5's consistency rule: ownership follows `internal`, not
+    // the verb and not the field. The door enforces it rather than trusting the
+    // caller, so no principal-facing session can be handed into somebody else's
+    // teardown cascade by supplying a parent id.
+    const app = await createApp(React.createElement(MinimalAgent), {
+      modelExecutor: mkExecutor(),
+      target: mkTarget(),
+    });
+    await app.createSession({ sessionId: "src" });
+
+    const visible = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      parentSessionId: "src",
+      spawnPath: ["src"],
+      sessionId: "visible-child",
+      from: { sessionId: "src", inherited: true, anchored: false },
+    });
+
+    expect((visible as unknown as { parentSessionId?: string }).parentSessionId).toBeUndefined();
+    expect(app.sessionTree("src")).not.toContain("visible-child");
+    expect(app.sessionTreeContains("src", "visible-child")).toBe(false);
+    await app.closeApp();
+  });
+
   it("a branch is OUTSIDE its source's live tree — nothing can cascade to it (ADR 100 ruling 5)", async () => {
     // Why a branch outlives its source: every teardown that reaches a
     // subordinate — `abort({ cascade: true })`, `destroySession`, a parent
