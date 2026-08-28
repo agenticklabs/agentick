@@ -16,6 +16,7 @@ import { CompilerHarness } from "@agentick/compiler-react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import {
+  SessionNotFoundError,
   ErrorCode,
   SPEC_VERSION,
   WireRpcError,
@@ -280,5 +281,43 @@ describe("session/get — the pure read", () => {
     expect(await app().getSessionRecord("ghost-3")).toBeUndefined();
     expect(ops).toEqual([]);
     await gateway.close();
+  });
+});
+
+describe("session/set_client_tools — open WITHOUT create", () => {
+  const setClientTools = sessionWireExtension.methods["session/set_client_tools"]!;
+
+  it("remounts a hibernated session and installs the client slice on it", async () => {
+    // The reopen-after-restart case: the browser declares its tools on a thread
+    // no app holds live. Live-only resolution failed here, and the send that
+    // followed remounted the session with an EMPTY client slice.
+    const { app, ops, evicted, ctx } = await gatewayRig();
+    await evicted("paged-out");
+
+    const result = await setClientTools(
+      {
+        sessionId: "paged-out",
+        declarations: [{ name: "navigate_to", description: "go", inputSchema: { type: "object" } }],
+      } as never,
+      ctx,
+    );
+
+    expect(result).toEqual({ count: 1 });
+    expect(ops).toEqual(["resume:paged-out"]);
+    const live = app().getSession("paged-out") as unknown as {
+      toolExecutor: { tools: { list(): readonly { name: string; binding?: unknown }[] } };
+    };
+    expect(live).toBeDefined();
+    expect(live.toolExecutor.tools.list().find((t) => t.name === "navigate_to")?.binding).toEqual({
+      scope: "client",
+      sessionId: "paged-out",
+    });
+  });
+
+  it("a total miss still throws — declaring never creates", async () => {
+    const { ctx } = await gatewayRig();
+    await expect(
+      setClientTools({ sessionId: "never-existed", declarations: [] } as never, ctx),
+    ).rejects.toThrow(SessionNotFoundError);
   });
 });

@@ -375,7 +375,16 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       return null;
     },
     "session/set_client_tools": async (params, ctx) => {
-      const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTools;
+      // Live-or-REMOUNT, never create: a declaration is state the model needs
+      // on the next turn, and the next turn (`session/send`) remounts a
+      // hibernated session anyway. Declaring against the live-only door failed
+      // for every thread reopened after a restart, and the send that followed
+      // remounted the session with an EMPTY client slice — the tools were
+      // "delivered" and never seen. A total miss still throws.
+      const { session } = ctx.session
+        ? { session: ctx.session }
+        : await openSession(ctx, params.sessionId);
+      const sess = session as SessionWithTools;
       const binding = { scope: "client", sessionId: params.sessionId } as const;
       // UPSERT by name, latest declaration wins. NOT a whole-slice replace:
       // several clients share this session's slice, and clearing it before
