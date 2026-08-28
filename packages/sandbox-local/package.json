@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox-local",
-  "version": "1.0.0-next.170",
+  "version": "1.0.0-next.171",
   "description": "Local reference SandboxProvider — spawns commands in a temp workspace, path-confined fs, atomic editFile, dynamic mounts, and a 127.0.0.1 egress proxy (ADR 59).",
   "files": [
     "dist"
