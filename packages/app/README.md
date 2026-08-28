@@ -197,7 +197,7 @@ A store-bearing namespace carries a `hydrate` seam, and the app is what runs it.
 
 - **Genesis completes before the first render.** The first compile already sees the resumed conversation — there is no window where the tree renders against an empty log.
 - **A throwing hydrator fails `createSession`** with its typed error (`TimelineHydrateFailed` for the timeline). There is no half-hydrated session that only explodes at the first `send`.
-- **Genesis runs on create and resume, and on a fork — never on a spawn.** A spawned child opens on nothing, so it has no durable scope to read. A fork branches the parent's scopes at the store layer first, so the child genesises over its own copy.
+- **Genesis runs on create and resume, and on any INHERITED branch — never on a session that inherits nothing.** A plain spawned worker opens on nothing, so it has no durable scope to read. A branch that inherits (a fork, a reply, a `spawn({ branch })`) copies its source's scopes at the store layer first, then genesises over its own copy.
 
 ```tsx
 const app = await createApp(<Agent />, { model, timeline: { store } });
@@ -234,6 +234,45 @@ const record = await app.getSessionRecord("chat-1"); // resolves closed sessions
 It is an app singleton, defaulting to a node-local in-memory store. Swap a durable adapter and the list survives an app restart — which is the store's entire purpose. Ephemeral `runOnce` sessions get no store entry; they are throwaway and stay out of the durable list.
 
 `title` / `description` / `metadata` are yours to populate — seed them at `createSession({ title })` or set them later with `app.setSessionMeta(id, { title })`. The framework stores them and is blind to their semantics.
+
+### Branching — where a session came from
+
+`createSession` is the one door, branch or not. Two things say where a session stands: `internal` — plumbing, or something a person is meant to see — and `from`, the entry it branched at.
+
+```ts
+// a new direction from an entry — a fork
+await app.createSession({
+  from: { sessionId: "chat-1", entryId, inherited: true, anchored: false },
+});
+// a side-thread that hangs under it — a reply
+await app.createSession({
+  from: { sessionId: "chat-1", entryId, inherited: true, anchored: true },
+});
+// plumbing nobody is meant to see
+await app.createSession({ internal: true });
+```
+
+`inherited` takes the source's state as of that entry — timeline, knobs, and state alike, so a forked conversation keeps its knob values. `anchored` says it stays where it came from. Both are birth-declared and never change afterward.
+
+The door takes no `seq`. It resolves the entry to its position once, against the source's log, and writes the complete bag onto the record — so the branch point cannot drift as the source grows, and an inherited copy has an inclusive bound to stop at. Omit `entryId` and you get **the source's tip as of now**, which is the gesture a fork button makes; a source with nothing to anchor on records no `entryId` and `seq: -1`, the empty prefix. Name an entry the source does not have and the create is refused (`BranchSourceEntryNotFoundError`) rather than silently anchored somewhere else. Branching reads the source's timeline, so **the source must be live** — see [Roadmap](#roadmap--known-gaps).
+
+`session.fork(entryId?)` / `session.reply(entryId)` / `session.spawn(agent)` are sugar that fill this bag. They are deliberately not operations of their own: the hooks, the journal entry, and the security guard live on the create underneath, exactly once.
+
+|                                   | `internal` | `inherited` | `anchored` | `relation(record)` |
+| --------------------------------- | ---------- | ----------- | ---------- | ------------------ |
+| a conversation                    | false      | —           | —          | `conversation`     |
+| `fork(entryId?)`                  | false      | true        | false      | `fork`             |
+| `reply(entryId)`                  | false      | true        | true       | `reply`            |
+| `spawn(agent)`                    | true       | false       | false      | `worker`           |
+| `spawn(agent, { branch: entry })` | true       | true        | false      | `forked-worker`    |
+
+`relation(record)` — a pure fold over those two fields, exported from [@agentick/spec](../spec) — is the vocabulary for lists, logs, and UI. Nothing stores it; there is no `kind` column to keep honest.
+
+**Persistence keys on `internal`, not on lineage.** An internal session writes its row at genesis, because plumbing's lineage is a fact the moment it exists rather than something a first message earns. Everything else keeps create-early/persist-late, `from` included: an abandoned fork or reply thread leaves nothing behind, exactly like an abandoned new chat.
+
+**A branch is not a subordinate.** `from` records where a session came from and confers no lifecycle relationship. The cancellation ladder, `abortExecutionTree`, and `sessionTree` all walk the live spawn registry — so aborting a conversation never reaches a fork of it, and destroying that conversation never destroys the fork. Only a spawned worker is owned by its parent.
+
+**Listing.** The conversation list is the composed predicate — `listSessions({ internal: false, anchored: false })` — because anchored sessions render under their anchor entry and internal ones render nowhere. `listSessions({ fromSessionId })` is the other half: one level of the graph, forks and replies and workers alike, narrowed with the same two dispositions.
 
 ### The same list over the wire — paged, and scoped to the caller
 
@@ -349,7 +388,7 @@ Every spawn stamps the execution that asked for it — `SessionRecord.originExec
 if (app.executionTreeContains(turn.executionId, event.scope.sessionId)) render(event);
 ```
 
-The fan-out walks DOWN over a registry snapshot, which suits a one-shot cancellation. A subscriber filtering a live stream has the opposite problem — one session id per event, arriving continuously — so this walks UP instead, following `parentSessionId` until it hits an ancestor stamped with that origin execution. O(depth), no snapshot, and the gateway's [`fanIn` progress fan](../gateway#progress-on-a-running-turn) is its first caller.
+The fan-out walks DOWN over a registry snapshot, which suits a one-shot cancellation. A subscriber filtering a live stream has the opposite problem — one session id per event, arriving continuously — so this walks UP instead, following the live parent edge until it hits an ancestor stamped with that origin execution. O(depth), no snapshot, and the gateway's [`fanIn` progress fan](../gateway#progress-on-a-running-turn) is its first caller.
 
 The origin session itself is deliberately **not** a member of its own turn's tree: a session that has moved on to a later turn must not be dragged in by an id naming an earlier one. And like the fan-out walk, it reads only the live registry — an evicted ancestor breaks the chain.
 
@@ -486,7 +525,8 @@ const app = await createApp(<Agent />, { model, sessions: { maxSpawnDepth: 10 } 
 ```
 
 - **Depth ceiling.** A session already `maxSpawnDepth` deep cannot spawn further — `spawn()` throws `SpawnDepthExceededError` with `{ depth, maxDepth }`. It fails closed, so a self-recursive agent crashes with a clear error instead of blowing the stack. Depth is just `spawnPath.length`; the default is 10.
-- **Lineage.** A child carries `spawnPath` — its ancestor ids, root-first. It lands on the child's `SessionRecord`, on the loop's event scope (so bus and journal envelopes attribute sub-agent work), and on the child's execution handle stream. With `parentSessionId`, the records reconstruct the whole spawn graph.
+- **Lineage.** A child carries `spawnPath` — its ancestor ids, root-first. It lands on the child's `SessionRecord`, on the loop's event scope (so bus and journal envelopes attribute sub-agent work), and on the child's execution handle stream. With [`from`](#branching--where-a-session-came-from), the records reconstruct the whole spawn graph.
+- **Disposition.** A spawned worker is always `internal` — a session a person can see is a fork or a reply — so its whole spine is client-hidden and its record is written at genesis rather than earned by a first turn.
 - **Teardown cascade.** The parent's signal is fanned into each child, so a parent abort tears down the child's in-flight work; a parent close or abort disposes its children transitively. No sub-session leaks.
 
 ## Lifecycle operations
@@ -715,6 +755,7 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - **No double-wrap detection.** Pass the same substrate instance to two `createApp({ cluster })` calls and the local bus gets two subscriptions per cluster event — double delivery, with nothing to warn you.
 - **No mid-flight cluster swap.** Replacing a cluster means closing the app and constructing a new one.
 - **No per-session namespace override.** Namespace configuration is app-wide; `createSession` takes no `timeline` override.
+- **Branching needs a live source.** The anchor's position is read from the source's timeline, which only the live session exposes — so forking a conversation nobody has opened is refused instead of resolved. Opening the source first (`app.resumeSession(id)`, or any `createSession` with its id) makes it work. Closing the gap means either opening the source from inside the door or moving the resolution into genesis, which reaches the source's stores anyway.
 - **The interruption mark has a best-effort window.** A crash between construction's record write-back and the mark landing loses the evidence, and the turn is never detected as interrupted. The loss is silent-drop-shaped rather than run-twice-shaped, which is the tradeoff taken deliberately.
 - **`resumeAttempts` is not in the store conformance suite.** The two resume slots are documented obligations on an adapter; nothing yet fails an adapter that drops them on the round trip.
 - **`onSessionClose` does not fire on eviction.** Leaving memory is not a lifecycle end, so the app-level handler stays quiet; the session's own bridge and extension close handlers do run. Observe evictions on `onBeforeSessionClose` instead, where the reason is `"evicted"`. `closeApp` is the exception that proves the rule: its sessions hibernate like evicted ones, but the handler DOES fire, because the adopter asked for the teardown and this is the last in-process moment they get.
@@ -725,6 +766,10 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 
 - `src/__tests__/session-scope-nodes.spec.tsx` — sessions on the app's own bus with no `sessionNode` configured and with one that resolves `[]`, two principals landing on disjoint node buses while the app bus sees both, two sessions of one principal sharing a node, an explicit per-session `bus` outranking the resolver, a node closing with its last session so the next one gets a fresh bus, and model deltas from the APP-SHARED executor reaching the sending session's node and the root but never a sibling principal's.
 - `src/__tests__/app-harness.spec.tsx` — construction, session lifecycle, close cascade, and the durable store: `listSessions` / `getSessionRecord` read it, records mirror lifecycle and execution accounting (status, `executionCount`, `currentExecutionId`, aggregated usage, close → `closed`), `setSessionMeta` sets the app-owned slots, and ephemeral `runOnce` sessions stay out of the list.
+- `src/__tests__/branch-resolution.spec.tsx` — the door resolving a branch anchor's position: a named entry landing on its seq, an absent one taking the source's tip (the trailing turn boundary left behind), a mid-timeline branch inheriting `source[..anchor]` inclusive and nothing the source said afterward, an entry the source does not have refused with `BranchSourceEntryNotFoundError`, and a source that is not live refused rather than guessed.
+- `src/__tests__/lazy-session-genesis.spec.tsx` — persistence keyed on the disposition: a bare `createSession` writing nothing, the first send earning the row, `{ eager: true }` forcing it, `{ internal: true }` writing it at genesis because plumbing's lineage is not speculative, and a branched conversation (`from`, not internal) still earning its row lazily.
+- `src/__tests__/session-substrate-factory.spec.tsx` — the per-session substrate slots, and the `from` bag threading through the create door onto the record while minting no live parent edge.
+- `src/__tests__/fork.spec.tsx` — `session.fork()` as the conversation verb: an unbound child carrying the source's knob values and timeline, no durable row until it speaks, then a record carrying the branch edge, and divergence in both directions afterward.
 - `src/__tests__/genesis-lifecycle.spec.tsx` — the app-level namespace slot reaching the session's timeline (definition form and inline bag), the genesis and shaping seams riding it, the zero-config default with no slot, genesis completing before first render, `createSession` failing with the typed error on a throwing hydrator, and the genesis law as amended — a spawn runs none, a fork branches the parent's scope and genesises over the copy, a resume re-runs it.
 - `src/__tests__/lifecycle-operations.spec.tsx` — the spawn and close envelopes end to end: spawn emits both operations with the child-create carrying `{ sessionId, parentSessionId, spawnPath }` and naming the spawn as its parent op, a spawn adds no host-create record, a fork adds snapshot + restore records, a guard veto at either layer creates no child, a spawn-only guard leaves host `createSession` alone, and close stays out of the journal while a veto leaves the session usable.
 - `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` firing on dispatch, `createSession({ hooks })` composing app-outer, `onAfter*` transforms flowing through, list-valued `hooks` / `guards` composing as ordered layers, and no-hooks being behavior-preserving.

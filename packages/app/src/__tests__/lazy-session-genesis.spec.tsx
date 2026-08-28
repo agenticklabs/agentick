@@ -102,4 +102,34 @@ describe("lazy durable genesis (E11)", () => {
 
     await app.closeApp();
   });
+
+  it("createSession({ internal: true }) persists at genesis — plumbing is not speculative", async () => {
+    // ADR 100 law 3, keyed on the disposition rather than on "was it spawned":
+    // a host-created internal session earns its row exactly like a spawned one.
+    const store = new InMemorySessionStore();
+    const app = await mkApp(store);
+
+    await app.createSession({ sessionId: "plumbing", internal: true });
+
+    expect(await app.getSessionRecord("plumbing")).toBeDefined();
+
+    await app.closeApp();
+  });
+
+  it("a branched CONVERSATION still earns its row lazily", async () => {
+    // The other arm of law 3: `from` is not a persistence trigger, so an
+    // abandoned fork or reply thread leaves nothing behind.
+    const store = new InMemorySessionStore();
+    const app = await mkApp(store);
+
+    await app.createSession({ sessionId: "source" });
+    await app.createSession({
+      sessionId: "branch",
+      from: { sessionId: "source", inherited: true, anchored: true },
+    });
+
+    expect(await app.getSessionRecord("branch")).toBeUndefined();
+
+    await app.closeApp();
+  });
 });

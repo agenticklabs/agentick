@@ -21,6 +21,7 @@ import type {
   ExecutionTarget,
   MessageInbox,
   ProtocolEvent,
+  SessionFromInput,
 } from "@agentick/spec";
 
 import { createApp } from "../react.js";
@@ -333,16 +334,25 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
     await app.closeApp();
   });
 
-  it("parentSessionId is stored on the session when supplied", async () => {
+  it("the from bag is threaded into the session when supplied (ADR 100)", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
       modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
-    const session = await app.createSession({
-      parentSessionId: "parent-xyz",
-    });
-    const stored = (session as unknown as { parentSessionId: string | undefined }).parentSessionId;
-    expect(stored).toBe("parent-xyz");
+    await app.createSession({ sessionId: "source-xyz" });
+    const from: SessionFromInput = { sessionId: "source-xyz", inherited: true, anchored: false };
+    const session = await app.createSession({ sessionId: "branched", eager: true, from });
+    const record = await app.getSessionRecord("branched");
+    expect(record?.from?.sessionId).toBe("source-xyz");
+    expect(record?.from?.inherited).toBe(true);
+    expect(record?.from?.anchored).toBe(false);
+    // The door resolved the anchor's position: a source with nothing to anchor
+    // on records `seq: -1` and no `entryId` (ADR 100 — the empty prefix).
+    expect(record?.from?.seq).toBe(-1);
+    expect(record?.from?.entryId).toBeUndefined();
+    // The durable branch edge mints no LIVE subordination: a fork is not a
+    // spawned child, so the host door leaves the parent edge alone.
+    expect((session as unknown as { parentSessionId?: string }).parentSessionId).toBeUndefined();
     await app.closeApp();
   });
 });

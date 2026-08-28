@@ -212,18 +212,21 @@ describe("a spawn runs as session:command:spawn → app:command:create-child-ses
     await app.closeApp();
   });
 
-  it("a fork inherits the envelope transitively (a fork IS a spawn plus a restore)", async () => {
+  it("a fork records the CREATE and nothing of its own — the verb is not an op", async () => {
+    // ADR 100: `fork` / `reply` / `branch` are sugar over the create door, so a
+    // fork leaves one construction record rather than a sugar envelope wrapped
+    // around it. It is no longer a spawn: the spawn op does not fire.
     const { app, events } = await rig();
     const parent = await app.createSession({ sessionId: "s-forker" });
 
     await parent.fork({});
     await settle();
 
-    expect(terminalOf(events, SPAWN_OP)?.outcome).toBe("succeeded");
     expect(terminalOf(events, CREATE_CHILD_OP)?.outcome).toBe("succeeded");
-    // The three layers of a fork, each its own record.
+    expect(terminalOf(events, SPAWN_OP)).toBeUndefined();
+    // The flush barrier still records: an inherited branch copies from the
+    // store, so the source drains to it first (checkpointing §5).
     expect(terminalOf(events, "session:command:snapshot")?.outcome).toBe("succeeded");
-    expect(terminalOf(events, "session:command:restore")?.outcome).toBe("succeeded");
 
     await app.closeApp();
   });
@@ -232,13 +235,13 @@ describe("a spawn runs as session:command:spawn → app:command:create-child-ses
     const { app } = await rig();
     const seen: Array<string | undefined> = [];
     app.onSessionCreate(async (input) => {
-      seen.push(input.parentSessionId);
+      seen.push(input.from?.sessionId);
     });
     const parent = await app.createSession({ sessionId: "s-parent" });
 
     await parent.spawn({});
 
-    // Two creates observed: the host one (no parent) and the spawn (parented).
+    // Two creates observed: the host one (rootless) and the spawn (branched).
     expect(seen).toContain("s-parent");
 
     await app.closeApp();

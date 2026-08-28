@@ -367,7 +367,7 @@ describe("execution-scoped cascade", () => {
     expect((await rootHandle.result).response).toContain("TURN-DONE");
 
     const record = await app.getSessionRecord("kid1");
-    expect(record?.parentSessionId).toBe("root");
+    expect(record?.from?.sessionId).toBe("root");
     expect(record?.originExecutionId).toBe(rootHandle.executionId);
     expect(record?.originCallId).toBe("tc-a");
 

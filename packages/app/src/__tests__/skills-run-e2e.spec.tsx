@@ -225,10 +225,10 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
   });
 });
 
-describe("session.skills!.run — isolation (C2: routes through session.fork())", () => {
-  it("runs on a forked child, leaves the PARENT timeline untouched, disposes the child after settle", async () => {
+describe("session.skills!.run — isolation (routes through spawn at the tip)", () => {
+  it("runs on a branched worker, leaves the PARENT timeline untouched, disposes it after settle", async () => {
     // Two scripted turns: [0] the parent's own send, [1] the isolated run's turn
-    // (executed on the forked child; the executor is shared/inherited).
+    // (executed on the branched worker; the executor is shared/inherited).
     const executor = fakeExecutor([
       { result: textResult("parent turn") },
       { result: textResult("isolated reply") },
@@ -253,13 +253,13 @@ describe("session.skills!.run — isolation (C2: routes through session.fork())"
     // ISOLATION INVARIANT — the parent's timeline gained NOTHING from the run.
     expect(session.timeline.read().entries.length).toBe(parentEntriesBefore);
 
-    // The forked child was created (durable record with parent lineage) …
+    // The branched worker was created (durable record with the branch edge) …
     const records = await app.listSessions();
-    const childRec = records.find((rec) => rec.parentSessionId === "s-iso");
+    const childRec = records.find((rec) => rec.from?.sessionId === "s-iso");
     expect(childRec).toBeDefined();
     // … and disposed from the LIVE registry after the handle settled.
     await waitFor(() => app.getSession(childRec!.id) === undefined, {
-      description: "isolated fork disposed after settle",
+      description: "isolated worker disposed after settle",
     });
 
     await session.close();
