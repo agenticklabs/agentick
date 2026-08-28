@@ -711,25 +711,40 @@ describe("gateway/list_sessions — the cross-app union", () => {
     await gateway.close();
   });
 
-  it("passes the tree filter through to the stores", async () => {
-    // `parentSessionId` is a STORE dimension, so it must reach the query rather
-    // than being post-filtered off an already-fetched page. Spawned children are
-    // the rows a conversation list has to be able to exclude — and a session
-    // graph view has to be able to ask for.
+  it("passes the graph filter and both dispositions through to the stores", async () => {
+    // `fromSessionId` / `anchored` / `internal` are STORE dimensions, so they
+    // must reach the query rather than being post-filtered off an
+    // already-fetched page. The conversation list is the composed predicate
+    // (ADR 100 law 2): it excludes the worker, and — the thing the deleted
+    // `root: true` filter got wrong — it keeps the FORK, which has a `from` and
+    // is every bit a conversation.
     const gateway = await createGateway({ authorizer: permissiveAuthorizer() });
     await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
 
-    await app.createSession({ sessionId: "parent", eager: true });
+    await app.createSession({ sessionId: "conversation", eager: true });
     await apart();
-    await app.createSession({ sessionId: "child", eager: true, parentSessionId: "parent" });
+    await app.createSession({
+      sessionId: "fork",
+      eager: true,
+      from: { sessionId: "conversation", inherited: true, anchored: false },
+    });
+    await apart();
+    await app.createSession({
+      sessionId: "worker",
+      eager: true,
+      internal: true,
+      from: { sessionId: "conversation", inherited: false, anchored: false },
+    });
 
-    const roots = await listGateway(gateway, { filter: { root: true } });
-    expect(roots.sessions.map((s) => s.id)).toEqual(["parent"]);
+    const conversations = await listGateway(gateway, {
+      filter: { internal: false, anchored: false },
+    });
+    expect(conversations.sessions.map((s) => s.id)).toEqual(["fork", "conversation"]);
 
-    const children = await listGateway(gateway, { filter: { parentSessionId: "parent" } });
-    expect(children.sessions.map((s) => s.id)).toEqual(["child"]);
-    expect(children.sessions[0]?.parentSessionId).toBe("parent");
+    const branches = await listGateway(gateway, { filter: { fromSessionId: "conversation" } });
+    expect(branches.sessions.map((s) => s.id)).toEqual(["worker", "fork"]);
+    expect(branches.sessions[0]?.from?.sessionId).toBe("conversation");
 
     await gateway.close();
   });

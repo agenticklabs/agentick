@@ -27,7 +27,11 @@ export { defineSession, type DefineSessionInput } from "./define-session.js";
 export { InMemorySessionStore } from "./session-store.js";
 // Re-export the ports from the same package as the bundled impl so store
 // adapters get the contract + reference from one dep.
-export type { SessionRecord, SessionStore, SessionStoreQuery } from "@agentick/spec";
+export type { SessionFrom, SessionRecord, SessionStore, SessionStoreQuery } from "@agentick/spec";
+// ADR 100 — the fold that names a branch ("conversation" | "fork" | "reply" |
+// "worker" | "forked-worker") from the record's `internal` + `from`. Derived on
+// read, stored nowhere; re-exported beside the record types that carry it.
+export { relation, type SessionRelation } from "@agentick/spec";
 // The round-trip recorder (docs/proposals/v2/observability.md) — one artifact
 // per TICK spanning compiler → model → provider → timeline. It lives HERE and
 // not with the model executor because the span crosses harnesses, and a package

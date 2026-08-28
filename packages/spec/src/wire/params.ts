@@ -19,6 +19,7 @@ import type { ModelFacts } from "../data/model-facts.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
 import type { DestroySessionResult, SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { SessionStatus } from "../protocol/hook-bridges.js";
+import type { SessionFromInput } from "../protocol/session-store.js";
 import type {
   GatewayDestroySessionResult,
   GatewaySessionEntry,
@@ -124,7 +125,13 @@ export interface GatewayListSessionsResult {
 // ============================================================================
 
 export interface AppCreateSessionParams extends WireRequestParams {
-  readonly appId: string;
+  /**
+   * OPTIONAL when {@link from} is present: a branch lives in its source's app,
+   * so the gateway resolves the app from the source session's record
+   * (decided 2026-08-28). When BOTH are given, `appId` must match the source's
+   * app. Required for a plain create — there is nothing to resolve from.
+   */
+  readonly appId?: string;
   readonly sessionId?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
@@ -134,6 +141,25 @@ export interface AppCreateSessionParams extends WireRequestParams {
    * first message and needs it enumerable / readable immediately.
    */
   readonly eager?: boolean;
+  /**
+   * Where the new session comes from (ADR 100) — the door's bag, `seq`
+   * excluded (genesis resolves it from `entryId`).
+   *
+   * Admitted ONLY when the caller's principal owns `from.sessionId` (ADR 100
+   * law 4, enforced at the gateway handler): `inherited` reads the source's
+   * timeline, knobs and state, so an unowned source is a cross-tenant state
+   * read rather than a bad parameter.
+   *
+   * Origin stamps (`originExecutionId` / `originCallId`) are deliberately NOT
+   * here — lineage is the edge's to assert, never the caller's.
+   */
+  readonly from?: SessionFromInput;
+  /*
+   * No `internal` here: it is server-declared, like `principal` (decided
+   * 2026-08-28). A caller able to hide its own session from the client surface
+   * could hide it from whoever reads that surface. Hosts and the spawn flow
+   * set it through `CreateSessionInput`.
+   */
 }
 
 export interface AppCreateSessionResult {

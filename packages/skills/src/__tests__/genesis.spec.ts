@@ -7,8 +7,8 @@
  *     (landmine 3);
  *   - a throwing hydrator surfaces `SkillsHydrateFailed` with nothing
  *     half-installed (landmine 2);
- *   - FORK / SPAWN-inherit never re-runs genesis (landmine 1) — a child that
- *     inherits its parent's image is restored, not re-hydrated;
+ *   - an INHERITING child never re-runs genesis (landmine 1) — a fork, a
+ *     reply, or a spawn with `branch` is restored, not re-hydrated;
  *   - a definition's `hooks:` / `guards:` bags use DROP-LAYER keys and land on
  *     the same ops the discriminated app-level names reach;
  *   - APP-level interceptors wrap DEFINITION-level ones: app guards veto before a

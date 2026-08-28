@@ -5,7 +5,9 @@
  * `@agentick/session-store-postgres`, any adopter-written store — MUST
  * pass this suite. The behaviors pinned here are the substrate contract the app
  * depends on for the durable session registry + resume index: put→get
- * round-trip, upsert-in-place, app / status / parent / recency filtered `list`,
+ * round-trip, upsert-in-place, app / status / recency filtered `list`, the ADR
+ * 100 branch dims (`fromSessionId` / `anchored` / `internal`, each matched AND
+ * non-matched — an unstamped record reads as `false` on both dispositions),
  * enumerate-all, delete, and (when supported) prune of closed sessions. An
  * adapter that diverges breaks the "list/resume my sessions" surface.
  *
@@ -26,7 +28,7 @@
 
 import { expect, it } from "vitest";
 
-import type { SessionRecord, SessionStore } from "@agentick/spec";
+import type { SessionFrom, SessionRecord, SessionStore } from "@agentick/spec";
 import { stubStoreCtx } from "@agentick/store";
 import { runStoreConformance } from "@agentick/store/testing";
 
@@ -79,6 +81,11 @@ const ZERO_USAGE = {
   outputTokens: 0,
   totalTokens: 0,
 } as const;
+
+/** A branch edge (ADR 100) — an unanchored, inherited fork unless overridden. */
+function from(sessionId: string, over: Partial<SessionFrom> = {}): SessionFrom {
+  return { sessionId, entryId: "entry:1", seq: 1, inherited: true, anchored: false, ...over };
+}
 
 /** Minimal well-formed record — the store treats records as opaque blobs. */
 function record(id: string, over: Partial<SessionRecord> = {}): SessionRecord {
@@ -156,23 +163,75 @@ export function runSessionStoreConformance(opts: SessionStoreConformanceOptions)
         expect(terminal.map((r) => r.id).sort()).toEqual(["session:b", "session:c"]);
       });
 
-      it("list() filters by parentSessionId (the session tree)", async () => {
+      it("list() filters by fromSessionId (one level of the session graph)", async () => {
         const store = await setup();
         await store.put(record("session:root"), stubStoreCtx());
+        await store.put(record("session:fork", { from: from("session:root") }), stubStoreCtx());
         await store.put(
-          record("session:child-a", { parentSessionId: "session:root" }),
+          record("session:reply", { from: from("session:root", { anchored: true }) }),
           stubStoreCtx(),
         );
         await store.put(
-          record("session:child-b", { parentSessionId: "session:root" }),
+          record("session:other", { from: from("session:elsewhere") }),
+          stubStoreCtx(),
+        );
+        const branches = await store.list({ fromSessionId: "session:root" }, stubStoreCtx());
+        // Forks, replies and workers alike — the graph edge, not a disposition.
+        expect(branches.map((r) => r.id).sort()).toEqual(["session:fork", "session:reply"]);
+      });
+
+      it("list() filters by anchored — and `false` matches a record with no `from`", async () => {
+        const store = await setup();
+        await store.put(record("session:root"), stubStoreCtx());
+        await store.put(record("session:fork", { from: from("session:root") }), stubStoreCtx());
+        await store.put(
+          record("session:reply", { from: from("session:root", { anchored: true }) }),
+          stubStoreCtx(),
+        );
+        expect((await store.list({ anchored: true }, stubStoreCtx())).map((r) => r.id)).toEqual([
+          "session:reply",
+        ]);
+        // A root hangs off nothing, so it is unanchored — the non-match half.
+        expect(
+          (await store.list({ anchored: false }, stubStoreCtx())).map((r) => r.id).sort(),
+        ).toEqual(["session:fork", "session:root"]);
+      });
+
+      it("list() filters by internal — and `false` matches a record that never stamped it", async () => {
+        const store = await setup();
+        await store.put(record("session:conversation"), stubStoreCtx());
+        await store.put(record("session:visible", { internal: false }), stubStoreCtx());
+        await store.put(record("session:worker", { internal: true }), stubStoreCtx());
+        expect((await store.list({ internal: true }, stubStoreCtx())).map((r) => r.id)).toEqual([
+          "session:worker",
+        ]);
+        expect(
+          (await store.list({ internal: false }, stubStoreCtx())).map((r) => r.id).sort(),
+        ).toEqual(["session:conversation", "session:visible"]);
+      });
+
+      it("list() composes the conversation-list predicate (ADR 100 law 2)", async () => {
+        const store = await setup();
+        await store.put(record("session:conversation"), stubStoreCtx());
+        await store.put(
+          record("session:fork", { from: from("session:conversation") }),
           stubStoreCtx(),
         );
         await store.put(
-          record("session:other", { parentSessionId: "session:elsewhere" }),
+          record("session:reply", { from: from("session:conversation", { anchored: true }) }),
           stubStoreCtx(),
         );
-        const children = await store.list({ parentSessionId: "session:root" }, stubStoreCtx());
-        expect(children.map((r) => r.id).sort()).toEqual(["session:child-a", "session:child-b"]);
+        await store.put(
+          record("session:worker", {
+            internal: true,
+            from: from("session:conversation", { inherited: false }),
+          }),
+          stubStoreCtx(),
+        );
+        const list = await store.list({ internal: false, anchored: false }, stubStoreCtx());
+        // A fork of a conversation IS a conversation; the reply renders under
+        // its anchor and the worker renders nowhere.
+        expect(list.map((r) => r.id).sort()).toEqual(["session:conversation", "session:fork"]);
       });
 
       it("list() filters by updatedAfter recency (>=)", async () => {

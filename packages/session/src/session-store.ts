@@ -1,13 +1,14 @@
 /**
  * `InMemorySessionStore` — the bundled, zero-dependency {@link SessionStore}
- * default (E11). App / status / parent / recency filtering over a keyed
- * collection with `:memory:` semantics — lost on process exit.
+ * default (E11). App / status / origin / disposition / recency filtering over a
+ * keyed collection with `:memory:` semantics — lost on process exit.
  *
  * Built by parameterizing the generic {@link MemoryCollection}
  * (`@agentick/store`): the only session-specific code is `keyOf`
  * (`record.id`), the `matchQuery` predicate (the scope-shaped `appId` /
- * `parentSessionId` dims via the shared `matchesScope`, plus a status
- * set-membership check and an `updatedAfter` recency bound), and the
+ * `fromSessionId` dims via the shared `matchesScope`, the `anchored` /
+ * `internal` dispositions, plus a status set-membership check and an
+ * `updatedAfter` recency bound), and the
  * `prunePredicate` (ended-and-old). The `Map` mechanics, fresh-array `list`,
  * idempotent delete, and predicate-driven prune are the generic's.
  *
@@ -62,18 +63,25 @@ export class InMemorySessionStore implements SessionStore {
     keyOf: (record) => record.id,
     matchQuery: (record, query) => {
       if (query === undefined) return true;
-      // Scope-shaped equality dims (appId, parentSessionId) via the shared
+      // Scope-shaped equality dims (appId, fromSessionId) via the shared
       // containment predicate — `undefined` query dims are not constraints.
       if (
         !matchesScope(
-          { appId: query.appId, parentSessionId: query.parentSessionId },
-          { appId: record.appId, parentSessionId: record.parentSessionId },
+          { appId: query.appId, fromSessionId: query.fromSessionId },
+          { appId: record.appId, fromSessionId: record.from?.sessionId },
         )
       ) {
         return false;
       }
-      // Root-only: absence of a parent, which the equality dims above cannot say.
-      if (query.root === true && record.parentSessionId !== undefined) return false;
+      // The two dispositions: an unstamped record reads as `false` on both, so
+      // `anchored: false` matches a root and `internal: false` matches a record
+      // that never stamped the field (the store obligation ADR 100 documents).
+      if (query.anchored !== undefined && (record.from?.anchored ?? false) !== query.anchored) {
+        return false;
+      }
+      if (query.internal !== undefined && (record.internal ?? false) !== query.internal) {
+        return false;
+      }
       if (!statusMatches(record, query)) return false;
       // Recency: include records last touched at-or-after the cutoff (`>=`).
       if (query.updatedAfter !== undefined && record.updatedAt < query.updatedAfter) return false;

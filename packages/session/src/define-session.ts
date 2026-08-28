@@ -73,7 +73,9 @@ import type {
   SessionHarnessFactory,
   SessionHarnessFactoryDeps,
   SessionHarnessProtocol,
+  BranchInput,
   ForkInput,
+  ReplyInput,
   SpawnInput,
   TickEndForwardDecision,
   Unsubscribe,
@@ -133,7 +135,12 @@ export interface DefineSessionInput<P = unknown> {
   readonly spawn?: (
     input: SpawnInput<P>,
   ) => Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
-  readonly fork?: (input?: ForkInput) => Promise<SessionHarnessProtocol<P>>;
+  /**
+   * The branch door (ADR 100). ONE callback behind all three conversation
+   * verbs: `fork` and `reply` lower to it with their defaults filled in, so a
+   * callback session reads `input.anchored` rather than implementing three.
+   */
+  readonly branch?: (input: BranchInput) => Promise<SessionHarnessProtocol<P>>;
   readonly modelInfo?: () => ModelInfoResult | undefined;
   /**
    * The session's tools handle (three-audiences-plan §F). Replaces the former
@@ -408,11 +415,19 @@ class CallbackSessionHarness<P = unknown>
     return this.spec.modelInfo?.();
   }
 
-  fork(input?: ForkInput): Promise<SessionHarnessProtocol<P>> {
-    if (this.spec.fork) return this.spec.fork(input);
+  fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {
+    return this.branch(input);
+  }
+
+  reply(entryId: string, input: ReplyInput = {}): Promise<SessionHarnessProtocol<P>> {
+    return this.branch({ ...input, entryId, anchored: true });
+  }
+
+  branch(input: BranchInput): Promise<SessionHarnessProtocol<P>> {
+    if (this.spec.branch) return this.spec.branch(input);
     return Promise.reject(
       new ExecutionFailed({
-        cause: new Error("defineSession: fork() not configured"),
+        cause: new Error("defineSession: branch() not configured"),
       }) satisfies SessionError,
     );
   }

@@ -121,7 +121,7 @@ A skill carrying `allowedTools` restricts what the model can reach _for that run
 await session.skills.run("code_review", { args: { change }, isolate: true });
 ```
 
-An isolated run executes on a fork of the current session — same image, copied state — and the child is disposed once the run settles. Nothing it does lands on the parent's timeline. An inline run is the opposite by design: its messages persist as ordinary conversation history.
+An isolated run executes on a throwaway worker branched off the current session — same image, transcript carried across — and the child is disposed once the run settles. Nothing it does lands on the parent's timeline. An inline run is the opposite by design: its messages persist as ordinary conversation history.
 
 > [!NOTE]
 > Isolation must be bound by the composition root. A library used outside a session, or one whose host never bound an isolation runner, throws `SkillIsolationUnavailable` rather than silently degrading to an in-session run.

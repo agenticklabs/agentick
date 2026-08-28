@@ -10,6 +10,7 @@ export { appWireExtension } from "./app-extension.js";
 export { sessionWireExtension } from "./session-extension.js";
 export { subscriptionsWireExtension } from "./subscriptions-extension.js";
 export {
+  mayBranchFrom,
   metadataMatches,
   needsSnapshotPath,
   toSessionEntry,

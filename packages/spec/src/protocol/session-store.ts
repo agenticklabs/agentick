@@ -13,7 +13,7 @@
  *     **manifest** (`stores?`, placeholder below), making a record the entry
  *     point for `SessionHarness.restore`;
  *   - **the backing for the sessions-list wire surface** — `list(query)` by
- *     `appId` / `status` / `parentSessionId` / recent-`updatedAt` is the query
+ *     `appId` / `status` / `fromSessionId` / recent-`updatedAt` is the query
  *     the client's "my sessions" list projects from (`enumerate` is
  *     foundational).
  *
@@ -49,11 +49,76 @@ import type { StoreCtx } from "./store-ctx.js";
 // ============================================================================
 
 /**
+ * Where a session came from — the ONE edge (ADR 100). Absent on the record ⇒
+ * a root session.
+ *
+ * `inherited` and `anchored` are the same category of descriptor:
+ * birth-declared, immutable adjectives about the branch's standing
+ * relationship to its origin — what it carried away, and whether it left.
+ *
+ * @see docs/proposals/v2/blueprint/100-conversation-branches.md
+ */
+export interface SessionFrom {
+  /** The session it branched from. */
+  readonly sessionId: string;
+  /**
+   * The timeline entry it branched at. ABSENT when the source had no entries
+   * (a spawn off a fresh session): the edge still records lineage, anchored to
+   * nothing. Entry ids are message ids — boundary entries cannot anchor.
+   */
+  readonly entryId?: string;
+  /**
+   * {@link entryId}'s seq in the source timeline AS THE STORE REPORTS IT
+   * (the bundled store is 0-based) — resolved once, at genesis, and used as
+   * the INCLUSIVE inherit bound (`entry.seq <= seq`). `-1` ⇔ no
+   * {@link entryId}: below every store's floor, so an inherited copy bounded
+   * by it copies nothing.
+   */
+  readonly seq: number;
+  /**
+   * It took the source's state up to {@link seq} — timeline AND knobs AND
+   * state (the branch fan-out, checkpointing §5). A store satisfies this
+   * invariant its own way: copy at genesis, or stitch at read.
+   */
+  readonly inherited: boolean;
+  /**
+   * It stays at the entry it came from — a side-thread rendered under its
+   * anchor, rather than a new direction that leaves.
+   */
+  readonly anchored: boolean;
+}
+
+/**
+ * The DOOR shape — no `seq` (genesis resolves it). `entryId` absent at the
+ * door means "the source's tip, as of genesis"; on the RECORD, absent means
+ * the source had no entries. Two layers, two meanings, one resolution site.
+ */
+export type SessionFromInput = Omit<SessionFrom, "seq">;
+
+/**
+ * What a session IS, folded from `internal` + `from` (ADR 100) — README
+ * vocabulary for lists, UI, and logs. Derived on read, stored nowhere.
+ */
+export type SessionRelation = "conversation" | "fork" | "reply" | "worker" | "forked-worker";
+
+/**
+ * The fold. `internal` is the worker axis (a spawn is always internal, and a
+ * host-created plumbing session is a worker with no origin); among
+ * principal-facing sessions, `anchored` separates a side-thread from a new
+ * direction.
+ */
+export function relation(record: Pick<SessionRecord, "internal" | "from">): SessionRelation {
+  if (record.internal) return record.from?.inherited ? "forked-worker" : "worker";
+  if (!record.from) return "conversation";
+  return record.from.anchored ? "reply" : "fork";
+}
+
+/**
  * The durable metadata for one session — a serializable snapshot keyed by
  * `id`. Grouped by ownership (E11):
  *
  *   - **identity / lifecycle** (framework-owned) — `id`, `createdAt`,
- *     `updatedAt`, `status`, `parentSessionId`, `appId`.
+ *     `updatedAt`, `status`, `from`, `internal`, `appId`.
  *   - **runtime accounting** (framework-owned), hierarchy-aware
  *     (session → execution → tick) — `currentExecutionId`, `executionCount`,
  *     `usage`. NOTE: there is deliberately **NO `currentTick`** — a tick is
@@ -75,19 +140,27 @@ export interface SessionRecord {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly status: SessionStatus;
-  /** Spawn ancestry (1 agent : 1 session) — the parent's id forms the session tree. */
-  readonly parentSessionId?: string;
+  /**
+   * Where this session came from (ADR 100) — the one edge every branch rides:
+   * a fork, a reply, and a spawned worker differ only in this bag plus
+   * {@link internal}. Absent ⇒ a root session. See {@link relation}.
+   *
+   * NOTE (downstream store adapters): columnize it — `from_session`,
+   * `from_entry`, `from_seq`, `inherited`, `anchored` — and index the columns
+   * the list predicates read. Never jsonb-in-a-WHERE.
+   */
+  readonly from?: SessionFrom;
   /**
    * Full spawn lineage (SP5) — ancestor session ids, root-first
    * (`[root, …, parent]`); its length is the session's spawn depth. Absent
    * for a root session. Lets a sessions-list attribute a sub-agent to its
-   * whole ancestor chain, not just its immediate `parentSessionId`.
+   * whole ancestor chain, not just its immediate {@link from}.
    */
   readonly spawnPath?: readonly string[];
   /**
    * The parent EXECUTION that spawned this session (EX1) — which of the
-   * parent's executions fanned out, where {@link parentSessionId} names only
-   * which session did. Construction-bound; absent for a root session and for a
+   * parent's executions fanned out, where {@link from} names only which
+   * session did. Construction-bound; absent for a root session and for a
    * child spawned outside any execution (a host calling `session.spawn()`).
    *
    * This is the edge `AppHarnessProtocol.abortExecutionTree` walks: it is the
@@ -122,19 +195,24 @@ export interface SessionRecord {
    * durable identity, not a transient runtime accounting value.
    */
   readonly principal?: string;
-
-  // ─── runtime accounting (framework-owned), hierarchy-aware ───
   /**
    * The session is INTERNAL (backlog F — see internal-visibility.md): every
    * execution/message/block it produces is stamped `internal` (client-hidden;
    * the model still reads it, and the bus/journal stay whole). The top of the
    * stamp spine, set from {@link CreateSessionInput.internal}.
    *
+   * At SESSION granularity (ADR 100 laws 2 + 3): an internal session renders
+   * nowhere in a principal-facing list, and its record is written at genesis —
+   * lineage is not speculative, so the create-early/persist-late rule that
+   * spares an abandoned conversation a blank row does not apply to plumbing.
+   *
    * NOTE (downstream store adapters): persist + round-trip this — it is a durable
    * session-level disposition, and losing it un-hides a session's whole history
    * from the client on reload. `KnowifySessionStore` needs the column.
    */
   readonly internal?: boolean;
+
+  // ─── runtime accounting (framework-owned), hierarchy-aware ───
   /** The in-flight execution's id (`exec:${generateId()}`), or absent when idle. */
   readonly currentExecutionId?: string;
   /**
@@ -257,10 +335,17 @@ export type OnInterruptedExecution = (
  *
  *   - `appId` — scope to one app (equality).
  *   - `status` — a single status or any of a set (set membership).
- *   - `parentSessionId` — one level of the session tree (equality); pass the
- *     parent's id to list its direct children.
+ *   - `fromSessionId` — one level of the session graph (equality); pass a
+ *     session's id to list everything branched from it.
+ *   - `anchored` / `internal` — the two dispositions, matched exactly.
  *   - `updatedAfter` — recency: only records last touched at-or-after this
  *     ms-epoch (`>=`).
+ *
+ * The conversation list is the composed predicate
+ * `{ internal: false, anchored: false, principal }` (ADR 100 law 2). There is
+ * no `root` dimension: a root session is one with no `from`, which is not what
+ * a conversation list is asking for — a fork of a conversation is a
+ * conversation.
  */
 export interface SessionStoreQuery {
   /** Scope to one owning app. */
@@ -268,8 +353,9 @@ export interface SessionStoreQuery {
   /** Match a single status or any of a set. */
   readonly status?: SessionStatus | readonly SessionStatus[];
   /**
-   * Match sessions whose parent is exactly this id — DIRECT children, one
-   * level. Not the transitive tree.
+   * Match sessions branched from exactly this id (`from.sessionId`) — ONE
+   * level of the graph, forks and replies and workers alike. Not the
+   * transitive tree.
    *
    * // TODO(trail-spawn-tree-query): a `spawnPathContains?: string` ancestor
    * // predicate is what cost attribution across an agent tree needs (see
@@ -283,21 +369,18 @@ export interface SessionStoreQuery {
    * // result shape to signal it. Land it in the conformance suite and every
    * // adapter as one change, or not at all.
    */
-  readonly parentSessionId?: string;
+  readonly fromSessionId?: string;
   /**
-   * `true` matches only ROOT sessions — those with no parent at all.
-   *
-   * The gap `parentSessionId` cannot fill: it asks "whose parent is X", and there is
-   * no id meaning "none". A conversation list needs exactly this, because a spawned
-   * child is a real session with a real record — so a sub-agent's working session
-   * would otherwise sit in a user's thread list beside conversations they actually
-   * had.
-   *
-   * Mutually exclusive with `parentSessionId` in practice (a session cannot both
-   * have no parent and have a specific one); supplying both matches nothing rather
-   * than silently preferring one.
+   * Match `from.anchored` exactly. `false` also matches a session with no
+   * `from` at all — an unanchored session is one that does not hang off an
+   * entry, and a root hangs off nothing.
    */
-  readonly root?: boolean;
+  readonly anchored?: boolean;
+  /**
+   * Match {@link SessionRecord.internal} exactly. `false` also matches a
+   * record that never stamped the field — absent IS not-internal.
+   */
+  readonly internal?: boolean;
   /** Recency: `record.updatedAt >= updatedAfter`. */
   readonly updatedAfter?: number;
   /**
@@ -331,7 +414,7 @@ export interface SessionStoreQuery {
 
 /**
  * Adopter-pluggable durable backing for session metadata — a CRUD port keyed
- * by `id`, queryable by app / status / parent / recency. Upsert-on-transition
+ * by `id`, queryable by app / status / origin / recency. Upsert-on-transition
  * (construction, status change, execution boundary); NO `subscribe` (liveness
  * is the bus / the session's own event stream, like the tasks store). Swappable
  * + conformance-parameterized (`runSessionStoreConformance(factory)` in
@@ -354,7 +437,7 @@ export interface SessionStore extends CollectionStore<SessionRecord, SessionStor
   /** Upsert — a later `put` of the same `id` replaces the record. */
   put(record: SessionRecord, ctx: StoreCtx): Promise<void>;
   get(id: string, ctx: StoreCtx): Promise<SessionRecord | undefined>;
-  /** By app / status / parent / recency. Omitting the query returns every record. */
+  /** By app / status / origin / disposition / recency. Omitting the query returns every record. */
   list(query: SessionStoreQuery | undefined, ctx: StoreCtx): Promise<readonly SessionRecord[]>;
   /**
    * OPTIONAL cursored read — one page of the same query, with the store minting

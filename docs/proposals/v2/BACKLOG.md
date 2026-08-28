@@ -330,6 +330,18 @@ carry usage rollups.
 
 ## Standing context
 
+2026-08-28 — ADR 100 PHASE 1 BUILT (feat/adr100-branching, pushed):
+26 commits, four agents, two waves + rulings round. Workspace 7552/7552,
+typecheck 112/112. Six Ryan rulings + coordinator rulings baked into the
+ADR's Build record (appId-from-source, as()-door law 4, OR-down
+visibility, optional anchor/-1, branches-survive-source with door
+ENFORCEMENT, branch: entryId|true, uniform anchors, disposition-keyed
+subordination). Known gaps recorded: cold-source branching
+(TODO(adr100-cold-branch)), tip-is-last-message, openSession asymmetry.
+NEXT: merge PR to feat/v2 → publish next.167+ → knowify Phase 2
+(migration, stitch-iff-inherited, index predicates, panel UI — blocked
+on Ryan's reply/thread design spec).
+
 2026-08-27 — ADR 100 REV 2 RATIFIED (supersedes rev 1 + amendment +
 open-revision draft): session branching = ONE edge + ONE disposition.
 `from {session, entry, seq, inherited, anchored}` + Backlog F's

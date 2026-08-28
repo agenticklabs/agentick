@@ -16,7 +16,14 @@
  */
 
 import { omitUndefined } from "@agentick/utils";
-import type { SessionEntry, SessionFilter, SessionRecord, SessionStoreQuery } from "@agentick/spec";
+import type {
+  AppHarnessProtocol,
+  SessionEntry,
+  SessionFilter,
+  SessionFromInput,
+  SessionRecord,
+  SessionStoreQuery,
+} from "@agentick/spec";
 
 // ============================================================================
 // Projection
@@ -42,18 +49,30 @@ export function toSessionEntry(record: SessionRecord): SessionEntry {
     ...omitUndefined({
       title: record.title,
       description: record.description,
-      parentSessionId: record.parentSessionId,
+      // ADR 100 — the branch bag and the disposition, verbatim: a row that came
+      // back from a list wider than the conversation list has to be
+      // classifiable (`relation()`), and an anchored row has to know which
+      // entry it hangs under.
+      from: record.from,
+      internal: record.internal,
     }),
   };
 }
 
 /**
  * Map the wire's {@link SessionFilter} onto the store's
- * {@link SessionStoreQuery}. `status` / `root` / `parentSessionId` are STORE
- * dimensions and must reach the query — a paged list that post-filtered them
- * would drop rows from the page it already fetched instead of fetching more
- * matches. `metadata` has no store dimension (E11's query is
- * scope/status/tree/recency), so it stays the in-process post-filter below.
+ * {@link SessionStoreQuery}. `status` / `fromSessionId` / `anchored` /
+ * `internal` are STORE dimensions and must reach the query — a paged list that
+ * post-filtered them would drop rows from the page it already fetched instead
+ * of fetching more matches. `metadata` has no store dimension (E11's query is
+ * scope/status/graph/recency), so it stays the in-process post-filter below.
+ *
+ * The conversation list is the composed predicate `{ internal: false,
+ * anchored: false }` (ADR 100 law 2), which the CALLER writes: there is no
+ * `root` dimension to synthesize here, because a fork of a conversation has a
+ * `from` and is still a conversation. Both dims match absence (an unstamped
+ * record is not internal; a record with no `from` is not anchored) — the
+ * store's obligation, carried by the session-store conformance suite.
  */
 export function toSessionStoreQuery(
   filter: SessionFilter | undefined,
@@ -61,8 +80,9 @@ export function toSessionStoreQuery(
 ): SessionStoreQuery | undefined {
   const query = omitUndefined({
     status: filter?.status,
-    root: filter?.root,
-    parentSessionId: filter?.parentSessionId,
+    fromSessionId: filter?.fromSessionId,
+    anchored: filter?.anchored,
+    internal: filter?.internal,
     // Scoping rides the QUERY, not a filter over the answer. Once the store cuts
     // the page, a caller-side ownership filter would shorten it — and leave a
     // `nextCursor` pointing past rows that were dropped after the cut.
@@ -120,4 +140,29 @@ export function visibleTo(
   principal: string | undefined,
 ): boolean {
   return record.principal === undefined || record.principal === principal;
+}
+
+/**
+ * ADR 100 law 4 — may this caller open a session branched from `from`?
+ *
+ * The load-bearing line of the feature. `from.inherited` reads the SOURCE's
+ * timeline, knobs and state into the new session, so a `from` the caller does
+ * not own is a cross-tenant state read rather than a bad parameter — and the
+ * new session is the caller's own, which is where the read comes back out.
+ *
+ * The rule is {@link visibleTo}'s, asked of the source record: an unstamped
+ * source asserts no ownership and is open to anyone (the principal-less
+ * deployment / local pole), an owned one matches its principal exactly.
+ *
+ * A source that does not exist refuses IDENTICALLY to one owned by someone
+ * else. A distinct "no such session" would answer, for any id a caller cares to
+ * name, whether that session exists.
+ */
+export async function mayBranchFrom(
+  app: Pick<AppHarnessProtocol, "getSessionRecord">,
+  from: SessionFromInput,
+  principal: string | undefined,
+): Promise<boolean> {
+  const source = await app.getSessionRecord(from.sessionId);
+  return source !== undefined && visibleTo(source, principal);
 }

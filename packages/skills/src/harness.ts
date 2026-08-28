@@ -238,10 +238,10 @@ export class SkillsHarness
   /**
    * Late-bound ISOLATED send capability (C2 — three-audiences-plan §C split,
    * item 3). Injected at session install via {@link bindIsolationRunner};
-   * routes a run through `session.fork()` (a same-image, copied-state child
-   * disposed after the run) instead of the current session. `undefined` when
-   * no isolation runner was bound — `run({ isolate: true })` then throws
-   * `SkillIsolationUnavailable` (the pre-C2 behavior).
+   * routes a run through `session.spawn({ branch: tip })` (a same-image worker
+   * carrying the transcript, disposed after the run) instead of the current
+   * session. `undefined` when no isolation runner was bound —
+   * `run({ isolate: true })` then throws `SkillIsolationUnavailable`.
    */
   private isolationRunner?: SessionSendCapability;
 
@@ -414,10 +414,11 @@ export class SkillsHarness
    * Inject the session's ISOLATED send capability (C2 — three-audiences-plan
    * §C split, item 3). Optional sibling to {@link bindRunner}: where
    * `bindRunner` runs a send in THIS session, an isolation runner runs it in a
-   * fresh `session.fork()` (a same-image, copied-state child disposed after
-   * the run settles) — the isolation `skills.run({ isolate: true })` needs. The
-   * composition root binds it at session install exactly as it binds
-   * `bindRunner`; a harness with none stays pre-C2 (isolation throws).
+   * fresh `session.spawn({ branch: tip })` (a same-image worker carrying the
+   * transcript, disposed after the run settles) — the isolation
+   * `skills.run({ isolate: true })` needs. The composition root binds it at
+   * session install exactly as it binds `bindRunner`; a harness with none
+   * bound throws on isolation.
    */
   bindIsolationRunner(runner: SessionSendCapability): void {
     this.isolationRunner = runner;
@@ -473,8 +474,9 @@ export class SkillsHarness
         try: async () => {
           const { name } = input;
           // C2 — an isolation request routes through the isolation runner (a
-          // `session.fork()`-backed send) when one is bound; with none it STILL
-          // throws (never silently degrade to a same-session run).
+          // `session.spawn({ branch: tip })`-backed send) when one is bound;
+          // with none it STILL throws (never silently degrade to a
+          // same-session run).
           const isolate = input.isolate === true;
           if (isolate && this.isolationRunner === undefined) {
             throw new SkillIsolationUnavailable({ skillName: name });
@@ -501,8 +503,8 @@ export class SkillsHarness
           // the send path). `.result` may reject (steer-conflict, validation,
           // incomplete) — the typed error propagates to whoever awaits it, NOT
           // to this operation, which terminates the moment the handle exists.
-          // The isolation runner threads the same composed send through a forked
-          // child and disposes it after the handle settles.
+          // The isolation runner threads the same composed send through a
+          // branched worker and disposes it after the handle settles.
           return await runner(stamped);
         },
         catch: (cause): SkillsError =>
@@ -677,9 +679,10 @@ export class SkillsHarness
    * would write the store back onto itself. Timestamps a record carries are
    * PRESERVED (a store replay keeps its real history); absent ones default to now.
    *
-   * **Fork/spawn.** Genesis must not run for a child that inherits its parent's
-   * image. That decision belongs to the session (it knows its lineage), which
-   * simply does not install a fresh genesis for a fork.
+   * **Inheriting children.** Genesis must not run for a child that inherits
+   * its source's image — a fork, a reply, or a spawn with `branch`. That
+   * decision belongs to the session (it knows its lineage), which simply does
+   * not install a fresh genesis for one.
    *
    * **Not the checkpoint contract.** `CheckpointCapable` is feature-detected on
    * `persist` + `hydrate` TOGETHER, so pairing this method with a `persist` enrolls

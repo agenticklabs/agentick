@@ -220,12 +220,12 @@ describe("SP5 — spawnPath lineage", () => {
 
     // Direct child: lineage is [root]; length 1 == depth.
     const childRec = await app.getSessionRecord("child");
-    expect(childRec?.parentSessionId).toBe("root");
+    expect(childRec?.from?.sessionId).toBe("root");
     expect(childRec?.spawnPath).toEqual(["root"]);
 
-    // Grandchild: full ancestry [root, child]; parent edge still just its parent.
+    // Grandchild: full ancestry [root, child]; branch edge still just its parent.
     const grandRec = await app.getSessionRecord("grand");
-    expect(grandRec?.parentSessionId).toBe("child");
+    expect(grandRec?.from?.sessionId).toBe("child");
     expect(grandRec?.spawnPath).toEqual(["root", "child"]);
     await app.closeApp();
   });

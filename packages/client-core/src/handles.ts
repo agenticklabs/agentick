@@ -15,6 +15,7 @@ import type {
   SessionModelInfoResult,
   ChannelView,
   ChannelViewConfig,
+  ClientBranchInput,
   ClientProtocol,
   ClientSessionExecutionHandle,
   ClientSendInput,
@@ -30,6 +31,7 @@ import type {
   SendMessageInput,
   SessionEntry,
   SessionFilter,
+  SessionFromInput,
   SessionHandle,
   SessionHandleBase,
   SessionPageRequest,
@@ -41,7 +43,12 @@ import type {
 } from "@agentick/spec";
 import type { Cursor } from "@agentick/spec";
 import { isProgressEventName } from "@agentick/spec";
-import { omitUndefined, pipeAsyncIterableTo, readableFromAsyncIterable } from "@agentick/utils";
+import {
+  generateId,
+  omitUndefined,
+  pipeAsyncIterableTo,
+  readableFromAsyncIterable,
+} from "@agentick/utils";
 import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import { sessionStatusView, type SessionStatusView } from "./session-status-view.js";
@@ -131,6 +138,9 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
         sessionId: input?.sessionId,
         metadata: input?.metadata,
         eager: input?.eager,
+        // ADR 100 — the branch bag rides the ONE create door. The gateway
+        // admits it only when the caller's principal owns `from.sessionId`.
+        from: input?.from,
       });
     },
     async getSession(sessionId): Promise<SessionEntry> {
@@ -186,6 +196,42 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
       return makeSessionHandle(client, sessionId);
     },
   };
+}
+
+/**
+ * The body the three ADR 100 conversation verbs share: mint the new id, fire
+ * the create carrying the `from` bag, hand back the new session's handle.
+ *
+ * No `appId` — a branch lives in its source's app, so the gateway resolves it
+ * from the source record. The bag carries no `seq` and no `internal`: both are
+ * server-resolved, and an absent `entryId` means the source's tip.
+ *
+ * The verbs return SYNCHRONOUSLY (the `client.session(id)` lazy-create
+ * posture), so the create is fired and not awaited. Its rejection is swallowed
+ * here and resurfaces on the next verb sent to the returned handle — an
+ * unhandled rejection would take a process down over a failure the caller is
+ * about to be told about anyway.
+ */
+function branchFrom(
+  client: InternalClient,
+  sourceSessionId: string,
+  input: ClientBranchInput & { readonly anchored: boolean },
+): SessionHandle {
+  const sessionId = input.sessionId ?? `session:${generateId()}`;
+  const from: SessionFromInput = {
+    sessionId: sourceSessionId,
+    inherited: input.inherited ?? true,
+    anchored: input.anchored,
+    ...(input.entryId !== undefined ? { entryId: input.entryId } : {}),
+  };
+  void client
+    .request("app/create_session", {
+      sessionId,
+      from,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    })
+    .catch(() => {});
+  return makeSessionHandle(client, sessionId);
 }
 
 /**
@@ -267,6 +313,15 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
         input,
       });
       return result.content;
+    },
+    reply(entryId: string): SessionHandle {
+      return branchFrom(client, sessionId, { entryId, anchored: true });
+    },
+    fork(entryId?: string): SessionHandle {
+      return branchFrom(client, sessionId, { entryId, anchored: false });
+    },
+    branch(input: ClientBranchInput): SessionHandle {
+      return branchFrom(client, sessionId, { ...input, anchored: input.anchored ?? false });
     },
     async abort(reason, opts) {
       // `cascade` rides the same verb — see `SessionAbortOptions`. Omitted when

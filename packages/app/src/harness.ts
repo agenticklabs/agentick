@@ -74,9 +74,12 @@ import type {
   OnInterruptedExecution,
   ScopeNodeLease,
   SessionCloseReason,
+  SessionFrom,
+  SessionFromInput,
   SessionRecord,
   SessionStore,
   SessionStoreQuery,
+  TimelineEntry,
 } from "@agentick/spec";
 import {
   InMemoryHandlerResolver,
@@ -87,6 +90,7 @@ import {
 import {
   AppClosedError,
   AppExecutionFailed,
+  BranchSourceEntryNotFoundError,
   DEFAULT_JOURNALING_POLICY,
   HandlerError,
   isExecutorFactory,
@@ -850,18 +854,32 @@ interface InternalSessionEntry<P> {
   readonly tools: ToolExecutorProtocol;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly createdAt: number;
+  /**
+   * The LIVE parent edge — set for a SPAWNED child only, and the edge every
+   * subordination walk here reads (cascade, execution tree, session tree).
+   * Not the durable `SessionRecord.from`: a branch records where it came from
+   * without becoming subordinate to it.
+   */
   readonly parentSessionId?: string;
   /**
    * EX1 — the parent EXECUTION that spawned this session (`parentSessionId`
    * names which session did; this names which of its turns). The live half of
-   * the same edge the durable `SessionRecord` carries, and the key
-   * {@link AppHarness.abortExecutionTree} walks.
+   * the same edge the durable `SessionRecord.originExecutionId` carries, and
+   * the key {@link AppHarness.abortExecutionTree} walks.
    */
   readonly originExecutionId?: string;
   /** EX1 — the parent TOOL CALL that asked for the spawn, when there was one. */
   readonly originCallId?: string;
   lastActiveAt?: number;
   ephemeral: boolean;
+}
+
+/**
+ * What a branch may anchor on (ADR 100) — a message id. Boundary entries carry
+ * no id, so they cannot be branch points.
+ */
+function anchorIdOf(entry: TimelineEntry): string | undefined {
+  return entry.kind === "message" ? entry.message.id : undefined;
 }
 
 /** Why `disposeSession` is tearing a session down — see its doc-block. */
@@ -877,7 +895,10 @@ const CLOSE_REASON_OF: Record<DisposeReason, SessionCloseReason> = {
 /** Construction facts the spawn flow supplies out of band — see `buildSession`. */
 interface SessionBuildOverrides {
   readonly agent?: unknown;
+  /** The LIVE parent edge (registry, cascade, inbox climb) — spawn-supplied. */
   readonly parentSessionId?: string;
+  /** ADR 100 — the durable branch edge the spawn composed. */
+  readonly from?: SessionFromInput;
   /** SP5 — the child's spawn lineage, forwarded onto the session. */
   readonly spawnPath?: readonly string[];
   /** SP6 — the parent's construction signal, fanned into the child. */
@@ -2187,9 +2208,9 @@ export class AppHarness<P = unknown>
    * Enumerate the durable session registry — the {@link SessionStore} (E11).
    * Returns {@link SessionRecord}s (the superset: every non-ephemeral session
    * ever, including closed ones the live `registry` dropped), filtered by app /
-   * status / parent / recency. This — NOT the live registry — backs every
-   * "list / resume my sessions" surface. See {@link getSession} for the live
-   * routing half of the E11 split.
+   * status / origin / disposition / recency. This — NOT the live registry —
+   * backs every "list / resume my sessions" surface. See {@link getSession} for
+   * the live routing half of the E11 split.
    */
   listSessions(query?: SessionStoreQuery): Promise<readonly SessionRecord[]> {
     return this.sessionStore.list(query, this.storeCtx());
@@ -2476,6 +2497,60 @@ export class AppHarness<P = unknown>
   }
 
   /**
+   * ADR 100 — the anchor's POSITION, resolved once against the source's log.
+   *
+   * The two absences are different questions, which is why the door shape and
+   * the record shape differ: an absent `entryId` ARRIVING here means "the
+   * source's tip, as of now" (the gesture a fork button makes), while an absent
+   * `entryId` LEAVING here means the source had nothing to anchor on — spelled
+   * `seq: -1`, below every store's floor, so an inherited copy bounded by it
+   * takes nothing.
+   *
+   * @throws {BranchSourceEntryNotFoundError} the named entry is not in the
+   *   source's log — the same answer the session-side verbs give.
+   */
+  private async resolveBranchPosition(
+    from: SessionFromInput,
+    source: InternalSessionEntry<P> | undefined,
+  ): Promise<SessionFrom> {
+    if (source === undefined) {
+      // TODO(adr100-cold-branch): branching a cold conversation is a real
+      // gesture (fork from a list, without opening it first). The app has no
+      // channel to a non-live session's timeline store, so the likely
+      // resolution is resolving position inside session genesis, where the
+      // store binding already lives.
+      throw new AppExecutionFailed({
+        cause: new Error(
+          `cannot branch from ${from.sessionId}: it is not live, and its anchor's position is read from its timeline`,
+        ),
+      });
+    }
+    const anchors = (await source.session.timeline.history()).flatMap((row) => {
+      const id = anchorIdOf(row.entry);
+      return id === undefined ? [] : [{ id, seq: row.seq }];
+    });
+    const anchor =
+      from.entryId === undefined
+        ? anchors[anchors.length - 1]
+        : anchors.find((candidate) => candidate.id === from.entryId);
+    if (anchor === undefined && from.entryId !== undefined) {
+      throw new BranchSourceEntryNotFoundError({
+        sessionId: from.sessionId,
+        entryId: from.entryId,
+      });
+    }
+    if (anchor === undefined) {
+      return {
+        sessionId: from.sessionId,
+        inherited: from.inherited,
+        anchored: from.anchored,
+        seq: -1,
+      };
+    }
+    return { ...from, entryId: anchor.id, seq: anchor.seq };
+  }
+
+  /**
    * The create-session body proper. Pushes every substrate-claiming harness it
    * constructs onto `claimed` so {@link createSessionBody} can release them if
    * construction does not reach the registry.
@@ -2488,14 +2563,13 @@ export class AppHarness<P = unknown>
   ): Promise<SessionHarnessProtocol<P>> {
     this.assertOpen();
 
-    // Fold the spawn-supplied `parentSessionId` (which the spawn flow threads
-    // via `overrides`, not `input`) INTO the input the hooks see, so the
+    // Fold the spawn-supplied `from` (which the spawn flow threads via
+    // `overrides`, not `input`) INTO the input the hooks see, so the
     // `onSessionCreate` reshape arm can read it — the selective-inheritance
-    // seam is "read `input.parentSessionId` → look up the parent record →
-    // inject chosen metadata keys." The later parentSessionId cascade
-    // (overrides-wins) is unaffected.
-    if (overrides.parentSessionId !== undefined && input.parentSessionId === undefined) {
-      input = { ...input, parentSessionId: overrides.parentSessionId };
+    // seam is "read `input.from.sessionId` → look up the source record →
+    // inject chosen metadata keys."
+    if (overrides.from !== undefined && input.from === undefined) {
+      input = { ...input, from: overrides.from };
     }
 
     // Run `onSessionCreate` handlers — the house before-hook grammar, three
@@ -2550,6 +2624,22 @@ export class AppHarness<P = unknown>
     // second close is a no-op; the registry drop is the point) and construction
     // continues into a live replacement.
     if (existing !== undefined) await this.disposeSession(sessionId, "close");
+
+    // ADR 100 — complete the branch edge. The verbs name the ENTRY (they hold
+    // the source's timeline and answer for a bad id); this door resolves that
+    // entry's POSITION, once, and the complete bag is what genesis bounds the
+    // inherited copy by and what the record stores.
+    //
+    // A HOST-door branch is flushed first (checkpointing §5): the source may be
+    // live and holding writes, and genesis copies from the STORE. The
+    // session-side verbs flush their own source before they get here, which is
+    // what `overrides.from` marks — so a spawn is never flushed twice.
+    let branchedFrom: SessionFrom | undefined;
+    if (input.from !== undefined) {
+      const source = this.registry.get(input.from.sessionId);
+      if (overrides.from === undefined && source !== undefined) await source.session.snapshot();
+      branchedFrom = await this.resolveBranchPosition(input.from, source);
+    }
 
     // ADR 102 — the session's node in the scope tree, held for as long as
     // the session lives. Unconfigured (or when the adopter wired an
@@ -2987,13 +3077,10 @@ export class AppHarness<P = unknown>
       // at `sessionExtensionBridges` construction (above); session-
       // extensions overlay them via `installer.registerNamespace`.
       ...(sessionExtensionBridges.size > 0 ? { extensionBridges: sessionExtensionBridges } : {}),
-      // ParentSessionId cascade: spawn-supplied (overrides) wins; adopter
-      // can also wire a non-spawn parent linkage via input.parentSessionId.
-      ...(overrides.parentSessionId !== undefined
-        ? { parentSessionId: overrides.parentSessionId }
-        : input.parentSessionId !== undefined
-          ? { parentSessionId: input.parentSessionId }
-          : {}),
+      // The live parent edge is SPAWN-ONLY (subordination: cascade, inbox
+      // climb). `from` sits beside it as the durable branch edge and mints no
+      // subordination — a fork outlives what it forked from.
+      ...omitUndefined({ parentSessionId: overrides.parentSessionId, from: branchedFrom }),
       // E11 — the durable session registry. Injected app-singleton (mirrors
       // `taskStore`), so the session mirrors its metadata into the store off
       // the critical path. Ephemeral (`runOnce`) sessions get NO store — they
@@ -3007,8 +3094,10 @@ export class AppHarness<P = unknown>
         title: input.title,
         description: input.description,
         // E11 — genesis persistence is lazy by default (first mutation writes);
-        // `eager` forces the write at construction.
-        eager: input.eager,
+        // `eager` forces the write at construction. ADR 100 law 3 — an
+        // INTERNAL session is plumbing, and plumbing's lineage is not
+        // speculative, so it earns its row at genesis whatever the caller said.
+        eager: input.internal === true ? true : input.eager,
       }),
     });
     claimed.push(session);
@@ -3084,15 +3173,17 @@ export class AppHarness<P = unknown>
       const sendCapability: SessionSendCapability = (sendInput) =>
         session.send(sendInput as SendInput<P>);
       // C2 (three-audiences-plan §C split, item 3) — the ISOLATED send
-      // capability. Each run forks the session (`session.fork()` — a same-image
-      // child over a branched copy of its scopes) and runs the composed send on
-      // that fresh child, so nothing from the isolated run touches THIS
-      // session's timeline/state. The child is disposed after the handle
-      // settles (registry removal + `session.close()` via `disposeChildSession`,
-      // which awaits the child's own quiescence). Disposal rides OFF the
-      // critical path: its errors are swallowed and never mask the run result.
+      // capability. ADR 100 reconciliation 2: the throwaway same-image child is
+      // `spawn({ branch: tip })`, a WORKER carrying the transcript — not a
+      // fork, which would put a visible conversation in the user's list for the
+      // length of a skill run. The composed send runs there, so nothing from it
+      // touches THIS session's timeline or state. The child is disposed after
+      // the handle settles (registry removal + `session.close()` via
+      // `disposeChildSession`, which awaits the child's own quiescence).
+      // Disposal rides OFF the critical path: its errors are swallowed and
+      // never mask the run result.
       const isolationCapability: SessionSendCapability = async (sendInput) => {
-        const child = await session.fork();
+        const child = (await session.spawn({ branch: true })) as SessionHarnessProtocol<P>;
         const handle = await child.send(sendInput as SendInput<P>);
         void handle.result
           .then(
@@ -3160,9 +3251,17 @@ export class AppHarness<P = unknown>
   }
 
   /**
-   * `SpawnContext` impl — invoked by a parent SessionHarness when its
-   * `spawn()` method is called. Creates a child session linked to the
-   * parent in the registry.
+   * `SpawnContext` impl — the door a SessionHarness reaches the app through,
+   * for every session it creates: a `spawn`ed worker, and a `fork` / `reply`
+   * branch alike.
+   *
+   * What separates them is the child's DISPOSITION, not which verb called
+   * (ADR 100 ruling 5). An internal child is registered subordinate to its
+   * parent — the abort cascade, the execution tree, teardown with it. A
+   * principal-facing branch is registered as an ordinary top-level session
+   * owned by the same principal, and the door enforces that rather than
+   * trusting it: the live-lineage bundle is dropped for a visible child even
+   * if a caller supplies one.
    */
   async createChildSession(input: SpawnContextChildInput<P>): Promise<SessionHarnessProtocol<P>> {
     // The child's id is minted HERE rather than inside `createSessionBody`, so
@@ -3170,25 +3269,42 @@ export class AppHarness<P = unknown>
     // and same fallback the body would have applied — it sees a concrete id and
     // takes its normal path.
     const sessionId = input.sessionId ?? `session:${generateId()}`;
+    // ADR 100 ruling 5 — subordination keys on the resolved DISPOSITION, never
+    // on which verb opened the door: an INTERNAL child is owned by its parent
+    // (the abort cascade, the execution tree, teardown with it), and a
+    // principal-facing branch is owned by nobody. So the live-lineage bundle
+    // travels together and only for a worker: the parent edge, the ancestry it
+    // extends, and the construction signal that tears it down.
+    //
+    // Origin stamps are NOT in it. They are provenance rather than ownership —
+    // what tells an agent's fork from a person's — so they ride either way.
+    const lineage: {
+      readonly parentSessionId?: string;
+      readonly spawnPath?: readonly string[];
+      readonly signal?: AbortSignal;
+    } =
+      input.internal === true
+        ? omitUndefined({
+            parentSessionId: input.parentSessionId,
+            spawnPath: input.spawnPath,
+            signal: input.signal,
+          })
+        : {};
     const createInput: CreateSessionInput<P> = {
       sessionId,
-      // A spawned / forked child persists its record at genesis: unlike a
-      // top-level "new chat", the record encodes the lineage edge
-      // (parentSessionId / spawnPath / originExecutionId) that abort-tree walks
-      // and lineage listings read, and that edge exists at creation — it is not
-      // speculative garbage waiting on a first message.
-      eager: true,
       ...omitUndefined({
         metadata: input.metadata,
+        // ADR 100 — the disposition is the CALLER's: this one door serves
+        // `spawn` (always internal, forced on the session side) and the
+        // conversation verbs (internal only when their source was). Law 3 then
+        // decides persistence from it — see `buildSession`.
+        internal: input.internal,
         // ADR 48 — thread the inherited principal (the parent's own, set by
         // `session.spawn()`) so the child's harness + record carry ownership.
         principal: input.principal,
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
-        // Backlog F — the child's resolved `internal` (parent || explicit),
-        // routed through `createSessionBody` onto its `SessionRecord.internal`.
-        internal: input.internal,
       }),
     };
     const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {
@@ -3197,11 +3313,14 @@ export class AppHarness<P = unknown>
       name: "app:command:create-child-session",
       // The lineage IS the scope: the child (`sessionId`), its parent
       // (`parentSessionId`), and the whole ancestry (`spawnPath`). An auditor
-      // reconstructs the spawn tree from these records alone.
+      // reconstructs the spawn tree from these records alone — and a BRANCH,
+      // which is subordinate to nothing, is scoped by what it does have.
       scope: {
         sessionId,
-        parentSessionId: input.parentSessionId,
-        ...omitUndefined({ spawnPath: input.spawnPath }),
+        ...omitUndefined({
+          parentSessionId: lineage.parentSessionId,
+          spawnPath: lineage.spawnPath,
+        }),
       },
       // ADR 92 Slice B — the causal link to the invoking `session:command:spawn`,
       // threaded as DATA by `session.spawn()`. The runtime's ambient
@@ -3222,14 +3341,16 @@ export class AppHarness<P = unknown>
           try: () =>
             this.createSessionBody(i, /* ephemeral */ false, {
               agent: input.agent,
-              parentSessionId: input.parentSessionId,
-              // SP5/SP6 — forward the child's lineage + the parent's
-              // construction signal so the session stamps envelopes and
-              // cascades teardown. EX1 — plus the origin edge (which of the
-              // parent's turns, and which tool call, asked for this child).
+              // SP5/SP6 + EX1 — a worker's live lineage: the parent edge it is
+              // torn down through, the ancestry it extends, the construction
+              // signal fanned into it. Empty for a branch, which is the whole
+              // shape of one — it registers as an ordinary top-level session.
+              ...lineage,
+              // ADR 100 — the durable branch edge, and the origin stamps that
+              // name the turn behind this session. Both travel whatever the
+              // disposition: they describe where it came from, not who owns it.
               ...omitUndefined({
-                spawnPath: input.spawnPath,
-                signal: input.signal,
+                from: input.from,
                 originExecutionId: input.originExecutionId,
                 originCallId: input.originCallId,
               }),

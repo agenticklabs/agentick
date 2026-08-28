@@ -60,6 +60,13 @@ function fakeExecutor(): FakeLanguageModelExecutor {
 const Agent = (): React.ReactElement =>
   React.createElement("message", { role: "system" }, "You are an agent.");
 
+/** ADR 100 law 3 — a conversation (a fork included) has no row until it speaks. */
+async function recordEarnedBySpeaking(session: SessionHarnessProtocol): Promise<void> {
+  await (
+    await session.send({ messages: [{ role: "user", content: "hi" }] })
+  ).result;
+}
+
 describe("session-principal — inheritance + adopter seams (ADR 48)", () => {
   it("(part 2) spawn + fork children carry the parent's principal (harness + record)", async () => {
     const app = await createApp(React.createElement(Agent), {
@@ -73,8 +80,11 @@ describe("session-principal — inheritance + adopter seams (ADR 48)", () => {
     expect(spawned.principal).toBe("owner-1");
     expect((await app.getSessionRecord(spawned.id))?.principal).toBe("owner-1");
 
+    // A fork is a conversation, so its record is earned by speaking (ADR 100
+    // law 3) — the descent is on the harness from birth, and on the row it writes.
     const forked = await parent.fork();
     expect(forked.principal).toBe("owner-1");
+    await recordEarnedBySpeaking(forked);
     expect((await app.getSessionRecord(forked.id))?.principal).toBe("owner-1");
 
     await app.closeApp();
@@ -93,10 +103,12 @@ describe("session-principal — inheritance + adopter seams (ADR 48)", () => {
 
     // fork, no metadata → inherits the parent's bag (a same-image copy).
     const forkInherit = await parent.fork();
+    await recordEarnedBySpeaking(forkInherit);
     expect((await app.getSessionRecord(forkInherit.id))?.metadata?.tenant).toBe("acme");
 
     // fork with explicit metadata → the explicit bag wins.
     const forkExplicit = await parent.fork({ metadata: { tenant: "beta" } });
+    await recordEarnedBySpeaking(forkExplicit);
     expect((await app.getSessionRecord(forkExplicit.id))?.metadata?.tenant).toBe("beta");
 
     // spawn → a NEW session; metadata is NOT auto-inherited.
@@ -111,9 +123,9 @@ describe("session-principal — inheritance + adopter seams (ADR 48)", () => {
       modelExecutor: fakeExecutor(),
       target,
     });
-    // Selective spawn inheritance: reshape ONLY children (those with a parent).
+    // Selective spawn inheritance: reshape ONLY branched sessions.
     app.onSessionCreate((input: CreateSessionInput) => {
-      if (input.parentSessionId === undefined) return Promise.resolve();
+      if (input.from === undefined) return Promise.resolve();
       return Promise.resolve({ ...input, metadata: { ...input.metadata, injected: "yes" } });
     });
 

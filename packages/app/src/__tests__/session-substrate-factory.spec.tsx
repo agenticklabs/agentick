@@ -21,6 +21,7 @@ import type {
   ExecutionTarget,
   MessageInbox,
   ProtocolEvent,
+  SessionFromInput,
 } from "@agentick/spec";
 
 import { createApp } from "../react.js";
@@ -333,16 +334,108 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
     await app.closeApp();
   });
 
-  it("parentSessionId is stored on the session when supplied", async () => {
+  it("the from bag is threaded into the session when supplied (ADR 100)", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
       modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
-    const session = await app.createSession({
-      parentSessionId: "parent-xyz",
+    await app.createSession({ sessionId: "source-xyz" });
+    const from: SessionFromInput = { sessionId: "source-xyz", inherited: true, anchored: false };
+    const session = await app.createSession({ sessionId: "branched", eager: true, from });
+    const record = await app.getSessionRecord("branched");
+    expect(record?.from?.sessionId).toBe("source-xyz");
+    expect(record?.from?.inherited).toBe(true);
+    expect(record?.from?.anchored).toBe(false);
+    // The door resolved the anchor's position: a source with nothing to anchor
+    // on records `seq: -1` and no `entryId` (ADR 100 — the empty prefix).
+    expect(record?.from?.seq).toBe(-1);
+    expect(record?.from?.entryId).toBeUndefined();
+    // The durable branch edge mints no LIVE subordination: a fork is not a
+    // spawned child, so the host door leaves the parent edge alone.
+    expect((session as unknown as { parentSessionId?: string }).parentSessionId).toBeUndefined();
+    await app.closeApp();
+  });
+
+  it("a VERB-door branch registers as an ordinary session — no live parent edge (ADR 100 ruling 5)", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {
+      modelExecutor: mkExecutor(),
+      target: mkTarget(),
     });
-    const stored = (session as unknown as { parentSessionId: string | undefined }).parentSessionId;
-    expect(stored).toBe("parent-xyz");
+    await app.createSession({ sessionId: "source-xyz" });
+
+    // What `session.fork()` / `session.reply()` hand the door: a branch edge and
+    // NO parent edge. The absence is the whole shape — the door reads it as an
+    // ordinary top-level session rather than a subordinate child.
+    const branch = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      sessionId: "branch-verb",
+      from: { sessionId: "source-xyz", inherited: true, anchored: false },
+    });
+
+    expect((branch as unknown as { parentSessionId?: string }).parentSessionId).toBeUndefined();
+    expect(app.getSession("branch-verb")?.id).toBe("branch-verb");
+    await app.closeApp();
+  });
+
+  it("subordination keys on the DISPOSITION — a visible child gets no parent edge even if one is passed", async () => {
+    // ADR 100 ruling 5's consistency rule: ownership follows `internal`, not
+    // the verb and not the field. The door enforces it rather than trusting the
+    // caller, so no principal-facing session can be handed into somebody else's
+    // teardown cascade by supplying a parent id.
+    const app = await createApp(React.createElement(MinimalAgent), {
+      modelExecutor: mkExecutor(),
+      target: mkTarget(),
+    });
+    await app.createSession({ sessionId: "src" });
+
+    const visible = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      parentSessionId: "src",
+      spawnPath: ["src"],
+      sessionId: "visible-child",
+      from: { sessionId: "src", inherited: true, anchored: false },
+    });
+
+    expect((visible as unknown as { parentSessionId?: string }).parentSessionId).toBeUndefined();
+    expect(app.sessionTree("src")).not.toContain("visible-child");
+    expect(app.sessionTreeContains("src", "visible-child")).toBe(false);
+    await app.closeApp();
+  });
+
+  it("a branch is OUTSIDE its source's live tree — nothing can cascade to it (ADR 100 ruling 5)", async () => {
+    // Why a branch outlives its source: every teardown that reaches a
+    // subordinate — `abort({ cascade: true })`, `destroySession`, a parent
+    // close — walks the live parent edge, and a branch has none. Asserting the
+    // tree is asserting the reach of all of them at once.
+    const app = await createApp(React.createElement(MinimalAgent), {
+      modelExecutor: mkExecutor(),
+      target: mkTarget(),
+    });
+    const source = await app.createSession({ sessionId: "src" });
+
+    const worker = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      parentSessionId: "src",
+      sessionId: "worker",
+      internal: true,
+      from: { sessionId: "src", inherited: false, anchored: false },
+    });
+    const branch = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      sessionId: "branch-outliver",
+      from: { sessionId: "src", inherited: true, anchored: false },
+    });
+
+    // The worker is subordinate; the branch stands beside its source.
+    expect(app.sessionTree("src")).toContain(worker.id);
+    expect(app.sessionTree("src")).not.toContain(branch.id);
+    expect(app.sessionTreeContains("src", branch.id)).toBe(false);
+
+    // …and closing the source leaves it live and usable.
+    void source;
+    await app.closeSession("src");
+    expect(app.getSession("src")).toBeUndefined();
+    expect(app.getSession(branch.id)?.id).toBe(branch.id);
     await app.closeApp();
   });
 });

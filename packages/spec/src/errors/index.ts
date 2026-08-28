@@ -83,6 +83,7 @@ export {
   SessionError,
   type SessionErrorChannel,
   SessionNotFoundError,
+  BranchSourceEntryNotFoundError,
   SessionTimelineError,
   SpawnDepthExceededError,
   type StateApplyError,

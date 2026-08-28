@@ -60,7 +60,8 @@ export function sessionStatusEventQuery(): EventQuery {
  * payload. The wire-visible half of `onAfterSessionPersist`: the same fact the
  * server hook observes, heard across the wire. Pair with a gateway/app
  * `SubscriptionScope` for a thread list holding no session handles; skip
- * records carrying `parentSessionId` when the list is a root projection.
+ * records that are `internal` or anchored when the list is a conversation
+ * projection (ADR 100 law 2).
  */
 export function sessionPersistEventQuery(): EventQuery {
   return { name: { exact: "session:command:persist" }, phase: "terminal" };
