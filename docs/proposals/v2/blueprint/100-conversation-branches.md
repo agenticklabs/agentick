@@ -23,8 +23,8 @@ derived, stored nowhere.
 internal: boolean        // Backlog F's axis — true: plumbing, false: principal-facing
 
 from?: {                 // absent ⇒ root
-  session: string        // spawned from
-  entry: string          // at this timeline entry
+  sessionId: string      // spawned from
+  entryId: string        // at this timeline entry
   seq: number            // the entry's position — resolved once at genesis
   inherited: boolean     // took the state (C2 branch fan-out — timeline, knobs, state)
   anchored: boolean      // stays at the entry it came from
@@ -59,10 +59,10 @@ exactly as Slack ships it — never a structural constraint, never a derived id.
 // SessionHarness (server: hosts, connectors, agents mid-turn) and the client
 // handle carry the SAME verbs. The agent-side path stamps origin; the wire
 // path cannot.
-session.reply(entry)                → create({ from: { session: this, entry, inherited: true,  anchored: true  } })
-session.fork(entry?)                → create({ from: { session: this, entry: entry ?? tip, inherited: true, anchored: false } })
-session.spawn(agent)                → create({ internal: true, from: { session: this, entry: tip, inherited: false, anchored: false } })  // + origin stamps, as today
-session.spawn(agent, { branch: e }) → create({ internal: true, from: { session: this, entry: e, inherited: true,  anchored: false } })
+session.reply(entryId)              → create({ from: { sessionId: this.id, entryId, inherited: true,  anchored: true  } })
+session.fork(entryId?)              → create({ from: { sessionId: this.id, entryId: entryId ?? tip, inherited: true, anchored: false } })
+session.spawn(agent)                → create({ internal: true, from: { sessionId: this.id, entryId: tip, inherited: false, anchored: false } })  // + origin stamps, as today
+session.spawn(agent, { branch: e }) → create({ internal: true, from: { sessionId: this.id, entryId: e, inherited: true,  anchored: false } })
 session.branch(opts)                → the explicit form
 
 // the one door underneath everything:
@@ -92,7 +92,7 @@ Fresh ids everywhere; ids are strings; the framework mandates no format.
    turn earns it via `session:persist`. An abandoned reply thread leaves
    nothing.
 4. **Security** — the wire admits `from` only when the caller's principal owns
-   `from.session` (without this, `from` is a cross-tenant state read — the
+   `from.sessionId` (without this, `from` is a cross-tenant state read — the
    load-bearing line). `internal` dispositions follow Backlog F's door rules;
    origin stamps are never wire-settable — lineage is the edge's to assert.
 
@@ -133,7 +133,7 @@ relation(record); // "conversation" | "fork" | "reply" | "worker" | "forked-work
    Subordination consumers (abort-cascade, principal descent, spawnPath) keep
    their semantics: cascade walks the LIVE spawn registry as today (lifecycle
    was never a durable-record fact); the durable edge they read becomes
-   `from.session` where they read the record at all. Lands as its own commit
+   `from.sessionId` where they read the record at all. Lands as its own commit
    with the unfiltered-grep ritual.
 
 ## Adopter alignment (knowify)
