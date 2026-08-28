@@ -157,3 +157,17 @@ describe("createToolsHandle (server session.tools)", () => {
     expect(handle.list()[0]!.annotations?.destructiveHint).toBe(true);
   });
 });
+
+describe("ToolInfo.binding", () => {
+  it("list() and get() surface each tool's binding, so a reader can tell a client-declared tool from an app one", () => {
+    const r = new InMemoryToolRegistry();
+    r.add(reg("navigate", {}, { scope: "client", sessionId: "s1" }));
+    r.add(reg("calc.add", {}, { scope: "app", appId: "a1" }));
+    const { handle } = harnessOverRegistry(r);
+
+    const byName = Object.fromEntries(handle.list().map((i) => [i.name, i.binding]));
+    expect(byName["navigate"]).toEqual({ scope: "client", sessionId: "s1" });
+    expect(byName["calc.add"]).toEqual({ scope: "app", appId: "a1" });
+    expect(handle.get("navigate")?.info.binding).toEqual({ scope: "client", sessionId: "s1" });
+  });
+});

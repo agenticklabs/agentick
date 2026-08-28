@@ -27,6 +27,7 @@
  */
 
 import type {
+  ToolBinding,
   ContentBlock,
   DispatchOptions,
   DispatchResult,
@@ -62,9 +63,10 @@ export interface ToolsHandleDeps {
   subscribe(listener: (name: string | undefined) => void): () => void;
 }
 
-/** Project a live {@link ToolDeclaration} to its wire-safe {@link ToolInfo}. */
-export function toToolInfo(decl: ToolDeclaration): ToolInfo {
+/** Project a live {@link ToolDeclaration} (+ its binding, when known) to its wire-safe {@link ToolInfo}. */
+export function toToolInfo(decl: ToolDeclaration, binding?: ToolBinding): ToolInfo {
   return {
+    ...(binding !== undefined ? { binding } : {}),
     name: decl.name,
     description: decl.description,
     ...(decl.summary !== undefined ? { summary: decl.summary } : {}),
@@ -82,7 +84,9 @@ export function createToolsHandle(deps: ToolsHandleDeps): ToolsHandle {
     list: (query) => {
       const filter: ToolListFilter | undefined =
         query?.exposure !== undefined ? { exposure: query.exposure } : undefined;
-      return deps.compileSync(filter).map(toToolInfo);
+      return deps
+        .compileSync(filter)
+        .map((decl) => toToolInfo(decl, deps.getSync(decl.name)?.binding));
     },
     get: (name): ToolHandle | undefined => {
       const reg = deps.getSync(name);
@@ -92,7 +96,7 @@ export function createToolsHandle(deps: ToolsHandleDeps): ToolsHandle {
       const canonical = reg.declaration.name;
       return {
         name: canonical,
-        info: toToolInfo(reg.declaration),
+        info: toToolInfo(reg.declaration, reg.binding),
         dispatch: ((input, opts) =>
           deps.dispatch(canonical, input, opts)) as ToolHandle["dispatch"],
       };

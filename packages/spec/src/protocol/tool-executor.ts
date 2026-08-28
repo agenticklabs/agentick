@@ -313,6 +313,14 @@ export interface ToolInfo {
   readonly annotations?: ToolAnnotations;
   /** True when the tool declares an `inputSchema`. The schema itself never crosses. */
   readonly hasInputSchema: boolean;
+  /**
+   * Which layer bound the tool (the registration's {@link ToolBinding}) —
+   * lets a reader tell a statically-composed app tool from one a client
+   * declared for THIS session (`client`) or a send scoped to THIS execution
+   * (`execution`). Plain data, wire-safe. Absent only when the projection had
+   * no registration in reach.
+   */
+  readonly binding?: ToolBinding;
 }
 
 /**
