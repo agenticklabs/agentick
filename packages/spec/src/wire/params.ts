@@ -125,7 +125,13 @@ export interface GatewayListSessionsResult {
 // ============================================================================
 
 export interface AppCreateSessionParams extends WireRequestParams {
-  readonly appId: string;
+  /**
+   * OPTIONAL when {@link from} is present: a branch lives in its source's app,
+   * so the gateway resolves the app from the source session's record
+   * (decided 2026-08-28). When BOTH are given, `appId` must match the source's
+   * app. Required for a plain create — there is nothing to resolve from.
+   */
+  readonly appId?: string;
   readonly sessionId?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**

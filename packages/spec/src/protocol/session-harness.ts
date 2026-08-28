@@ -1356,12 +1356,14 @@ export interface SpawnInput<P = unknown> {
    */
   readonly originCallId?: string;
   /**
-   * Continue the parent's TRANSCRIPT from this entry — the worker inherits
-   * the parent's timeline, knobs and state up to it (ADR 100's
-   * `spawn(agent, { branch: e })` row). Omit for a worker that starts clean
-   * with only what its send carries.
+   * Continue the parent's TRANSCRIPT — the worker inherits the parent's
+   * timeline, knobs and state (ADR 100's `spawn(agent, { branch })` row). An
+   * entry id bounds the inheritance at that entry; `true` inherits everything
+   * to the tip (decided 2026-08-28 — inheritance no longer requires a
+   * nameable entry, so a session with knob state and no messages can still
+   * hand it down). Omit for a worker that starts clean.
    */
-  readonly branch?: string;
+  readonly branch?: string | true;
 }
 
 /**
