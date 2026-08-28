@@ -2,7 +2,7 @@
 
 **Source of truth:** `blueprint/100-conversation-branches.md` (rev 2). Every
 brief inherits it verbatim; a brief may not reinterpret a law. **Dispatch
-gate:** Backlog F complete + clean next.155 cut. Ships as next.156.
+gate:** Backlog F complete + clean next.155 cut. **Built on `feat/adr100-branching`** (branch on the shared tree — announce to peer sessions before checkout; never a worktree), merged to `feat/v2` as one PR. Ships as next.156.
 
 **Global rules (every brief):**
 
