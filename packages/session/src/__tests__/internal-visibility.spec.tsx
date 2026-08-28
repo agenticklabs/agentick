@@ -171,6 +171,40 @@ describe("internal visibility — the stamp spine (session side)", () => {
     await session.close();
   });
 
+  it("a message-level visibility hides ONE input while the response stays visible", async () => {
+    const session = await mkSession(scriptedLoop());
+    await (
+      await session.send({
+        messages: [
+          { role: "user", content: "context payload", visibility: "internal" },
+          { role: "user", content: "go" },
+        ],
+      })
+    ).result;
+    const es = entriesOf(session);
+    expect(visOf(es, "user")).toEqual(["internal", undefined]);
+    expect(visOf(es, "assistant")).toEqual([undefined]);
+    expect(boundaryOf(es)?.internal).toBeUndefined();
+    await session.close();
+  });
+
+  it("a message never WIDENS out of an internal execution ('log' stays log)", async () => {
+    const session = await mkSession(scriptedLoop());
+    await (
+      await session.send({
+        messages: [
+          { role: "user", content: "escape attempt", visibility: "model" },
+          { role: "user", content: "note", visibility: "log" },
+        ],
+        internal: true,
+      })
+    ).result;
+    const es = entriesOf(session);
+    expect(visOf(es, "user")).toEqual(["internal", "log"]);
+    expect(visOf(es, "assistant")).toEqual(["internal"]);
+    await session.close();
+  });
+
   it("send({ internal }) stamps the whole execution — input + assistant + boundary", async () => {
     const session = await mkSession(scriptedLoop());
     await (

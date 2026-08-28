@@ -154,23 +154,25 @@ export interface SessionMessageMetadata {
  */
 export type TimelineEntry = MessageTimelineEntry | TurnBoundaryEntry;
 
+/**
+ * Visibility of a timeline entry:
+ *   - "model"    — included in context rendered to the model
+ *   - "observer" — visible to bus subscribers; not to the model
+ *   - "log"      — only in journal/log; not in any render
+ *   - "internal" — rendered to the model, but NEVER delivered to the client:
+ *                  persisted like any entry (so the model reads it from the
+ *                  durable tier) yet excluded from the bus publish and the
+ *                  history page — undelivered, not hidden. The model-yes /
+ *                  client-no quadrant (e.g. an async task result injected back
+ *                  into the parent turn).
+ *   Default: "model".
+ */
+export type EntryVisibility = "model" | "observer" | "log" | "internal";
+
 export interface MessageTimelineEntry {
   readonly kind: "message";
   readonly message: SessionMessage;
-  /**
-   * Visibility control:
-   *   - "model"    — included in context rendered to the model
-   *   - "observer" — visible to bus subscribers; not to the model
-   *   - "log"      — only in journal/log; not in any render
-   *   - "internal" — rendered to the model, but NEVER delivered to the client:
-   *                  persisted like any entry (so the model reads it from the
-   *                  durable tier) yet excluded from the bus publish and the
-   *                  history page — undelivered, not hidden. The model-yes /
-   *                  client-no quadrant (e.g. an async task result injected back
-   *                  into the parent turn).
-   *   Default: "model".
-   */
-  readonly visibility?: "model" | "observer" | "log" | "internal";
+  readonly visibility?: EntryVisibility;
   readonly tags?: readonly string[];
 }
 
@@ -495,6 +497,15 @@ export interface SendMessageInput {
   readonly id?: string;
   readonly role: SessionMessageRole;
   readonly content: string | readonly ContentBlock[];
+  /**
+   * Visibility of THIS message's timeline entry — {@link EntryVisibility},
+   * per message where `SendInput.internal` is per execution. `internal`
+   * injects context the model reads but the client is never delivered
+   * (a RAG payload, an operator nudge) while the turn's response stays
+   * visible. Only restricts — inside an internal execution everything
+   * but `log` reads `internal`; no message widens out of its turn.
+   */
+  readonly visibility?: EntryVisibility;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

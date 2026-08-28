@@ -4291,9 +4291,17 @@ export class SessionHarness<P = unknown>
       }
     }
     const metadata = { ...m.metadata, ...omitUndefined({ executionId }) };
+    // Composed HERE, not in appendMessageEntryFx (whose explicit-wins serves
+    // framework callers): the send door only ever RESTRICTS — no caller widens
+    // a message out of an internal execution. `log` is already narrower.
+    const visibility =
+      this.runtime.currentExecutionInternal() && m.visibility !== "log"
+        ? ("internal" as const)
+        : m.visibility;
     return this.appendMessageEntryFx({
       role: m.role,
       content,
+      ...omitUndefined({ visibility }),
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     }).pipe(Effect.asVoid);
   }
