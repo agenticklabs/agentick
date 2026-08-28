@@ -130,6 +130,12 @@ where the spec named `fork`, it migrates with cause stated.
   hand-built `parentSessionId` records updates to the bag — flagged in the
   diff, not silently reshaped.
 
+**Wave A decisions (Ryan, 2026-08-28):** `internal` is NOT wire-settable —
+server-declared like `principal`; Brief 4 resolves `TODO(adr100-internal-wire)`
+accordingly. The projected `SessionEntry` gains `internal?: boolean` (Brief 4)
+so views filtering the new dim can classify rows. Wave A landed as
+`f976cdd09`.
+
 ## Wave C — coordinator (not an agent brief)
 
 Adversarial judge pass; the cross-package contract spec at the adopter's
