@@ -159,8 +159,11 @@ async function mkSession(id: string, db: Stores, opts: Options = {}): Promise<Se
 function appDoor(db: Stores, source: () => SessionHarness) {
   const seen: SpawnContextChildInput[] = [];
   const children: SessionHarness[] = [];
+  const disposed: string[] = [];
   const ctx: SpawnContext = {
-    disposeChildSession: async () => undefined,
+    disposeChildSession: async (id) => {
+      disposed.push(id);
+    },
     abortSubtree: async () => 0,
     createChildSession: async (input) => {
       seen.push(input);
@@ -176,7 +179,7 @@ function appDoor(db: Stores, source: () => SessionHarness) {
       return child as unknown as SessionHarnessProtocol;
     },
   };
-  return { ctx, seen, children };
+  return { ctx, seen, children, disposed };
 }
 
 /**
@@ -211,12 +214,14 @@ describe("ADR 100 — the five-case matrix", () => {
     await source.reply("m1");
     await source.spawn({});
     await source.spawn({ branch: "m1" });
+    await source.spawn({ branch: true });
 
-    const [forked, replied, worker, forkedWorker] = door.seen;
-    // row 2 — fork: a new direction from the tip, unanchored, visible.
+    const [forked, replied, worker, forkedWorker, tipWorker] = door.seen;
+    // row 2 — fork: a new direction, unanchored, visible. No `entryId` because
+    // nobody named one: the door reads the tip, which is the ONE rule for every
+    // verb and both poles (a client's fork cannot know the tip from a browser).
     expect(forked?.from).toEqual({
       sessionId: "s-matrix",
-      entryId: "m2",
       inherited: true,
       anchored: false,
     });
@@ -232,7 +237,6 @@ describe("ADR 100 — the five-case matrix", () => {
     // row 4 — spawn: a worker, internal, carrying no transcript.
     expect(worker?.from).toEqual({
       sessionId: "s-matrix",
-      entryId: "m2",
       inherited: false,
       anchored: false,
     });
@@ -245,6 +249,14 @@ describe("ADR 100 — the five-case matrix", () => {
       anchored: false,
     });
     expect(forkedWorker?.internal).toBe(true);
+    // ruling 6 — `branch: true` inherits without naming an entry, which is now
+    // the same shape every unnamed branch produces.
+    expect(tipWorker?.from).toEqual({
+      sessionId: "s-matrix",
+      inherited: true,
+      anchored: false,
+    });
+    expect(tipWorker?.internal).toBe(true);
 
     await source.close();
   });
@@ -285,52 +297,94 @@ describe("ADR 100 — the five-case matrix", () => {
     await source.close();
   });
 
-  it("branches off an INTERNAL session stay internal — plumbing does not sprout a conversation", async () => {
+  it("a conversation branch OUTLIVES its source — it is a peer, not a resource", async () => {
+    // ADR 100 ruling 5 (2026-08-28): subordination is the internal case. A fork
+    // joins no lineage, takes no parent edge and no construction signal, so
+    // closing the session it came from leaves it running.
     const db = stores();
     let source!: SessionHarness;
     const door = appDoor(db, () => source);
-    source = await mkSession("s-plumbing", db, { spawnContext: door.ctx, internal: true });
+    source = await mkSession("s-peer", db, { spawnContext: door.ctx });
     await source.timeline.append(entry("m1"));
 
     await source.fork();
+    const fork = door.children[0]!;
+    expect(door.seen[0]?.parentSessionId).toBeUndefined();
+    expect(door.seen[0]?.spawnPath).toBeUndefined();
+
+    await source.close();
+
+    expect(door.disposed).toEqual([]);
+    expect(fork.status).not.toBe("closed");
+    await fork.close();
+  });
+
+  it("a WORKER stays subordinate — its source disposes it on close", async () => {
+    // The other half of the same ruling: a spawn is its parent's resource, so
+    // every edge the branch verbs shed is exactly what a worker keeps.
+    const db = stores();
+    let source!: SessionHarness;
+    const door = appDoor(db, () => source);
+    source = await mkSession("s-owner", db, { spawnContext: door.ctx });
+    await source.timeline.append(entry("m1"));
+
+    await source.spawn({ sessionId: "worker-1" });
+    expect(door.seen[0]?.parentSessionId).toBe("s-owner");
+    expect(door.seen[0]?.spawnPath).toEqual(["s-owner"]);
+
+    await source.close();
+
+    expect(door.disposed).toEqual(["worker-1"]);
+    await door.children[0]!.close();
+  });
+
+  it("a branch of an INTERNAL session stays subordinate — visibility and ownership agree", async () => {
+    // Rulings 3 and 5 meet here: a fork of plumbing is plumbing (ruling 3), and
+    // because it is internal it is also a resource (ruling 5). Keying both on
+    // the RESOLVED disposition rather than on the verb is what keeps them from
+    // disagreeing.
+    const db = stores();
+    let source!: SessionHarness;
+    const door = appDoor(db, () => source);
+    source = await mkSession("s-plumbing-fork", db, { spawnContext: door.ctx, internal: true });
+    await source.timeline.append(entry("m1"));
+
+    await source.fork({ sessionId: "inner-fork" });
     expect(door.seen[0]?.internal).toBe(true);
+    expect(door.seen[0]?.parentSessionId).toBe("s-plumbing-fork");
 
     await source.close();
+    expect(door.disposed).toEqual(["inner-fork"]);
+    await door.children[0]!.close();
   });
 
-  it("a branch is enlisted as a LIVE child of its source — today's lifecycle, not the ADR's", async () => {
-    // TODO(adr100-branch-lifecycle): ADR 100 says a branch is subordinate to
-    // nothing, so this edge (which also enlists the new conversation in its
-    // source's teardown cascade) is wrong for a fork. Pinned because it is the
-    // behavior that shipped before the rename, so the change is a decision
-    // someone makes rather than a rename's side effect. Flip this pin with the
-    // matching TODO in `createBranchSession`.
-    const db = stores();
-    let source!: SessionHarness;
-    const door = appDoor(db, () => source);
-    source = await mkSession("s-lifecycle", db, { spawnContext: door.ctx });
-    await source.timeline.append(entry("m1"));
-
-    await source.fork();
-    expect(door.seen[0]?.parentSessionId).toBe("s-lifecycle");
-
-    await source.close();
-  });
-
-  it("a branch off an empty timeline records lineage with no anchor", async () => {
+  it("an inherited branch off an EMPTY source resolves to the empty prefix, not to everything", async () => {
+    // The two meanings of an absent anchor meet here. Leaving the verb it means
+    // "nobody named one"; arriving at the door it means the tip — and a source
+    // with no anchorable entry has no tip, which resolves to `-1`, the empty
+    // prefix. The failure this guards is the opposite reading, where an
+    // unbounded copy inherits a log that was never there.
     const db = stores();
     let source!: SessionHarness;
     const door = appDoor(db, () => source);
     source = await mkSession("s-empty", db, { spawnContext: door.ctx });
+    await source.knobs.set({ id: "tone", value: "brisk" });
 
-    await source.spawn({});
+    await source.fork();
+    const child = door.children[0]!;
+
     expect(door.seen[0]?.from).toEqual({
       sessionId: "s-empty",
-      inherited: false,
+      inherited: true,
       anchored: false,
     });
+    expect(child.timeline.read().entries).toEqual([]);
+    // …and the knob still crosses: knobs are state as of the anchor, not a
+    // sequence, so the empty prefix does not empty them.
+    expect(child.knobs.get("tone")).toBe("brisk");
 
     await source.close();
+    await child.close();
   });
 
   it("naming an entry the source does not have fails the branch", async () => {

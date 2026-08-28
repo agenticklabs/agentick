@@ -285,6 +285,7 @@ const older = await session.fork({ entryId }); // …or from any entry
 const thread = await session.reply(entryId); // a side-thread that stays put
 const worker = await session.spawn({ agent: <Auditor /> }); // plumbing
 const continued = await session.spawn({ agent: <Auditor />, branch: entryId }); // …carrying the transcript
+const carrying = await session.spawn({ agent: <Auditor />, branch: true }); // …carrying all of it
 ```
 
 |                            | `internal` | `inherited` | `anchored` | `relation()`  |
@@ -295,7 +296,11 @@ const continued = await session.spawn({ agent: <Auditor />, branch: entryId }); 
 | `spawn(agent)`             | **true**   | false       | false      | worker        |
 | `spawn(agent, { branch })` | **true**   | true        | false      | forked-worker |
 
+`branch` takes an entry id or `true` — `true` inherits to the tip without naming one.
+
 `relation(record)` folds those two fields into that last column. Nothing stores it — "fork", "reply" and "worker" are vocabulary, derived on read for lists, UI, and logs.
+
+**An anchor nobody names is resolved at genesis, not when you asked.** Name an entry and it is validated here, against the source's own log. Leave it out — `fork()`, or `spawn({ branch: true })` — and the create door reads the source's tip as the new session is born. One rule for both, because it has to be: the client's `fork()` cannot know the tip from a browser, and ADR 100 gives both poles the same verbs.
 
 **Inheriting is a store-layer copy, not a payload.** `snapshot()` flushes the source first so its stores are complete as of that instant; every bridge implementing `branch(ctx)` copies the source's scope onto the new session's **in its own store**, bounded by the anchor (`entry.seq <= from.seq`); genesis then opens the new session on that copy. Nothing is serialized through memory, so a forked conversation keeps its knob values, not just its transcript. From that instant the two diverge — a knob set on one is invisible to the other.
 
@@ -306,6 +311,8 @@ await (
 ).result;
 await branch.close(); // the source never saw it
 ```
+
+**A branch outlives what it branched from; a worker does not.** Subordination is exactly the internal case: a worker carries the live parent edge, joins the spawn lineage and its depth ceiling, and takes the parent's construction signal, so closing or aborting the parent tears it down. A fork or a reply takes none of that — it is a peer, and closing the conversation it came from leaves it running. Because visibility cascades, a branch of an internal session is internal, which makes it a worker in both senses: hidden and owned.
 
 **A spawn is always internal.** There is no non-internal spawn: an agent-created session a person can see is a fork or a reply, and one they cannot see is a worker. That is what keeps a sub-agent's working session out of the conversation list — which is the composed predicate `{ internal: false, anchored: false }`, not a "roots only" filter (a fork of a conversation is a conversation).
 
@@ -930,8 +937,7 @@ const session = factory({
 - **`setSessionMeta` targets live sessions only.** Editing a closed session's record needs a read-modify-write path against the store.
 - **A queued send is invisible to clients.** `onBusy: "queue"` defers a racing send server-side and `"steer"` enqueues onto a per-execution queue, but neither is readable, so a UI cannot show what a send is waiting behind or cancel it. The first consumer to port onto `onBusy` had to drop its queued-messages bar. Closing it wants the `timeline:history` shape — a grant-gated declared read plus `added`/`removed` notifications — and a `dequeue` verb beside it.
 - **A re-driven turn takes the session's default `maxTicks`.** The crashed send's per-call bounds (`maxTicks`, `timeoutMs`, `signal`, per-call model override) are not persisted, so `resumeExecution` runs under the session defaults. The budget is still the execution's total rather than a fresh allowance — but it is the default's total, not the original call's.
-- **A branch is registered as a LIVE child of its source.** The verbs reach the app through the one create door the session has, which also mints the subordination edge — so a forked conversation is disposed when the session it forked from closes. That is the pre-ADR-100 behavior, preserved deliberately rather than changed under a rename; a durable conversation arguably should outlive its source, and separating the two doors is the open question.
-- **Branching needs the timeline store's cursored read.** Naming the anchor reads `timeline.history()`, so a store implementing no cursored read fails the branch rather than degrading. The bundled store implements it.
+- **Naming an anchor needs the timeline store's cursored read.** Validating a named `entryId` reads `timeline.history()`, so a store implementing no cursored read fails that branch rather than degrading. A branch that names no anchor reads nothing. The bundled store implements it.
 - **`defineSession` has no inbox dispatch.** A callback-built session stores an escalation interceptor for protocol conformance but never consults it, and every inbox message rejects. Escalation and task-wake work on `SessionHarness` only.
 
 ## Verified by
@@ -952,7 +958,7 @@ const session = factory({
 - `src/__tests__/kill-resume.spec.tsx` + `src/testing/kill-resume-acceptance.ts` — the end-to-end resume acceptance run against memory, filesystem and Postgres backings: a completed turn surviving a fresh open on the same backing, the hydrated turn reaching the MODEL rather than only the timeline, `send()` not resolving before the store holds the turn, a delete leaving the next open empty, and `restore()` re-reading the store idempotently.
 - `resumeExecution` is verified where the crash can be staged end to end, in [@agentick/app](../app) (`execution-resume.spec.tsx`): a crashed turn completing under its **original** execution id with ticks continuing rather than restarting, its input not re-appended and its `executionCount` not bumped, and the manual door refusing an execution the timeline shows already finished.
 - `src/__tests__/session-store.spec.ts` — `InMemorySessionStore` under the full store conformance suite: round-trip, upsert, filtering by app / status / recency, the branch dims (`fromSessionId`, and `anchored` / `internal` matched AND non-matched, where an unstamped record reads as `false`) plus the composed conversation-list predicate, enumerate-all, delete, and prune-of-closed.
-- `src/__tests__/branching.spec.ts` — ADR 100 end to end in this package: the five-case matrix as the exact bag each verb hands the create door, `relation()` naming every row from that bag, a spawn that cannot be declared non-internal (the option does not exist), a branch off plumbing staying plumbing, a branch off an empty timeline recording lineage with no anchor, a named entry the source does not have failing the branch, law 1 in both halves (the inherited timeline bounded INCLUSIVELY at the anchor with nothing after it, and a knob value carried across) against a non-inherited spawn that takes neither, the snapshot flush barrier proven against a store whose writes land a turn late, and law 3's two arms (an internal session's row at genesis; a conversation still earning its own).
+- `src/__tests__/branching.spec.ts` — ADR 100 end to end in this package: the five-case matrix as the exact bag each verb hands the create door, `relation()` naming every row from that bag, a spawn that cannot be declared non-internal (the option does not exist), a branch off plumbing staying plumbing, a branch off an empty timeline recording lineage with no anchor, a named entry the source does not have failing the branch, law 1 in both halves (the inherited timeline bounded INCLUSIVELY at the anchor with nothing after it, and a knob value carried across) against a non-inherited spawn that takes neither, the snapshot flush barrier proven against a store whose writes land a turn late, the lifecycle split (a fork left running after its source closes and disposed by nobody; a worker disposed by its source; a fork of plumbing subordinate in both senses), and law 3's two arms (an internal session's row at genesis; a conversation still earning its own).
 - `src/__tests__/escalation.spec.ts` — a task's `ctx.elicit` resolving terminally at its root session with the answer round-tripping and the task state machine flipping, the interactive-versus-detached guard, a real two-session chain forwarding by `parentSessionId`, interception in all three modes (answer without touching the client, deny by throwing, fall through), lineage order in the forwarded envelope, and a forked child's escalation composing the same chain across processes.
 - `src/__tests__/task-wake.spec.ts` — an unobserved completion synthesizing a real journaled execution with task-wake provenance, an in-band result read consuming the wake so nothing is synthesized, and a wake arriving during a running execution steering into it.
 - `src/__tests__/telemetry.spec.ts` — a send emitting a nested span tree on a tracer runtime, an async loop middleware not breaking the downstream tree, no telemetry runtime still working, and per-call `functionId` + metadata landing on every span the send touches (with nothing registered when telemetry is off).

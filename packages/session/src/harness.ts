@@ -697,6 +697,7 @@ function runOutcomeOf(stopReason: SendResult["stopReason"]): SessionRunOutcome {
  * rest is the {@link SessionFrom} bag minus what only the timeline can answer.
  */
 interface BranchEdge {
+  /** The anchor, when the caller named one. Absent ⇒ the door reads the tip. */
   readonly entryId?: string;
   readonly inherited: boolean;
   readonly anchored: boolean;
@@ -2364,7 +2365,10 @@ export class SessionHarness<P = unknown>
     return this.createBranchSession(
       input,
       {
-        entryId: input.branch,
+        // ADR 100 ruling 6 — `branch: true` inherits without naming an entry,
+        // so a source carrying knob state and no messages can still hand it
+        // down. Only a string is an anchor; the door reads the tip either way.
+        ...omitUndefined({ entryId: typeof input.branch === "string" ? input.branch : undefined }),
         inherited: input.branch !== undefined,
         anchored: false,
         internal: true,
@@ -2390,6 +2394,10 @@ export class SessionHarness<P = unknown>
     edge: BranchEdge,
     parentOpId: string | undefined,
   ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
+    // The child's disposition decides BOTH what it is stamped and whether it is
+    // subordinate: visibility cascades (ruling 3), and subordination is exactly
+    // the internal case (ruling 5).
+    const internal = this.runtime.isInternal() || edge.internal;
     const verb = edge.internal ? "spawn" : "branch";
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: verb }) satisfies SessionError;
@@ -2404,7 +2412,9 @@ export class SessionHarness<P = unknown>
     // SP4 — fail closed at the depth ceiling. A session whose lineage is
     // already `maxSpawnDepth` deep cannot spawn a deeper child; this is the
     // guard against an agent recursively spawning itself into a stack blow-up.
-    if (this.spawnPath.length >= this.maxSpawnDepth) {
+    // It bounds the SPAWN tree; a conversation branch joins no lineage, so it
+    // cannot recurse into one.
+    if (internal && this.spawnPath.length >= this.maxSpawnDepth) {
       throw new SpawnDepthExceededError({
         depth: this.spawnPath.length,
         maxDepth: this.maxSpawnDepth,
@@ -2412,16 +2422,30 @@ export class SessionHarness<P = unknown>
     }
     const from = await this.resolveBranchEdge(edge);
     if (from.inherited) await this.snapshot();
+    // SUBORDINATION IS THE INTERNAL CASE (ADR 100 ruling 5, 2026-08-28). A
+    // worker is its parent's resource: it carries the live parent edge (the
+    // registry, the inbox climb), extends the spawn lineage, and takes the
+    // parent's construction signal merged with the spawning execution's, so a
+    // parent abort or a cancelled TURN tears down the work it started (SP5,
+    // SP6, EX1, PA1). A conversation branch is a PEER — it joins no lineage
+    // and takes no signal, so it survives the session it branched from.
+    //
+    // TODO(spawn-signal-listener-lifetime): an IN-EXECUTION spawn builds a
+    // composite signal, which leaves one `abort` listener on the (possibly
+    // app-wide, possibly very long-lived) construction signal per spawn —
+    // `mergeAbortSignals` returns no disposer to unregister with. Bounded by
+    // spawn count, and each spawn already allocates a session, so it is a
+    // smell rather than a leak; the fix is a disposing merge in
+    // `@agentick/utils`, which is a shared-signature change.
+    const subordination = internal
+      ? omitUndefined({
+          parentSessionId: this.runtime.id,
+          spawnPath: [...this.spawnPath, this.runtime.id],
+          signal: mergeAbortSignals(this.constructionSignal, this._currentExecutionAbort?.signal),
+        })
+      : {};
     const childInput = {
-      // The LIVE parent edge — subordination, and the door's only way to reach
-      // the registry.
-      //
-      // TODO(adr100-branch-lifecycle): a BRANCH is subordinate to nothing (ADR
-      // 100), so minting this edge for `fork`/`reply` also enlists the new
-      // conversation in its source's teardown cascade. Pinned as-is because it
-      // is the pre-ADR-100 behavior, not because it is right; the fix makes
-      // this optional at the door and the conversation verbs omit it.
-      parentSessionId: this.runtime.id,
+      ...subordination,
       // ADR 100 — the durable branch edge. This session names the anchor
       // (it holds the timeline); the app resolves that anchor's `seq`.
       from,
@@ -2429,8 +2453,6 @@ export class SessionHarness<P = unknown>
       // `SpawnContextChildInput.agent` boundary stays REQUIRED; the session
       // resolves the default (own agent root) before crossing it.
       agent: input.agent ?? this.agentRoot,
-      // SP5 — extend the lineage: the child's ancestry is ours plus our id.
-      spawnPath: [...this.spawnPath, this.runtime.id],
       ...omitUndefined({
         sessionId: input.sessionId,
         metadata: input.metadata,
@@ -2440,31 +2462,10 @@ export class SessionHarness<P = unknown>
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
-        // Backlog F — a child of an internal session is internal, and a spawn
-        // is internal by rule (ADR 100); stamps the whole child spine.
-        //
-        // TODO(adr100-fork-of-plumbing): the OR-down half is pending Ryan —
-        // `ForkInput`'s docblock reads "never internal" flatly, which would
-        // make this `edge.internal` alone and let plumbing sprout a
-        // client-visible conversation. One expression, one flip.
-        internal: this.runtime.isInternal() || edge.internal ? true : undefined,
-        // SP6 + EX1 — fan our construction signal AND the spawning execution's
-        // teardown signal into the child, as one merged construction signal.
-        // The first makes a parent abort tear down the child's in-flight work
-        // (PA1 merge-into-execution); the second does the same for a cancelled
-        // TURN, so a sub-agent never outlives the execution that asked for it.
-        // A spawn outside any execution merges to just the construction signal
-        // (`mergeAbortSignals` drops the undefined and hands the single signal
-        // back untouched), which is the old behavior, listener included.
-        //
-        // TODO(spawn-signal-listener-lifetime): an IN-EXECUTION spawn does
-        // build a composite, which leaves one `abort` listener on the (possibly
-        // app-wide, possibly very long-lived) construction signal for each such
-        // spawn — `mergeAbortSignals` returns no disposer to unregister with.
-        // Bounded by spawn count, and each spawn already allocates a session,
-        // so it is a smell rather than a leak; the fix is a disposing merge in
-        // `@agentick/utils`, which is a shared-signature change.
-        signal: mergeAbortSignals(this.constructionSignal, this._currentExecutionAbort?.signal),
+        // Visibility CASCADES (ADR 100 ruling 3, 2026-08-28): a spawn is
+        // internal by rule, and any branch of an internal session stays
+        // internal — plumbing never sprouts a client-visible conversation.
+        internal: internal ? true : undefined,
         // EX1 — the origin edge, stamped on the child's registry entry and its
         // durable record. The live signal above covers cancelling a RUNNING
         // execution; this is what still identifies the branch after that
@@ -2476,9 +2477,11 @@ export class SessionHarness<P = unknown>
       }),
     };
     const child = await this.spawnContext.createChildSession(childInput);
-    // SP6 — track the child so parent close / abort disposes it (see the
-    // teardown wired in the constructor). Idempotent on the child id.
-    this._children.add(child.id);
+    // SP6 — track a subordinate so parent close / abort disposes it (see the
+    // teardown wired in the constructor). Idempotent on the child id. A
+    // conversation branch is never tracked: disposing it with its source is
+    // precisely what ruling 5 removed.
+    if (internal) this._children.add(child.id);
     if (input.send === undefined) return child;
     const childHandle = await child.send(input.send);
     // Spawn boundary events (parent stream). ONLY the spawn-and-run form is
@@ -2587,37 +2590,37 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Resolve a branch anchor against THIS session's timeline — the source is
-   * the only party that holds it, so naming the entry is its job (the app
-   * resolves that entry's `seq` and writes the complete
-   * {@link SessionRecord.from}).
+   * Build the branch edge, VALIDATING a named anchor against this session's
+   * timeline. One rule, for every verb and both poles: an anchor the caller
+   * named is checked here (the source is the only party that holds the log it
+   * must be in); an anchor nobody named is left absent, and the create door
+   * resolves it to the source's tip as of genesis.
    *
-   * No `entryId` means the tip, the default gesture. A session with nothing on
-   * its timeline yet — a host spawning a worker before the first message — has
-   * no anchor at all, and says so rather than inventing one.
+   * The alternative — pinning the tip at the moment the verb was called — is
+   * not available to the CLIENT's `fork()`, which cannot know the tip from a
+   * browser. Resolving it here would make one verb mean two different things
+   * depending on which pole invoked it, and ADR 100 gives both poles the same
+   * verbs.
    *
    * @throws {BranchSourceEntryNotFoundError} the named entry is not here.
    */
   private async resolveBranchEdge(input: BranchEdge): Promise<SessionFromInput> {
-    const anchorable = (await this.bridges.timeline.history()).filter(
-      (e) => messageIdOf(e.entry) !== undefined,
+    const edge = {
+      sessionId: this.runtime.id,
+      inherited: input.inherited,
+      anchored: input.anchored,
+    };
+    if (input.entryId === undefined) return edge;
+    const found = (await this.bridges.timeline.history()).some(
+      (row) => messageIdOf(row.entry) === input.entryId,
     );
-    const anchor =
-      input.entryId === undefined
-        ? anchorable[anchorable.length - 1]
-        : anchorable.find((e) => messageIdOf(e.entry) === input.entryId);
-    if (input.entryId !== undefined && anchor === undefined) {
+    if (!found) {
       throw new BranchSourceEntryNotFoundError({
         sessionId: this.runtime.id,
         entryId: input.entryId,
       });
     }
-    return omitUndefined({
-      sessionId: this.runtime.id,
-      entryId: anchor === undefined ? undefined : messageIdOf(anchor.entry),
-      inherited: input.inherited,
-      anchored: input.anchored,
-    }) as SessionFromInput;
+    return { ...edge, entryId: input.entryId };
   }
 
   /**
