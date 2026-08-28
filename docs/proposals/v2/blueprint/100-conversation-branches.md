@@ -96,6 +96,12 @@ Fresh ids everywhere; ids are strings; the framework mandates no format.
    load-bearing line). `internal` dispositions follow Backlog F's door rules;
    origin stamps are never wire-settable — lineage is the edge's to assert.
 
+**Forward door (recorded, not designed):** a windowed inheritance —
+`sinceEntryId`/`sinceSeq` as an optional floor, absent = genesis — is additive:
+law 1 gains a clause (`source[sinceSeq..seq]`), the stitcher gains an `AND`,
+adapters a column. Nothing else reads how much was inherited. Timeline-only by
+nature: knobs/state are snapshots as of the anchor, not sequences.
+
 ## Queries
 
 ```ts
