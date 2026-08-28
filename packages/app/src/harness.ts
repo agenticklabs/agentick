@@ -67,7 +67,6 @@ import {
   InMemorySessionStore,
   type SessionHarnessOptions,
 } from "@agentick/session";
-import type { TimelineHandle } from "@agentick/timeline";
 import type {
   InstallerInterceptors,
   CursorPage,
@@ -881,20 +880,6 @@ interface InternalSessionEntry<P> {
  */
 function anchorIdOf(entry: TimelineEntry): string | undefined {
   return entry.kind === "message" ? entry.message.id : undefined;
-}
-
-/**
- * The entry a branch-at-the-tip anchors on — the last message in the session's
- * projection, or `undefined` for a session nobody has spoken to yet (which
- * inherits nothing, having nothing to inherit).
- */
-function tipEntryId(session: { readonly timeline: TimelineHandle }): string | undefined {
-  const { entries } = session.timeline.read();
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const id = entries[i] === undefined ? undefined : anchorIdOf(entries[i] as TimelineEntry);
-    if (id !== undefined) return id;
-  }
-  return undefined;
 }
 
 /** Why `disposeSession` is tearing a session down — see its doc-block. */
@@ -3198,9 +3183,7 @@ export class AppHarness<P = unknown>
       // Disposal rides OFF the critical path: its errors are swallowed and
       // never mask the run result.
       const isolationCapability: SessionSendCapability = async (sendInput) => {
-        const child = (await session.spawn(
-          omitUndefined({ branch: tipEntryId(session) }),
-        )) as SessionHarnessProtocol<P>;
+        const child = (await session.spawn({ branch: true })) as SessionHarnessProtocol<P>;
         const handle = await child.send(sendInput as SendInput<P>);
         void handle.result
           .then(
@@ -3268,9 +3251,17 @@ export class AppHarness<P = unknown>
   }
 
   /**
-   * `SpawnContext` impl — invoked by a parent SessionHarness when its
-   * `spawn()` method is called. Creates a child session linked to the
-   * parent in the registry.
+   * `SpawnContext` impl — the door a SessionHarness reaches the app through,
+   * for every session it creates: a `spawn`ed worker, and a `fork` / `reply`
+   * branch alike.
+   *
+   * What separates them is the child's DISPOSITION, not which verb called
+   * (ADR 100 ruling 5). An internal child is registered subordinate to its
+   * parent — the abort cascade, the execution tree, teardown with it. A
+   * principal-facing branch is registered as an ordinary top-level session
+   * owned by the same principal, and the door enforces that rather than
+   * trusting it: the live-lineage bundle is dropped for a visible child even
+   * if a caller supplies one.
    */
   async createChildSession(input: SpawnContextChildInput<P>): Promise<SessionHarnessProtocol<P>> {
     // The child's id is minted HERE rather than inside `createSessionBody`, so
@@ -3278,6 +3269,27 @@ export class AppHarness<P = unknown>
     // and same fallback the body would have applied — it sees a concrete id and
     // takes its normal path.
     const sessionId = input.sessionId ?? `session:${generateId()}`;
+    // ADR 100 ruling 5 — subordination keys on the resolved DISPOSITION, never
+    // on which verb opened the door: an INTERNAL child is owned by its parent
+    // (the abort cascade, the execution tree, teardown with it), and a
+    // principal-facing branch is owned by nobody. So the live-lineage bundle
+    // travels together and only for a worker: the parent edge, the ancestry it
+    // extends, and the construction signal that tears it down.
+    //
+    // Origin stamps are NOT in it. They are provenance rather than ownership —
+    // what tells an agent's fork from a person's — so they ride either way.
+    const lineage: {
+      readonly parentSessionId?: string;
+      readonly spawnPath?: readonly string[];
+      readonly signal?: AbortSignal;
+    } =
+      input.internal === true
+        ? omitUndefined({
+            parentSessionId: input.parentSessionId,
+            spawnPath: input.spawnPath,
+            signal: input.signal,
+          })
+        : {};
     const createInput: CreateSessionInput<P> = {
       sessionId,
       ...omitUndefined({
@@ -3301,11 +3313,14 @@ export class AppHarness<P = unknown>
       name: "app:command:create-child-session",
       // The lineage IS the scope: the child (`sessionId`), its parent
       // (`parentSessionId`), and the whole ancestry (`spawnPath`). An auditor
-      // reconstructs the spawn tree from these records alone.
+      // reconstructs the spawn tree from these records alone — and a BRANCH,
+      // which is subordinate to nothing, is scoped by what it does have.
       scope: {
         sessionId,
-        parentSessionId: input.parentSessionId,
-        ...omitUndefined({ spawnPath: input.spawnPath }),
+        ...omitUndefined({
+          parentSessionId: lineage.parentSessionId,
+          spawnPath: lineage.spawnPath,
+        }),
       },
       // ADR 92 Slice B — the causal link to the invoking `session:command:spawn`,
       // threaded as DATA by `session.spawn()`. The runtime's ambient
@@ -3326,16 +3341,16 @@ export class AppHarness<P = unknown>
           try: () =>
             this.createSessionBody(i, /* ephemeral */ false, {
               agent: input.agent,
-              parentSessionId: input.parentSessionId,
-              // SP5/SP6 — forward the child's lineage + the parent's
-              // construction signal so the session stamps envelopes and
-              // cascades teardown. EX1 — plus the origin edge (which of the
-              // parent's turns, and which tool call, asked for this child).
-              // ADR 100 — plus the durable branch edge the spawn composed.
+              // SP5/SP6 + EX1 — a worker's live lineage: the parent edge it is
+              // torn down through, the ancestry it extends, the construction
+              // signal fanned into it. Empty for a branch, which is the whole
+              // shape of one — it registers as an ordinary top-level session.
+              ...lineage,
+              // ADR 100 — the durable branch edge, and the origin stamps that
+              // name the turn behind this session. Both travel whatever the
+              // disposition: they describe where it came from, not who owns it.
               ...omitUndefined({
                 from: input.from,
-                spawnPath: input.spawnPath,
-                signal: input.signal,
                 originExecutionId: input.originExecutionId,
                 originCallId: input.originCallId,
               }),

@@ -20,7 +20,12 @@ import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
-import type { ExecutionTarget, LanguageModelExecutionResult, TimelineEntry } from "@agentick/spec";
+import type {
+  ExecutionTarget,
+  LanguageModelExecutionResult,
+  SessionHarnessProtocol,
+  TimelineEntry,
+} from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
 
@@ -107,10 +112,40 @@ describe("session.fork() — inherited state, own lineage, divergence (ADR 100)"
     expect(parent.timeline.read().entries.length).toBe(parentEntryCount);
 
     // …and having spoken, it has a record — carrying the branch edge back to
-    // its source (SP5 lineage rides the same write).
+    // its source.
     const childRec = await app.getSessionRecord(child.id);
     expect(childRec?.from?.sessionId).toBe("parent");
-    expect(childRec?.spawnPath).toEqual(["parent"]);
+    // …and NO spawn ancestry (ADR 100 ruling 5): a branch is subordinate to
+    // nothing, so it has no lineage to extend and nothing can cascade to it.
+    expect(childRec?.spawnPath).toBeUndefined();
+
+    await app.closeApp();
+  });
+
+  it("OUTLIVES the conversation it came from, where a spawned worker does not", async () => {
+    // Ruling 5, end to end through the verbs. Closing a conversation used to
+    // take its forks down with it: the verb minted a live parent edge and every
+    // teardown walks that edge. A worker is still owned by its parent — that
+    // half must not have been loosened along with it.
+    const executor = fakeExecutor([textResult("a turn")]);
+    const app = await createApp(React.createElement(Agent), { modelExecutor: executor, target });
+    const source = await app.createSession({ sessionId: "source" });
+    await (
+      await source.send({ messages: [{ role: "user", content: "hi" }] })
+    ).result;
+
+    const fork = await source.fork();
+    const worker = (await source.spawn({})) as SessionHarnessProtocol;
+
+    // The live tree is the reach of every cascade: the worker is in it, the
+    // fork stands beside its source.
+    expect(app.sessionTree("source")).toContain(worker.id);
+    expect(app.sessionTree("source")).not.toContain(fork.id);
+
+    await app.closeSession("source");
+
+    expect(app.getSession(fork.id)?.id).toBe(fork.id);
+    expect(app.getSession(worker.id)).toBeUndefined();
 
     await app.closeApp();
   });

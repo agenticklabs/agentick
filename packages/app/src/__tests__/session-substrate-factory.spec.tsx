@@ -355,6 +355,64 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
     expect((session as unknown as { parentSessionId?: string }).parentSessionId).toBeUndefined();
     await app.closeApp();
   });
+
+  it("a VERB-door branch registers as an ordinary session — no live parent edge (ADR 100 ruling 5)", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {
+      modelExecutor: mkExecutor(),
+      target: mkTarget(),
+    });
+    await app.createSession({ sessionId: "source-xyz" });
+
+    // What `session.fork()` / `session.reply()` hand the door: a branch edge and
+    // NO parent edge. The absence is the whole shape — the door reads it as an
+    // ordinary top-level session rather than a subordinate child.
+    const branch = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      sessionId: "branch-verb",
+      from: { sessionId: "source-xyz", inherited: true, anchored: false },
+    });
+
+    expect((branch as unknown as { parentSessionId?: string }).parentSessionId).toBeUndefined();
+    expect(app.getSession("branch-verb")?.id).toBe("branch-verb");
+    await app.closeApp();
+  });
+
+  it("a branch is OUTSIDE its source's live tree — nothing can cascade to it (ADR 100 ruling 5)", async () => {
+    // Why a branch outlives its source: every teardown that reaches a
+    // subordinate — `abort({ cascade: true })`, `destroySession`, a parent
+    // close — walks the live parent edge, and a branch has none. Asserting the
+    // tree is asserting the reach of all of them at once.
+    const app = await createApp(React.createElement(MinimalAgent), {
+      modelExecutor: mkExecutor(),
+      target: mkTarget(),
+    });
+    const source = await app.createSession({ sessionId: "src" });
+
+    const worker = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      parentSessionId: "src",
+      sessionId: "worker",
+      internal: true,
+      from: { sessionId: "src", inherited: false, anchored: false },
+    });
+    const branch = await app.createChildSession({
+      agent: React.createElement(MinimalAgent),
+      sessionId: "branch-outliver",
+      from: { sessionId: "src", inherited: true, anchored: false },
+    });
+
+    // The worker is subordinate; the branch stands beside its source.
+    expect(app.sessionTree("src")).toContain(worker.id);
+    expect(app.sessionTree("src")).not.toContain(branch.id);
+    expect(app.sessionTreeContains("src", branch.id)).toBe(false);
+
+    // …and closing the source leaves it live and usable.
+    void source;
+    await app.closeSession("src");
+    expect(app.getSession("src")).toBeUndefined();
+    expect(app.getSession(branch.id)?.id).toBe(branch.id);
+    await app.closeApp();
+  });
 });
 
 describe("createSession substrate slots — instance form (sharing across sessions)", () => {
