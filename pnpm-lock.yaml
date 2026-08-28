@@ -1847,13 +1847,12 @@ importers:
 
   packages/timeline-fs:
     dependencies:
-      '@agentick/timeline':
-        specifier: workspace:*
-        version: link:../timeline
-    devDependencies:
       '@agentick/store':
         specifier: workspace:*
         version: link:../store
+      '@agentick/timeline':
+        specifier: workspace:*
+        version: link:../timeline
 
   packages/timeline-postgres:
     dependencies:
