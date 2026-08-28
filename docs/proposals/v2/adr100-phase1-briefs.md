@@ -20,6 +20,13 @@ gate:** Backlog F complete + clean next.155 cut. **Built on `feat/adr100-branchi
 - Fences: do not touch `docs/proposals/v2/execution-resume.md`, any Backlog F
   file beyond what your brief names, or anything dirty in the tree you did not
   make dirty. Report unexpected dirt; never sweep it.
+- **Working posture (Ryan, 2026-08-28):** this arc is a WIP with confirmation
+  cycles — waves land for review, not in bulk. Cyclomatic complexity stays
+  LOW: prefer flat folds and early returns; a judge pass rejects nested
+  conditional ladders even when green. Any decision beyond the ADR's letter —
+  a semantics call, a surface addition, a migration with product visibility —
+  is SURFACED to Ryan for direction, never absorbed into an agent's diff or
+  the coordinator's judgment.
 - Agents implement; the coordinator judges (diff review, adversarial pass,
   delete-pass) and owns all commits.
 
