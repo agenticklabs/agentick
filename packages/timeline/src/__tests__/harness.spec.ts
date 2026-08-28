@@ -236,11 +236,12 @@ describe("TimelineHarness — inbox addressability", () => {
 });
 
 describe("TimelineHarness — branch: the fork transport (checkpointing §5)", () => {
-  const branchCtx = (fromSessionId: string) => ({
+  const branchCtx = (fromSessionId: string, toSeq?: number) => ({
     sessionId: fromSessionId,
     fromSessionId,
     tick: 0,
     storeCtx: stubStoreCtx(),
+    ...(toSeq !== undefined ? { toSeq } : {}),
   });
   const idsOf = (entries: readonly TimelineEntry[]): string[] =>
     entries.map((e) => (e.kind === "message" ? e.message.id : e.kind));
@@ -268,6 +269,64 @@ describe("TimelineHarness — branch: the fork transport (checkpointing §5)", (
       "p1",
       "p2",
     ]);
+    await child.close();
+  });
+
+  it("bounds the inherited prefix BY SEQ, not by position — a windowed source (baseSeq > 0)", async () => {
+    const store = new MemoryTimelineStore();
+    const { harness: parent } = await makeHarness(timelineScopeKey("br5-parent"), { store });
+    await parent.append(
+      messageEntry("p1", "1"),
+      messageEntry("p2", "2"),
+      messageEntry("p3", "3"),
+      messageEntry("p4", "4"),
+      messageEntry("p5", "5"),
+    );
+    await parent.persist();
+    await parent.close();
+    // Compaction moved the window: the log now starts at seq 2 (p3). Index 0 ≠ seq 0.
+    await store.prune(timelineScopeKey("br5-parent"), { seq: 2 }, stubStoreCtx());
+
+    const { harness: child } = await makeHarness(timelineScopeKey("br5-child"), { store });
+    await child.branch(branchCtx("br5-parent", 3));
+    await child.hydrate();
+    // seq ≤ 3 inclusive over the live window [p3@2, p4@3, p5@4] — never p5.
+    expect(idsOf(child.read().entries)).toEqual(["p3", "p4"]);
+    await child.close();
+  });
+
+  it("toSeq -1 — no anchor — inherits nothing", async () => {
+    const store = new MemoryTimelineStore();
+    const { harness: parent } = await makeHarness(timelineScopeKey("br6-parent"), { store });
+    await parent.append(messageEntry("p1", "one"));
+    await parent.persist();
+    await parent.close();
+
+    const { harness: child } = await makeHarness(timelineScopeKey("br6-child"), { store });
+    await child.branch(branchCtx("br6-parent", -1));
+    await child.hydrate();
+    expect(child.read().entries).toEqual([]);
+    await child.close();
+  });
+
+  it("the definition's `branch` seam replaces the copy — a stitch-at-read store copies nothing", async () => {
+    const store = new MemoryTimelineStore();
+    const { harness: parent } = await makeHarness(timelineScopeKey("br7-parent"), { store });
+    await parent.append(messageEntry("p1", "one"));
+    await parent.persist();
+    await parent.close();
+
+    const seen: string[] = [];
+    const { harness: child } = await makeHarness(timelineScopeKey("br7-child"), {
+      store,
+      branch: async (ctx) => {
+        seen.push(ctx.fromLogKey, String(ctx.toSeq));
+      },
+    });
+    await child.branch(branchCtx("br7-parent", 0));
+    await child.hydrate();
+    expect(seen).toEqual([timelineScopeKey("br7-parent"), "0"]);
+    expect(await store.read(timelineScopeKey("br7-child"), stubStoreCtx())).toEqual([]);
     await child.close();
   });
 

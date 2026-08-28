@@ -35,6 +35,8 @@ export {
   type TimelineCompactCtx,
   type TimelineCompactor,
   type TimelineDefinition,
+  type TimelineBranchCtx,
+  type TimelineBrancher,
   type TimelineHydrateCtx,
   type TimelineHydrator,
   type TimelineStoreVerbs,
@@ -42,7 +44,7 @@ export {
 // The named hydrators — the genesis-seam library. `hydrateFromStore()` is the
 // default when a store is configured (ADR 49 preserved); `hydrateTail(n)` is
 // the bounded-memory form.
-export { hydrateFromStore, hydrateTail, hydrateProjected } from "./hydrators.js";
+export { copyFromStore, hydrateFromStore, hydrateTail, hydrateProjected } from "./hydrators.js";
 
 // Compaction-strategy factories live at the `@agentick/timeline/strategies`
 // subpath (parallel to skills' `/loaders`) — they return CompactStrategy

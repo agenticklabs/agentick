@@ -239,11 +239,17 @@ resolves below or beside the framework:
 child genesis _because_ the parent's entries arrived via `restore(snapshot)`.
 The replacement is the same leaf-hook pattern: optional
 `BranchCapable.branch(ctx)` (`ctx.fromSessionId` + the hydrate ctx), fanned
-out by the fork path exactly as `persist`/`hydrate` are — the harness copies
-the source scope onto its own scope in its OWN store; no data crosses the
-seam. The fork law retires with the transport that motivated it: under store
-transport, fork = branch the scope, then genesis over the copy — the hydrator
-running in the child is now correct, not a violation.
+out by the fork path exactly as `persist`/`hydrate` are. The timeline routes
+it through the definition's `branch` seam (2026-08-28): the default,
+`copyFromStore`, copies the source's inherited prefix onto the branch's own
+scope — bounded BY SEQ through the store's window (`query({ toSeq })`), never
+by array position, since a log's seqs need not start at 0 and its `read` may
+be a window. A stitch-at-read store (a branch's rows are its own, numbered
+from `from_seq + 1`; its reads walk the ancestry) supplies a no-op and
+inherits through its reads. No data crosses the seam either way. The fork law
+retires with the transport that motivated it: fork = branch the scope, then
+genesis over what the seam made durable — the hydrator running in the child
+is now correct, not a violation.
 
 **The drop hook (amended 2026-08-22 — surfaced by the judge pass).** Copying a
 scope has an inverse, and nothing implemented it: `DropCapable.dropScope(ctx)`

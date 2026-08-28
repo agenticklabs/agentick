@@ -48,12 +48,13 @@ import {
 import { LogView, type LogProjectionMeta } from "@agentick/store";
 
 import { MemoryTimelineStore, timelineScopeKey } from "./store.js";
-import { hydrateFromStore } from "./hydrators.js";
+import { copyFromStore, hydrateFromStore } from "./hydrators.js";
 import type {
   TimelineCompactCtx,
   TimelineCompactor,
   TimelineDefinition,
   TimelineHydrateCtx,
+  TimelineBrancher,
   TimelineHydrator,
 } from "./definition.js";
 import type {
@@ -344,6 +345,8 @@ export class TimelineHarness
    * bundled in-memory default has always done.
    */
   private readonly hydrator?: TimelineHydrator;
+  /** The branch seam — the definition's `branch`, defaulting to {@link copyFromStore} with a store. */
+  private readonly brancher?: TimelineBrancher;
 
   // ─── Declared commands (ADR 51) — assigned in the constructor ───
   private readonly appendCmd: Cmd<TimelineAppendInput, void>;
@@ -391,6 +394,9 @@ export class TimelineHarness
     this.hydrator =
       (options.hydrate as TimelineHydrator | undefined) ??
       (options.store !== undefined ? hydrateFromStore() : undefined);
+    this.brancher =
+      (options.branch as TimelineBrancher | undefined) ??
+      (options.store !== undefined ? copyFromStore() : undefined);
     // The two-tier / write-behind / compaction-target storage machine — keyed
     // by scopeId (= sessionId). The pump's raw store-write rejection is mapped
     // to the typed `TimelineWriteFailed` a session barrier catchTags (write-
@@ -778,31 +784,25 @@ export class TimelineHarness
   }
 
   /**
-   * {@link BranchCapable} — the fork transport (checkpointing §5). Copies the
-   * source session's durable log onto THIS harness's scope, so the subsequent
-   * `hydrate` opens the child on its own copy of the parent's conversation.
-   * This is what retires the ADR-93 fork law: a child no longer inherits an
-   * image through a snapshot payload, so it no longer has to skip genesis —
-   * it branches, then genesises over the copy.
-   *
-   * Idempotent by DESTINATION: a scope that already holds entries is left
-   * alone, so a retried fork cannot double the log. A store that does not hold
-   * the source scope — the per-harness in-memory default, where the parent
-   * wrote to a different instance — copies nothing and resolves.
+   * {@link BranchCapable} — the fork transport (checkpointing §5), through the
+   * definition's branch seam. Default: {@link copyFromStore} — the source's
+   * inherited prefix (bounded by seq, ADR 100 law 1) is copied onto THIS
+   * harness's scope, so the subsequent `hydrate` opens the child on its own
+   * copy. A stitch-at-read adopter supplies a no-op and inherits through its
+   * reads. This is what retires the ADR-93 fork law: a child branches, then
+   * genesises over what the seam made durable.
    *
    * @see docs/proposals/v2/checkpointing.md §5
    */
   async branch(ctx: BranchCtx): Promise<void> {
-    if ((await this.store.read(this.scopeId, ctx.storeCtx)).length > 0) return;
-    const whole = await this.store.read(timelineScopeKey(ctx.fromSessionId), ctx.storeCtx);
-    // ADR 100 law 1 — the anchor bounds the inherited prefix INCLUSIVELY
-    // (`entry.seq <= toSeq`). The read tier has no seq column, so the bound
-    // applies by position: entries are append-ordered and seqs are
-    // 0-based-dense in the bundled store (`MemoryLog.baseSeq: 0`), making
-    // index === seq. `toSeq: -1` (no anchor) inherits nothing.
-    const source = ctx.toSeq === undefined ? whole : whole.slice(0, ctx.toSeq + 1);
-    if (source.length === 0) return;
-    await this.store.append(this.scopeId, source, ctx.storeCtx);
+    const brancher = this.brancher;
+    if (brancher === undefined) return;
+    await brancher({
+      ...this.hydrateCtx(),
+      fromSessionId: ctx.fromSessionId,
+      fromLogKey: timelineScopeKey(ctx.fromSessionId),
+      ...(ctx.toSeq !== undefined ? { toSeq: ctx.toSeq } : {}),
+    });
   }
 
   /**
