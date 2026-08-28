@@ -245,15 +245,6 @@ export interface ClientSendInput<P = unknown> extends SendInput<P> {
  * sub-handles ({@link SessionHandleExtensions}) AND the wire-derived namespace
  * surface ({@link SessionWireNamespaces}).
  */
-/** Input for {@link SessionHandleBase.branch} — the explicit client form. */
-export interface ClientBranchInput {
-  readonly entryId?: string;
-  readonly anchored?: boolean;
-  readonly inherited?: boolean;
-  readonly sessionId?: string;
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
 export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
   /**
    * Is this session executing right now — seeded AND live.
@@ -293,18 +284,6 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
    * in-process harness takes, over the wire.
    */
   abort(reason?: string, opts?: SessionAbortOptions): Promise<void>;
-
-  /**
-   * ADR 100 conversation verbs — the client half of the harness's
-   * `reply`/`fork`/`branch`. Each mints a fresh id, fires the create over the
-   * wire (`app/create_session` with the `from` bag — no `seq`, no `internal`:
-   * both server-resolved), and returns the new session's handle synchronously,
-   * lazy-create style. `fork()` with no `entryId` anchors at the source's tip
-   * — genesis resolves it, exactly as it resolves `seq`.
-   */
-  reply(entryId: string): SessionHandle;
-  fork(entryId?: string): SessionHandle;
-  branch(input: ClientBranchInput): SessionHandle;
   /**
    * The model this session is about to call, and what is known about it —
    * window, output cap, pricing, capabilities.
