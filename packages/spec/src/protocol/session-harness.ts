@@ -1534,7 +1534,7 @@ export interface SpawnContextChildInput<P = unknown> {
    * purpose: a branch (fork / reply) records where it came from and is
    * subordinate to nothing, so `from` must never mint this edge.
    */
-  readonly parentSessionId: string;
+  readonly parentSessionId?: string;
   /**
    * The child's disposition, CALLER-DECLARED — the door stamps what it is
    * handed and forces nothing (the same bag serves `spawn` and the
