@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { AppInfo, ContentBlock, SessionEntry } from "@agentick/spec";
-import { SPEC_VERSION } from "@agentick/spec";
+import { relation, SPEC_VERSION } from "@agentick/spec";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
@@ -149,49 +149,69 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
     await gateway.close();
   });
 
-  it("lists ROOT sessions only when asked, and says which is which", async () => {
-    // The failure this closes: a spawned child is a real session with a real durable
-    // record, so a conversation list showed a sub-agent's working session beside
-    // conversations the user actually had.
+  it("lists the conversations — a fork is one, a thread and a worker are not", async () => {
+    // ADR 100 law 2, and what the deleted `root: true` filter got wrong: it read
+    // "has no parent", so a FORK of a conversation — which has a `from` and is
+    // every bit a conversation — fell out of the list beside the sub-agent
+    // working sessions it was meant to hide.
     const gateway = await createGateway();
     await gateway.listen();
     const app = await gateway.createApp({
       rootElement: NULL_ROOT,
       options: mkAppOptions({ title: "Ernesto" }),
     });
-    const parent = await app.createSession({ title: "a real conversation", eager: true });
+    const source = await app.createSession({ title: "a real conversation", eager: true });
+    const at = (entryId: string) => ({ sessionId: source.id, entryId, inherited: true });
+    await app.createSession({
+      title: "the same conversation, a new direction",
+      from: { ...at("e1"), anchored: false },
+      eager: true,
+    });
+    await app.createSession({
+      title: "a side-thread on an entry",
+      from: { ...at("e1"), anchored: true },
+      eager: true,
+    });
     await app.createSession({
       title: "the analyst's own work",
-      parentSessionId: parent.id,
+      from: { sessionId: source.id, entryId: "e1", inherited: false, anchored: false },
+      internal: true,
       eager: true,
     });
     const wire = fakeWireCaller({ apps: [app] });
 
+    const conversations = await wire.call<{ sessions: readonly SessionEntry[] }>(
+      "app/list_sessions",
+      { appId: app.id, filter: { internal: false, anchored: false } },
+    );
+    expect(conversations.sessions.map((session) => session.title).sort()).toEqual([
+      "a real conversation",
+      "the same conversation, a new direction",
+    ]);
+
+    // Unfiltered, a client can still tell every row apart — the projection
+    // carries the whole bag plus the disposition, which is exactly what the
+    // vocabulary folds from.
     const all = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
       appId: app.id,
     });
-    expect(all.sessions).toHaveLength(2);
-    // Unfiltered, a client can still tell them apart — that is what nests a
-    // sub-session under the turn that opened it.
-    expect(all.sessions.filter((session) => session.parentSessionId !== undefined)).toHaveLength(1);
+    expect(new Map(all.sessions.map((session) => [session.title, relation(session)]))).toEqual(
+      new Map([
+        ["a real conversation", "conversation"],
+        ["the same conversation, a new direction", "fork"],
+        ["a side-thread on an entry", "reply"],
+        ["the analyst's own work", "worker"],
+      ]),
+    );
 
-    const roots = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
+    // The other half of the graph: everything branched from one session, which is
+    // what a thread view asks for once a conversation is open.
+    const branches = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
       appId: app.id,
-      filter: { root: true },
+      filter: { fromSessionId: source.id },
     });
-    expect(roots.sessions.map((session) => session.title)).toEqual(["a real conversation"]);
-    expect(roots.sessions[0]?.parentSessionId).toBeUndefined();
-
-    // The other half of the tree: children of one session, which is what a
-    // session-GRAPH view asks for once a thread is open. The store always had the
-    // dimension; the wire did not project it, so a client could exclude
-    // sub-sessions but never enumerate the ones belonging to a turn.
-    const children = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
-      appId: app.id,
-      filter: { parentSessionId: parent.id },
-    });
-    expect(children.sessions.map((session) => session.title)).toEqual(["the analyst's own work"]);
-    expect(children.sessions[0]?.parentSessionId).toBe(parent.id);
+    expect(branches.sessions).toHaveLength(3);
+    expect(branches.sessions.every((session) => session.from?.sessionId === source.id)).toBe(true);
 
     await gateway.close();
   });

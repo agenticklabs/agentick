@@ -28,6 +28,7 @@ import {
 } from "@agentick/spec";
 
 import {
+  mayBranchFrom,
   metadataMatches,
   needsSnapshotPath,
   toSessionEntry,
@@ -40,12 +41,21 @@ export const appWireExtension: WireExtension = defineWireExtension({
   namespace: "app",
   version: "1.0.0",
   methods: {
-    "app/create_session": async ({ appId, sessionId, metadata, eager }, ctx) => {
+    "app/create_session": async ({ appId, sessionId, metadata, eager, from }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
+      // ADR 100 law 4 — the wire admits `from` only from a caller who owns the
+      // SOURCE session, because `inherited` reads the source's timeline, knobs
+      // and state into a session the caller then owns. Refused before anything
+      // is created, and refused the same way for an absent source (see
+      // {@link mayBranchFrom}).
+      if (from !== undefined && !(await mayBranchFrom(app, from, ctx.principal))) {
+        throw WireRpcError.forbidden("app:create_session");
+      }
       const session = await app.createSession({
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(metadata !== undefined ? { metadata } : {}),
+        ...(from !== undefined ? { from } : {}),
         // E11 — lazy genesis by default; the client opts in to an immediate
         // durable write for a session it wants listed before the first message.
         ...(eager !== undefined ? { eager } : {}),

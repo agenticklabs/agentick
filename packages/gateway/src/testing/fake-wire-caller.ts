@@ -43,6 +43,13 @@ export interface FakeWireCallerOptions {
   readonly apps?: readonly AppHarnessProtocol[];
   /** Extra namespaces to resolve alongside the framework's. */
   readonly extensions?: readonly WireExtension[];
+  /**
+   * The caller ingress already resolved — `ctx.principal`, GIVEN rather than
+   * derived (this fake still runs no auth). Handlers that read it decide what a
+   * caller may name, not merely what they may see: `app/create_session` admits
+   * a `from` only from the source session's owner (ADR 100 law 4).
+   */
+  readonly principal?: string;
 }
 
 export interface FakeWireCaller {
@@ -67,6 +74,7 @@ export function fakeWireCaller(options: FakeWireCallerOptions = {}): FakeWireCal
       app: (appId: string) => apps.find((a) => a.id === appId),
       apps: () => apps,
     },
+    principal: options.principal,
   };
 
   return {
