@@ -83,6 +83,7 @@ function stubToolExecutor(
       dispatch: (i: { toolCallId: string; name: string; signal?: AbortSignal }) =>
         Effect.tryPromise({ try: () => dispatch(i), catch: (e) => e }),
     },
+    tools: { list: () => [] },
   } as unknown as ToolExecutorProtocol;
 }
 

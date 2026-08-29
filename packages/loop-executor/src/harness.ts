@@ -108,6 +108,8 @@ import type {
   TickResult,
   ToolCall,
   ToolDeclaration,
+  ToolInfo,
+  RenderedTree,
   UsageRollup,
   UsageStats,
 } from "@agentick/spec";
@@ -1067,12 +1069,36 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // (ADR 54 / 55) so useContextInfo / useRenderContext read it
       // SYNCHRONOUSLY during this render — adaptive-compaction components
       // react before the IR freezes. Composed in-fiber via `.fx`.
-      const renderResult = yield* input.compiler.fx.renderTree({
-        mountId: input.mountId,
-        sessionId: input.sessionId,
-        executionId,
-        ...(renderContext !== undefined ? { renderContext } : {}),
-      });
+      // The catalog a render sees is whatever the registry holds BEFORE the
+      // tree's own `<tool>` declarations land, so a tree that renders its
+      // catalog is one pass stale. Render, sync, and re-render once when the
+      // model-exposed set changed — tick 1 pays one extra pass; steady-state
+      // ticks pay none.
+      const listModelTools = (): readonly ToolInfo[] =>
+        input.toolExecutor.tools.list({ exposure: "model" });
+      const renderWith = (tools: readonly ToolInfo[]) =>
+        input.compiler.fx.renderTree({
+          mountId: input.mountId,
+          sessionId: input.sessionId,
+          executionId,
+          renderContext: { ...renderContext, tools },
+        });
+      const compilerBinding = { scope: "compiler", mountId: input.mountId } as const;
+      const syncCompilerTools = (tree: RenderedTree) =>
+        input.toolExecutor.fx.replaceCompilerTools({
+          mountId: input.mountId,
+          registrations: (tree.declarations?.tools ?? []).map((d) =>
+            toRegistration(d, compilerBinding),
+          ),
+        });
+      const toolsSeenByRender = listModelTools();
+      let renderResult = yield* renderWith(toolsSeenByRender);
+      yield* syncCompilerTools(renderResult.tree);
+      const toolsAfterSync = listModelTools();
+      if (!sameToolNames(toolsSeenByRender, toolsAfterSync)) {
+        renderResult = yield* renderWith(toolsAfterSync);
+        yield* syncCompilerTools(renderResult.tree);
+      }
 
       // ADR 56 — tree-declared per-tick model. If THIS render's IR
       // declared a model, resolve its ref (via the session-supplied
@@ -1119,12 +1145,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // Both compose in-fiber via `.fx`. Done BEFORE the config overlay
       // because the structured-output strategy resolution (§B2) reads
       // `modelTools.length` to resolve `"auto"`.
-      const compilerTools = renderResult.tree.declarations?.tools ?? [];
-      const compilerBinding = { scope: "compiler", mountId: input.mountId } as const;
-      yield* input.toolExecutor.fx.replaceCompilerTools({
-        mountId: input.mountId,
-        registrations: compilerTools.map((d) => toRegistration(d, compilerBinding)),
-      });
       const compiledModelTools = yield* input.toolExecutor.fx.compileForTick({
         exposure: "model",
       });
@@ -1777,4 +1797,10 @@ function failedTickResult(
     consecutiveFailures:
       executorTerminal.outcome === "failed" ? (input.consecutiveFailures ?? 0) + 1 : 0,
   };
+}
+
+function sameToolNames(a: readonly ToolInfo[], b: readonly ToolInfo[]): boolean {
+  if (a.length !== b.length) return false;
+  const names = new Set(a.map((t) => t.name));
+  return b.every((t) => names.has(t.name));
 }

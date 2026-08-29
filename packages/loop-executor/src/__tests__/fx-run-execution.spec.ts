@@ -66,6 +66,7 @@ const stubToolExecutor = (): ToolExecutorProtocol =>
     replaceCompilerTools: async () => undefined,
     compileForTick: async () => [],
     dispatch: async () => ({ toolCallId: "t", name: "n", content: [], isError: false }),
+    tools: { list: () => [] },
   }) as unknown as ToolExecutorProtocol;
 
 async function makeLoopAndInput(

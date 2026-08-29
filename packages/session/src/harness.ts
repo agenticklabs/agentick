@@ -3667,7 +3667,6 @@ export class SessionHarness<P = unknown>
                         : {}),
                       // The whole model-exposed registry, allowlist or not —
                       // see RenderContext.tools.
-                      tools: this.toolExecutor.tools.list({ exposure: "model" }),
                     };
                     // Model-less send: no fallback target to project. The tree may
                     // still declare a per-tick `<Model>`, but that resolves

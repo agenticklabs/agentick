@@ -141,6 +141,7 @@ function mkFakeToolExecutor(
     compileForTick: async () => [],
     dispatch: async (i: { name: string; toolCallId: string }) =>
       dispatch({ name: i.name, toolCallId: i.toolCallId }),
+    tools: { list: () => [] },
   } as unknown as ToolExecutorProtocol;
 }
 

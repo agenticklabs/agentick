@@ -63,6 +63,7 @@ const stubToolExecutor = (): ToolExecutorProtocol =>
       compileForTick: () => Effect.succeed([]),
       dispatch: () => Effect.succeed({ toolCallId: "t", name: "n", content: [], isError: false }),
     },
+    tools: { list: () => [] },
   }) as unknown as ToolExecutorProtocol;
 
 async function makeLoopAndInput(

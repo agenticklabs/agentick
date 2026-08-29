@@ -88,6 +88,7 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
     replaceCompilerTools: async () => undefined,
     compileForTick: async () => [],
     dispatch: async (i: { name: string; toolCallId: string }) => ok(i),
+    tools: { list: () => [] },
   } as unknown as ToolExecutorProtocol;
 }
 

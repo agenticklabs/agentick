@@ -374,3 +374,62 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     expect(seenTools(executor)[1]!).toEqual([]);
   });
 });
+
+describe("LoopExecutorHarness — the render sees the tools it declares", () => {
+  const calc: ToolDeclaration = {
+    id: "t.calc",
+    name: "calc",
+    description: "math",
+    inputSchema: jsonSchema({ type: "object" }),
+    exposure: ["model"],
+    handlerRef: "h.calc",
+  };
+
+  function recordingCompiler(tools: readonly ToolDeclaration[]) {
+    const seen: Array<readonly string[]> = [];
+    const base = mkCompiler(tools);
+    const record = (input: { renderContext?: { tools?: readonly { name: string }[] } }) =>
+      seen.push((input.renderContext?.tools ?? []).map((t) => t.name));
+    const compiler: CompilerProtocol = {
+      ...base,
+      fx: {
+        ...base.fx,
+        renderTree: (input) => {
+          record(input);
+          return base.fx.renderTree(input);
+        },
+      },
+    };
+    return { compiler, seen };
+  }
+
+  async function runOnce(compiler: CompilerProtocol, maxTicks = 1) {
+    const sub = mkSubstrate();
+    const loop = new LoopExecutorHarness("loop_rr", sub.journal, sub.bus, sub.inbox);
+    await loop.ready;
+    const executor = new FakeLanguageModelExecutor("rr_exec", sub.journal, sub.bus, sub.inbox);
+    await loop.runExecution({
+      sessionId: "s_rr",
+      mountId: "m_rr",
+      compiler,
+      modelExecutor: executor,
+      toolExecutor: await mkToolExecutor("tools_rr", sub),
+      target: executor.target,
+      stateApplicator: noopApplicator(),
+      executionId: "exec_rr",
+      maxTicks,
+    });
+  }
+
+  it("re-renders once on the first tick so the tree's own tools reach the render context", async () => {
+    const { compiler, seen } = recordingCompiler([calc]);
+    await runOnce(compiler);
+    expect(seen).toEqual([[], ["calc"]]);
+  });
+
+  it("renders exactly once when the tree declares nothing new", async () => {
+    const { compiler, seen } = recordingCompiler([]);
+    await runOnce(compiler);
+    expect(seen).toEqual([[]]);
+  });
+});
