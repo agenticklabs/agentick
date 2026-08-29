@@ -44,7 +44,15 @@ import {
 import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks";
 import type { TaskExecutor, TaskStore } from "@agentick/tasks";
-import type { ModelFacts, TaskRecord, TaskWakePolicy } from "@agentick/spec";
+import type {
+  ImageModelAdapter,
+  ImageModelExecutorProtocol,
+  EmbeddingModelAdapter,
+  EmbeddingModelExecutorProtocol,
+  ModelFacts,
+  TaskRecord,
+  TaskWakePolicy,
+} from "@agentick/spec";
 import { ResourcesHarness } from "@agentick/resources";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
 import {
@@ -61,7 +69,11 @@ import {
   type NormalizedTelemetry,
 } from "./telemetry-defaults.js";
 import { buildTelemetryExport } from "./telemetry-wiring.js";
-import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/model-executor";
+import {
+  ImageModelExecutor,
+  EmbeddingModelExecutor,
+  LanguageModelExecutor as TheLanguageModelExecutor,
+} from "@agentick/model-executor";
 import {
   SessionHarness,
   InMemorySessionStore,
@@ -88,6 +100,8 @@ import {
   type ToolHandler,
 } from "@agentick/tool-executor";
 import {
+  isImageModelAdapter,
+  isEmbeddingModelAdapter,
   AppClosedError,
   AppExecutionFailed,
   BranchSourceEntryNotFoundError,
@@ -368,6 +382,14 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
    * redundant `target` field below is optional.
    */
   readonly modelExecutor?: LanguageModelExecutor | ExecutorFactory;
+  /**
+   * The `image-model` family slot (ADR 105) — an adapter (`google.images(...)`)
+   * the app wraps in an `ImageModelExecutor` on its substrate + interceptor
+   * cascade, or a pre-built executor. Reaches tool handlers as `ctx.images`.
+   */
+  readonly images?: ImageModelAdapter | ImageModelExecutorProtocol;
+  /** The `embedding-model` family slot — as `images`, reaching tools as `ctx.embeddings`. */
+  readonly embeddings?: EmbeddingModelAdapter | EmbeddingModelExecutorProtocol;
   /**
    * Optional override of the model-executor's self-described target. When
    * omitted, `modelExecutor.target` is used. Override at this level when a
@@ -935,6 +957,9 @@ export class AppHarness<P = unknown>
    * `NoModelForExecutionError`.
    */
   private readonly modelExecutor: LanguageModelExecutor | undefined;
+  /** ADR 105 family executors — `undefined` when the slot was not configured. */
+  readonly images: ImageModelExecutorProtocol | undefined;
+  readonly embeddings: EmbeddingModelExecutorProtocol | undefined;
   private readonly target: ExecutionTarget | undefined;
   /**
    * Adapter→executor builder threaded into every session (ADR 89 §2 ergonomic
@@ -1344,6 +1369,28 @@ export class AppHarness<P = unknown>
     // Resolve target: caller override > modelExecutor.target (undefined when
     // model-less and no explicit target).
     this.target = options.target ?? this.modelExecutor?.target;
+    // The modality slots resolve like `model:` — a bare adapter becomes an
+    // executor on this app's substrate with the interceptor cascade live.
+    this.images =
+      options.images === undefined
+        ? undefined
+        : isImageModelAdapter(options.images)
+          ? new ImageModelExecutor(`${appId}:images`, journal, bus, inbox, {
+              adapter: options.images,
+              inheritedInterceptors: this.resolvedInterceptors(),
+              interceptorParent: this,
+            })
+          : options.images;
+    this.embeddings =
+      options.embeddings === undefined
+        ? undefined
+        : isEmbeddingModelAdapter(options.embeddings)
+          ? new EmbeddingModelExecutor(`${appId}:embeddings`, journal, bus, inbox, {
+              adapter: options.embeddings,
+              inheritedInterceptors: this.resolvedInterceptors(),
+              interceptorParent: this,
+            })
+          : options.embeddings;
     // ADR 89 §2 — the adapter→executor builder threaded into every session so
     // `session.model.setModel(adapter)` matches construction's `model` sugar.
     // Injected UNLESS the app supplied a BYO `modelExecutor` (that app opted out
@@ -2885,6 +2932,9 @@ export class AppHarness<P = unknown>
     // inside the handler.
     const codeNamespace = sessionExtensionBridges.get("code");
     if (codeNamespace !== undefined) ctxExtensionEntries.code = codeNamespace;
+    // ADR 105 — the modality executors, as `ctx.images` / `ctx.embeddings`.
+    if (this.images !== undefined) ctxExtensionEntries.images = this.images;
+    if (this.embeddings !== undefined) ctxExtensionEntries.embeddings = this.embeddings;
     const ctxExtensions: Readonly<Record<string, unknown>> | undefined =
       Object.keys(ctxExtensionEntries).length > 0 ? ctxExtensionEntries : undefined;
 
