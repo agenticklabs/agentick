@@ -3661,10 +3661,14 @@ export class SessionHarness<P = unknown>
                   resolveRenderContext: () => {
                     // The send's bound output shape is model-independent, so it
                     // survives the model-less branch below.
-                    const bound: RenderContext =
-                      effectiveResponseFormat !== undefined
+                    const bound: RenderContext = {
+                      ...(effectiveResponseFormat !== undefined
                         ? { responseFormat: effectiveResponseFormat }
-                        : {};
+                        : {}),
+                      // The whole model-exposed registry, allowlist or not —
+                      // see RenderContext.tools.
+                      tools: this.toolExecutor.tools.list({ exposure: "model" }),
+                    };
                     // Model-less send: no fallback target to project. The tree may
                     // still declare a per-tick `<Model>`, but that resolves
                     // POST-render (chicken-and-egg, see the loop's ADR-56 notes),

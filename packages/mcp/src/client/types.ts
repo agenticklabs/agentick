@@ -393,6 +393,7 @@ export interface McpToolDescriptor {
   readonly inputSchema: Readonly<Record<string, unknown>>;
   readonly outputSchema?: Readonly<Record<string, unknown>>;
   readonly annotations?: Readonly<Record<string, unknown>>;
+  readonly _meta?: Readonly<Record<string, unknown>>;
   /**
    * Execution annotations — `taskSupport` lives here per MCP 2025-11-25
    * (and 2026-07-28). Values:

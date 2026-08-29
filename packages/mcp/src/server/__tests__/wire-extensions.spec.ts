@@ -291,3 +291,18 @@ describe("readMcpDeclarationExtensions", () => {
     expect(readMcpDeclarationExtensions(undefined)).toBeUndefined();
   });
 });
+
+describe("toWireTool — catalog metadata", () => {
+  it("emits `group` and `summary` under `_meta['agentick/*']`, adopter meta winning on collision", () => {
+    const wire = toWireTool({
+      ...decl("search_invoices", mcpToolExtensions({ meta: { "agentick/summary": "adopter" } })),
+      group: ["invoicing"],
+      summary: "Find invoices.",
+    });
+    expect(wire._meta).toEqual({ "agentick/group": ["invoicing"], "agentick/summary": "adopter" });
+  });
+
+  it("emits no `_meta` when the declaration carries neither", () => {
+    expect(toWireTool(decl("search_invoices"))._meta).toBeUndefined();
+  });
+});

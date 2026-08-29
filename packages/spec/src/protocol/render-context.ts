@@ -40,6 +40,7 @@
 
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
+import type { ToolInfo } from "./tool-executor.js";
 
 export interface RenderContext {
   /**
@@ -81,4 +82,12 @@ export interface RenderContext {
    * IR-derived per tick and a change re-resolves this slot.
    */
   readonly activeModel?: Pick<ExecutionTarget, "provider" | "modelId" | "capabilities">;
+  /**
+   * The tools the session can reach at this tick — the model-exposed
+   * registry (`session.tools.list({ exposure: "model" })`), NOT the tick's
+   * allowlisted view: a prompt section that maps the territory must name the
+   * tools an allowlist (a tool-search extension) hides from the request.
+   * Each carries `summary` / `group` / `binding` for grouping and prose.
+   */
+  readonly tools?: readonly ToolInfo[];
 }

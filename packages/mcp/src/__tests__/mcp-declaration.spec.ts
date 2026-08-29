@@ -120,3 +120,35 @@ describe("mcpDeclaration — executedBy provenance", () => {
     expect(decl.annotations?.executedBy).toBe("mcp:srv");
   });
 });
+
+describe("mcpDeclaration — catalog metadata", () => {
+  it("lifts `_meta['agentick/group']` and `['agentick/summary']` onto the declaration", () => {
+    const decl = mcpDeclaration(
+      "sess-1",
+      "knowify",
+      { ...tool, _meta: { "agentick/group": ["jobs"], "agentick/summary": "Find jobs." } },
+      "knowify__search",
+      undefined,
+    );
+    expect(decl.group).toEqual(["jobs"]);
+    expect(decl.summary).toBe("Find jobs.");
+  });
+
+  it("accepts a bare string group and ignores malformed values", () => {
+    const decl = mcpDeclaration(
+      "sess-1",
+      "knowify",
+      { ...tool, _meta: { "agentick/group": "jobs", "agentick/summary": 42 } },
+      "knowify__search",
+      undefined,
+    );
+    expect(decl.group).toEqual(["jobs"]);
+    expect(decl.summary).toBeUndefined();
+  });
+
+  it("leaves both absent when the server sent no `_meta`", () => {
+    const decl = mcpDeclaration("sess-1", "knowify", tool, "knowify__search", undefined);
+    expect("group" in decl).toBe(false);
+    expect("summary" in decl).toBe(false);
+  });
+});

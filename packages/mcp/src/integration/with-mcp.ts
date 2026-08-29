@@ -408,12 +408,27 @@ export function mcpDeclaration(
     id: localName,
     name: localName,
     description: tool.description ?? `MCP tool ${serverId}/${tool.name}`,
+    ...omitUndefined({
+      group: metaStrings(tool._meta?.["agentick/group"]),
+      summary: metaString(tool._meta?.["agentick/summary"]),
+    }),
     inputSchema,
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     exposure: ["model", "dispatch"],
     handlerRef: mcpHandlerRef(sessionId, serverId, tool.name),
     annotations,
   };
+}
+
+function metaString(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+function metaStrings(v: unknown): readonly string[] | undefined {
+  if (typeof v === "string") return [v];
+  return Array.isArray(v) && v.every((x) => typeof x === "string")
+    ? (v as readonly string[])
+    : undefined;
 }
 
 /**

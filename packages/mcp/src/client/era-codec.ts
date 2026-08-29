@@ -65,6 +65,7 @@ export const CanonicalPassthroughCodec: EraCodec = {
       inputSchema?: Readonly<Record<string, unknown>>;
       outputSchema?: Readonly<Record<string, unknown>>;
       annotations?: Readonly<Record<string, unknown>>;
+      _meta?: Readonly<Record<string, unknown>>;
       execution?: { taskSupport?: "optional" | "required" | "forbidden" };
     };
     if (typeof r.name !== "string") {
@@ -77,6 +78,7 @@ export const CanonicalPassthroughCodec: EraCodec = {
       ...omitUndefined({
         outputSchema: r.outputSchema,
         annotations: r.annotations,
+        _meta: r._meta,
         execution: r.execution,
       }),
     };

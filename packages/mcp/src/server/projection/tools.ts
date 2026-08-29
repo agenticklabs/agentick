@@ -393,8 +393,16 @@ export function toWireTool(decl: ToolDeclaration): McpWireTool {
   // `createTool({ annotations: { readOnlyHint } })` should project here too —
   // `metadata.mcp.annotations` overriding, as `title` already does above.
   const mcpExt = readMcpToolExtensions(meta);
-  if (mcpExt?.meta !== undefined) {
-    wire._meta = mcpExt.meta as McpWireTool["_meta"];
+  // The declaration's own `group` / `summary` ride `_meta` under agentick
+  // keys, so an agentick client on the other end re-mints them onto the
+  // declaration it registers (a tool's place in the capability tree survives
+  // the wire). Adopter `mcp.meta` is spread first — explicit wins.
+  const catalogMeta = {
+    ...(decl.group !== undefined ? { "agentick/group": decl.group } : {}),
+    ...(decl.summary !== undefined ? { "agentick/summary": decl.summary } : {}),
+  };
+  if (mcpExt?.meta !== undefined || Object.keys(catalogMeta).length > 0) {
+    wire._meta = { ...catalogMeta, ...(mcpExt?.meta ?? {}) } as McpWireTool["_meta"];
   }
   if (mcpExt?.annotations !== undefined) {
     const hints = mcpExt.annotations;
