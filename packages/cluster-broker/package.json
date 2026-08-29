@@ -1,6 +1,6 @@
 {
   "name": "@agentick/cluster-broker",
-  "version": "1.0.0-next.174",
+  "version": "1.0.0-next.175",
   "description": "Broker-pattern base for cluster transport adapters that run their own broker process. Ships abstract `BaseBroker` + `BaseClusterClient`, a `Connection` interface, a length-prefix framing helper, and the wire frame schema. Concrete wire packages (cluster-net-next for TCP/Unix; cluster-ws-next for WebSocket) subclass these to plug in their listener / connector. External-broker adapters (cluster-redis-next, cluster-nats-next) are peers of this package, not children — they don't use this plumbing.",
   "keywords": [
     "agentick",
