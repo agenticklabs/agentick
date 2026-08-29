@@ -68,6 +68,8 @@ function listDeclaration(handlerRef: string): ToolDeclaration {
   return {
     id: RESOURCE_LIST,
     name: RESOURCE_LIST,
+    summary: "List what is registered under a resource address.",
+    group: ["resources"],
     description:
       "List the resources the application has made available for reading. " +
       "Resources are read-only content (files, config, computed views, data " +
@@ -90,6 +92,8 @@ function readDeclaration(handlerRef: string): ToolDeclaration {
   return {
     id: RESOURCE_READ,
     name: RESOURCE_READ,
+    summary: "Open a resource by its address and read it whole.",
+    group: ["resources"],
     description:
       "Read the content of one resource by its `uri` (discover uris with " +
       "`resource_list`). Returns the resource's content as one or more " +

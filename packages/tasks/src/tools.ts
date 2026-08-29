@@ -80,6 +80,8 @@ function listDeclaration(localName: string, handlerRef: string): ToolDeclaration
   return {
     id: localName,
     name: localName,
+    summary: "List the background work this conversation has started.",
+    group: ["tasks"],
     description:
       `${TOOLS_DESCRIPTION_PREAMBLE} ` +
       "List every framework background task known to this session — local " +
@@ -101,6 +103,8 @@ function getDeclaration(localName: string, handlerRef: string): ToolDeclaration 
   return {
     id: localName,
     name: localName,
+    summary: "Read one background task's status, and its result once it has one.",
+    group: ["tasks"],
     description:
       `${TOOLS_DESCRIPTION_PREAMBLE} ` +
       "Fetch the current TaskInfo snapshot for a single framework background " +
@@ -121,6 +125,8 @@ function cancelDeclaration(localName: string, handlerRef: string): ToolDeclarati
   return {
     id: localName,
     name: localName,
+    summary: "Stop a background task that is no longer wanted.",
+    group: ["tasks"],
     description:
       `${TOOLS_DESCRIPTION_PREAMBLE} ` +
       "Cancel an in-flight framework background task. Idempotent: cancelling " +
@@ -145,6 +151,8 @@ function awaitDeclaration(localName: string, handlerRef: string): ToolDeclaratio
   return {
     id: localName,
     name: localName,
+    summary: "Wait for a background task to finish.",
+    group: ["tasks"],
     description:
       `${TOOLS_DESCRIPTION_PREAMBLE} ` +
       "Block this tick until a framework background task reaches a terminal " +
