@@ -27,6 +27,9 @@
  */
 
 import type {
+  ExecutionResult,
+  EmbeddingModelAdapter,
+  ImageModelAdapter,
   AdapterDelta,
   ExecuteErrorChannel,
   ExecuteInput,
@@ -116,7 +119,7 @@ async function openThroughFirstChunk<TRaw, TChunk>(
  * stream that has produced output is never replayed. Abort is never
  * retried.
  */
-export function withRetry<TRaw, TChunk>(
+function withLanguageModelRetry<TRaw, TChunk>(
   adapter: LanguageModelAdapter<TRaw, TChunk>,
   options: RetryOptions = {},
 ): LanguageModelAdapter<TRaw, TChunk> {
@@ -184,7 +187,7 @@ interface FallbackChunk {
  * // by the consumer before the serving adapter is known — today the
  * // primary's transforms apply chain-wide.
  */
-export function withFallback(
+function withLanguageModelFallback(
   first: LanguageModelAdapter,
   ...rest: readonly LanguageModelAdapter[]
 ): LanguageModelAdapter<FallbackRaw, FallbackChunk> {
@@ -345,4 +348,138 @@ export function tapModel<TRaw, TChunk>(
       return result;
     },
   };
+}
+
+// ============================================================================
+// Modality families (ADR 105) — the same combinators over a single call
+// ============================================================================
+//
+// An image or embedding adapter has ONE async call, so retry and fallback are
+// the language-model semantics minus the stream: transient → retry with the
+// same jittered backoff; a chain serves the first adapter that succeeds and
+// stamps `finishMetadata.fallback` (same shape as the LM's) when it wasn't
+// the primary. Abort is never retried and never falls through.
+
+const isImageModelAdapter = (a: unknown): a is ImageModelAdapter =>
+  typeof (a as ImageModelAdapter).generate === "function";
+const isEmbeddingModelAdapter = (a: unknown): a is EmbeddingModelAdapter =>
+  typeof (a as EmbeddingModelAdapter).embed === "function";
+
+function retryCall<A extends unknown[], R>(
+  call: (...args: A) => Promise<R>,
+  signalIndex: number,
+  options: RetryOptions,
+): (...args: A) => Promise<R> {
+  const attempts = options.attempts ?? 3;
+  const backoffMs = options.backoffMs ?? 250;
+  const retryOn = options.retryOn ?? isTransientProviderError;
+  return async (...args: A): Promise<R> => {
+    const signal = args[signalIndex] as AbortSignal | undefined;
+    for (let i = 1; ; i++) {
+      try {
+        return await call(...args);
+      } catch (cause) {
+        if (signal?.aborted || i === attempts || !retryOn(cause, i)) throw cause;
+        await delay(backoffMs * 2 ** (i - 1) * Math.random());
+      }
+    }
+  };
+}
+
+function fallbackMetadata(
+  served: { provider: string; target: ExecutionTarget },
+  first: { target: ExecutionTarget },
+): Readonly<Record<string, unknown>> {
+  return {
+    fallback: {
+      provider: served.provider,
+      ...(served.target.modelId !== undefined ? { modelId: served.target.modelId } : {}),
+      ...(first.target.modelId !== undefined ? { primary: first.target.modelId } : {}),
+    },
+  };
+}
+
+async function fallbackChain<
+  A extends { provider: string; target: ExecutionTarget },
+  R extends ExecutionResult,
+>(chain: readonly A[], signal: AbortSignal | undefined, run: (a: A) => Promise<R>): Promise<R> {
+  let lastCause: unknown;
+  for (const a of chain) {
+    try {
+      const result = await run(a);
+      return a === chain[0]
+        ? result
+        : {
+            ...result,
+            finishMetadata: { ...(result.finishMetadata ?? {}), ...fallbackMetadata(a, chain[0]!) },
+          };
+    } catch (cause) {
+      if (signal?.aborted) throw cause;
+      lastCause = cause;
+    }
+  }
+  throw lastCause;
+}
+
+/**
+ * Retry transient provider failures with exponential, full-jitter backoff.
+ * Works on every adapter family: language models (streaming retries the
+ * START only), image models, embedding models.
+ */
+export function withRetry(adapter: ImageModelAdapter, options?: RetryOptions): ImageModelAdapter;
+export function withRetry(
+  adapter: EmbeddingModelAdapter,
+  options?: RetryOptions,
+): EmbeddingModelAdapter;
+export function withRetry<TRaw, TChunk>(
+  adapter: LanguageModelAdapter<TRaw, TChunk>,
+  options?: RetryOptions,
+): LanguageModelAdapter<TRaw, TChunk>;
+export function withRetry(adapter: unknown, options: RetryOptions = {}): unknown {
+  if (isImageModelAdapter(adapter)) {
+    return { ...adapter, generate: retryCall(adapter.generate.bind(adapter), 1, options) };
+  }
+  if (isEmbeddingModelAdapter(adapter)) {
+    return { ...adapter, embed: retryCall(adapter.embed.bind(adapter), 1, options) };
+  }
+  return withLanguageModelRetry(adapter as LanguageModelAdapter, options);
+}
+
+/**
+ * Serve from the first adapter in the chain that succeeds. A degraded call
+ * carries `finishMetadata.fallback` — the audit signal — on every family.
+ */
+export function withFallback(
+  first: ImageModelAdapter,
+  ...rest: readonly ImageModelAdapter[]
+): ImageModelAdapter;
+export function withFallback(
+  first: EmbeddingModelAdapter,
+  ...rest: readonly EmbeddingModelAdapter[]
+): EmbeddingModelAdapter;
+export function withFallback(
+  first: LanguageModelAdapter,
+  ...rest: readonly LanguageModelAdapter[]
+): LanguageModelAdapter<FallbackRaw, FallbackChunk>;
+export function withFallback(first: unknown, ...rest: readonly unknown[]): unknown {
+  if (isImageModelAdapter(first)) {
+    const chain = [first, ...(rest as ImageModelAdapter[])];
+    return {
+      provider: first.provider,
+      target: first.target,
+      generate: (input, signal) => fallbackChain(chain, signal, (a) => a.generate(input, signal)),
+    } satisfies ImageModelAdapter;
+  }
+  if (isEmbeddingModelAdapter(first)) {
+    const chain = [first, ...(rest as EmbeddingModelAdapter[])];
+    return {
+      provider: first.provider,
+      target: first.target,
+      embed: (input, signal) => fallbackChain(chain, signal, (a) => a.embed(input, signal)),
+    } satisfies EmbeddingModelAdapter;
+  }
+  return withLanguageModelFallback(
+    first as LanguageModelAdapter,
+    ...(rest as LanguageModelAdapter[]),
+  );
 }

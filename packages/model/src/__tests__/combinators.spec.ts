@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { EmbeddingModelAdapter, ImageModelAdapter } from "@agentick/spec";
 
 import { generate, generateStream } from "../generate.js";
 import { scriptedAdapter } from "../testing/index.js";
@@ -193,5 +194,64 @@ describe("isTransientProviderError", () => {
     expect(isTransientProviderError({ code: "ECONNRESET" })).toBe(true);
     expect(isTransientProviderError({ status: 400 })).toBe(false);
     expect(isTransientProviderError(new Error("plain"))).toBe(false);
+  });
+});
+
+describe("modality families — withRetry / withFallback (ADR 105)", () => {
+  const SPEC = "2026-05-08";
+  const transient = () => Object.assign(new Error("rate limited"), { status: 429 });
+
+  function imageAdapter(modelId: string, failures: number) {
+    let calls = 0;
+    const adapter: ImageModelAdapter = {
+      provider: "stub",
+      target: { kind: "image-model", provider: "stub", modelId },
+      async generate() {
+        calls++;
+        if (calls <= failures) throw transient();
+        return { specVersion: SPEC, output: [], images: [{ data: "AA==", mimeType: "image/png" }] };
+      },
+    };
+    return { adapter, calls: () => calls };
+  }
+
+  it("withRetry retries a transient image call, then serves", async () => {
+    const inner = imageAdapter("img", 2);
+    const result = await withRetry(inner.adapter, { attempts: 3, backoffMs: 0 }).generate({
+      prompt: "x",
+    });
+    expect(result.images).toHaveLength(1);
+    expect(inner.calls()).toBe(3);
+  });
+
+  it("withFallback serves the secondary and stamps finishMetadata.fallback; a healthy primary stamps nothing", async () => {
+    const primary = imageAdapter("imagen-4", 99);
+    const secondary = imageAdapter("imagen-3", 0);
+    const degraded = await withFallback(primary.adapter, secondary.adapter).generate({
+      prompt: "x",
+    });
+    expect(degraded.finishMetadata).toMatchObject({
+      fallback: { provider: "stub", modelId: "imagen-3", primary: "imagen-4" },
+    });
+
+    const healthy = imageAdapter("imagen-4", 0);
+    const fine = await withFallback(healthy.adapter, secondary.adapter).generate({ prompt: "x" });
+    expect(fine.finishMetadata?.["fallback"]).toBeUndefined();
+  });
+
+  it("embedding adapters get the same combinators", async () => {
+    let calls = 0;
+    const adapter: EmbeddingModelAdapter = {
+      provider: "stub",
+      target: { kind: "embedding-model", provider: "stub", modelId: "emb" },
+      async embed({ input }) {
+        calls++;
+        if (calls === 1) throw transient();
+        return { specVersion: SPEC, output: [], embeddings: input.map(() => [1]), dimensions: 1 };
+      },
+    };
+    const result = await withRetry(adapter, { backoffMs: 0 }).embed({ input: ["a"] });
+    expect(result.embeddings).toEqual([[1]]);
+    expect(calls).toBe(2);
   });
 });
