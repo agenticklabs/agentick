@@ -37,6 +37,8 @@ import {
   type BaseHarnessOptions,
 } from "@agentick/runtime";
 import type {
+  ImageModelAdapter,
+  EmbeddingModelAdapter,
   AnyExtension,
   AppHarnessProtocol,
   AuthorizeInput,
@@ -374,6 +376,17 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions<unknown, "gate
    * @see docs/proposals/v2/blueprint/78-telemetry-via-runtime-substrate.md
    */
   readonly telemetry?: TelemetrySetting;
+
+  /**
+   * Model-family DEFAULTS for hosted apps (ADR 105), on the telemetry rule: an
+   * app that omits the slot inherits the gateway's; one that supplies it wins.
+   * ADAPTERS only — each app builds its own executor on its own substrate, so
+   * spans and the interceptor cascade attribute to the app that made the call
+   * rather than to whichever app happened to construct a shared harness.
+   */
+  readonly model?: AppHarnessOptions["model"];
+  readonly images?: ImageModelAdapter;
+  readonly embeddings?: EmbeddingModelAdapter;
 }
 
 // ============================================================================
@@ -484,6 +497,12 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * gateway ships no telemetry.
    */
   private readonly telemetrySetting: TelemetrySetting | undefined;
+  /** ADR 105 — adapter defaults default-chained into every hosted app that omits the slot. */
+  private readonly modelDefaults: {
+    readonly model?: AppHarnessOptions["model"];
+    readonly images?: ImageModelAdapter;
+    readonly embeddings?: EmbeddingModelAdapter;
+  };
   /**
    * Gateway-scoped telemetry runtime (ADR 78) — the tracer twin of
    * `AppHarness.telemetryRuntime`. Built ONCE in {@link initTelemetryExport}
@@ -604,6 +623,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // imports the optional sink package). `gatewayReady` awaits `telemetryReady`,
     // so `telemetryRuntime` is always set before the first gateway op reads it.
     this.telemetrySetting = options.telemetry;
+    this.modelDefaults = {
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.images !== undefined ? { images: options.images } : {}),
+      ...(options.embeddings !== undefined ? { embeddings: options.embeddings } : {}),
+    };
     // The gateway exports SPANS for its own ops (`runGatewayOp`) AND owns a
     // `ctx.metrics` surface — the wire-extension handler ctx (ADR 64/78). So it
     // builds BOTH halves of the export from the full setting (readers included),
@@ -1434,6 +1458,20 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       // AND the gateway ships one do we default-chain the gateway's setting
       // down, so a single gateway-level switch lights up telemetry across every
       // hosted app while a per-app override stays authoritative.
+      // Model-family defaults (ADR 105), same rule: the app's own slot wins. A
+      // `model` default applies only when the app names NEITHER model nor
+      // modelExecutor — either is the app choosing.
+      ...(input.options.model === undefined &&
+      input.options.modelExecutor === undefined &&
+      this.modelDefaults.model !== undefined
+        ? { model: this.modelDefaults.model }
+        : {}),
+      ...(input.options.images === undefined && this.modelDefaults.images !== undefined
+        ? { images: this.modelDefaults.images }
+        : {}),
+      ...(input.options.embeddings === undefined && this.modelDefaults.embeddings !== undefined
+        ? { embeddings: this.modelDefaults.embeddings }
+        : {}),
       ...(input.options.telemetry === undefined && this.telemetrySetting !== undefined
         ? { telemetry: this.telemetrySetting }
         : {}),
