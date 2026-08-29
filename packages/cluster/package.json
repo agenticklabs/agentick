@@ -1,6 +1,6 @@
 {
   "name": "@agentick/cluster",
-  "version": "1.0.0-next.175",
+  "version": "1.0.0-next.176",
   "description": "Cluster protocol for Agentick v2 — typed seams (`ClusterTransport`, `ClusterMembership`, `ClusterPartitioning`, `ClusterCodec`, optional `DurableJournal`) + `defineCluster*` adapter-authoring helpers + conformance suite. Sits at the substrate-wrapping seam in `createGateway` / `createApp`; adapters ship separately (`@agentick/cluster-ipc`, `@agentick/cluster-redis`, etc.). Effect-internal, Promise/callback adapter surface.",
   "keywords": [
     "agentick",
