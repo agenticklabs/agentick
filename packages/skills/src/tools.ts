@@ -67,6 +67,8 @@ function listDeclaration(handlerRef: string): ToolDeclaration {
   return {
     id: SKILL_LIST,
     name: SKILL_LIST,
+    summary: "List the skills available to you — reusable playbooks for particular kinds of task.",
+    group: ["skills"],
     description:
       "List the skills available to you — reusable capability documents the " +
       "application curates (recipes, playbooks, domain guides). Returns " +
@@ -83,6 +85,8 @@ function readDeclaration(handlerRef: string): ToolDeclaration {
   return {
     id: SKILL_READ,
     name: SKILL_READ,
+    summary: "Open one skill and read its instructions before following them.",
+    group: ["skills"],
     description:
       "Read one skill's full content by its `name` (discover names with " +
       "`skill_list`). Returns `{ name, description, content, tags? }` — the " +
