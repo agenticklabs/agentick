@@ -15,12 +15,34 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ExecutionTarget } from "@agentick/spec";
 
 import { createApp } from "../react.js";
+import { useRenderContext } from "@agentick/compiler-react";
+import { jsonSchema } from "@agentick/spec";
+import type { ToolDeclaration } from "@agentick/spec";
 
 function Agent() {
   return React.createElement(
     "section" as never,
     { id: "system", audience: "model" },
     "You are a helpful agent.",
+  );
+}
+
+const greet: ToolDeclaration = {
+  id: "greet",
+  name: "greet",
+  description: "say hi",
+  inputSchema: jsonSchema({ type: "object" }),
+  exposure: ["model"],
+  handlerRef: "h.greet",
+};
+
+/** Renders the catalog it was handed — the shape `<Toolboxes />` has. */
+function CatalogAgent() {
+  const tools = useRenderContext().tools ?? [];
+  return React.createElement(
+    "section" as never,
+    { id: "system", audience: "model" },
+    `tools: ${tools.map((t) => t.name).join(", ")}`,
   );
 }
 
@@ -86,6 +108,33 @@ describe("session.dryRun", () => {
       // And project() builds on it rather than re-rendering.
       const input = await session.project(tree);
       expect(JSON.stringify(input)).toContain("helpful agent");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("compiles against the same render context a tick would supply", async () => {
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const executor = new FakeLanguageModelExecutor("dry-4", journal, bus, inbox, {
+      scripted: [{ kind: "text", text: "ok" }] as never,
+    });
+    await executor.ready;
+    const app = await createApp(React.createElement(CatalogAgent), {
+      modelExecutor: executor,
+      target: mkTarget(),
+      journal,
+      bus,
+      inbox,
+      tools: [greet],
+    });
+    const session = await app.createSession({ sessionId: "dry-4" });
+    try {
+      const tree = await session.compile();
+      // A preview that renders no catalog is a preview of a prompt the model
+      // never sees — the tick's render supplies one, so this must too.
+      expect(JSON.stringify(tree)).toContain("tools: greet");
     } finally {
       await app.close();
     }

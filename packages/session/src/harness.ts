@@ -1738,8 +1738,29 @@ export class SessionHarness<P = unknown>
       // Not a tick: this render is a read of current state, and saying so keeps
       // it out of anything that counts ticks or fires tick lifecycle.
       purpose: "free-root",
+      renderContext: this.previewRenderContext(),
     });
     return tree;
+  }
+
+  /** What a tick's render sees, reproduced for an out-of-tick compile. */
+  private previewRenderContext(): RenderContext {
+    const target = this.modelFacade.current?.target;
+    const contextWindow =
+      target !== undefined ? effectiveModelInfo(target, this.models)?.contextWindow : undefined;
+    return {
+      tools: this.toolExecutor.tools.list({ exposure: "model" }),
+      ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
+      ...(target !== undefined
+        ? {
+            activeModel: {
+              provider: target.provider,
+              modelId: target.modelId,
+              capabilities: target.capabilities,
+            },
+          }
+        : {}),
+    };
   }
 
   /**
