@@ -12,9 +12,29 @@
  * @see docs/proposals/v2/V1-PARITY-TRACKER.md
  */
 
+import { google as languageModel } from "./google-adapter.js";
+import { googleEmbeddings, googleImages } from "./google-modalities.js";
+
 export {
-  google,
   type GoogleAdapterOptions,
   type CustomBlockDefinition,
   sanitizeSchemaForGemini,
 } from "./google-adapter.js";
+
+/**
+ * The Google provider family (ADR 105): `google(model)` is the language-model
+ * adapter; `google.images(model)` / `google.embeddings(model)` are the
+ * image-model and embedding-model adapters, sharing options + client resolution.
+ */
+export const google = Object.assign(languageModel, {
+  images: googleImages,
+  embeddings: googleEmbeddings,
+});
+
+export {
+  googleImages,
+  googleEmbeddings,
+  type GoogleImagesOptions,
+  type GoogleEmbeddingsOptions,
+  type GoogleModalityClient,
+} from "./google-modalities.js";

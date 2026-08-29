@@ -1151,7 +1151,7 @@ function lookupToolName(contents: ReadonlyArray<Content>, toolUseId: string): st
  * no result, so an application only learns of a dropped attachment by auditing for it.
  * See "Repair is yours" in `@agentick/model`'s README.
  */
-function googlePartFromSource(
+export function googlePartFromSource(
   source: MediaSource,
   mediaType: string | undefined,
   defaultMime: string,
