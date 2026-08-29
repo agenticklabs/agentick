@@ -27,3 +27,12 @@ export {
   mergeSignals,
 } from "./language-model-executor.js";
 export { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
+// ADR 105 — the image-model + embedding-model families. The augment import is
+// a side effect: it types `ctx.images` / `ctx.embeddings` on ToolHandlerCtx.
+import "./augment.js";
+export {
+  ImageModelExecutor,
+  EmbeddingModelExecutor,
+  type ImageModelExecutorOptions,
+  type EmbeddingModelExecutorOptions,
+} from "./modality-executor.js";

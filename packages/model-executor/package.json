@@ -20,6 +20,12 @@
     "dist"
   ],
   "type": "module",
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/augment.ts",
+    "./dist/index.js",
+    "./dist/augment.js"
+  ],
   "main": "src/index.ts",
   "exports": {
     ".": {
