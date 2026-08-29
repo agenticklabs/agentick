@@ -138,6 +138,10 @@ export interface ExecutionTarget {
     readonly outputPerMTok: number;
     readonly cachedInputPerMTok?: number;
     readonly cacheWritePerMTok?: number;
+    /** Per generated image — the `image-model` family's rate (ADR 105). */
+    readonly perImage?: number;
+    /** Per million input tokens embedded — the `embedding-model` family's rate. */
+    readonly embeddingPerMTok?: number;
   };
   /**
    * Adopter-supplied rates, declared at model construction

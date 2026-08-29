@@ -27,6 +27,13 @@ import type { InstallerInterceptors } from "./app-extension.js";
 import type { Effect } from "effect";
 import type { ProviderOptions, ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js";
 import type { MediaSource } from "../data/content-blocks.js";
+import type { EventScope } from "../data/events.js";
+import type {
+  EmbedInput,
+  EmbedResult,
+  ImageGenerateInput,
+  ImageGenerateResult,
+} from "../data/modalities.js";
 import type { ExecutionTarget, LanguageModelTarget } from "../data/execution-target.js";
 import type {
   ExecutionResult,
@@ -744,6 +751,75 @@ export interface LanguageModelExecutor extends ExecutorProtocol<
    * `RunInput.target` / `SendInput.target`.
    */
   readonly target: ExecutionTarget;
+}
+
+// ============================================================================
+// Modality families (ADR 105) — image-model, embedding-model
+// ============================================================================
+//
+// The language-model family above is "the v2 shipped family"; these are the
+// next two, on the same split (ADR 52): a THIN adapter owns the provider call,
+// an executor harness owns orchestration and mints the call as a command
+// (`model:generate_image`, `model:embed`) so journal / spans / interceptors /
+// cost ride the spine. Neither streams — the protocols are Promise-facing and
+// minimal; `ExecutorFx.executeStream` is the language-model family's shape.
+
+/** Per-call options a family executor accepts beside its input. */
+export interface ModalityCallOptions {
+  /** Work-path scope dims for the operation (executionId / sessionId / …). */
+  readonly scope?: EventScope;
+  readonly signal?: AbortSignal;
+}
+
+export interface ImageModelAdapter {
+  readonly provider: string;
+  /** `kind: "image-model"`, plus `pricing.perImage` when the rate is known. */
+  readonly target: ExecutionTarget;
+  generate(input: ImageGenerateInput, signal?: AbortSignal): Promise<ImageGenerateResult>;
+  /** Provider error → typed {@link ExecuteErrorChannel}; the executor supplies a default. */
+  mapProviderError?(cause: unknown): ExecuteErrorChannel;
+}
+
+export interface ImageModelExecutorProtocol {
+  readonly family: "image-model";
+  readonly target: ExecutionTarget;
+  readonly ready: Promise<void>;
+  /** The `model:generate_image` command. */
+  generate(input: ImageGenerateInput, opts?: ModalityCallOptions): Promise<ImageGenerateResult>;
+}
+
+export interface EmbeddingModelAdapter {
+  readonly provider: string;
+  /** `kind: "embedding-model"`, plus `pricing.embeddingPerMTok` when known. */
+  readonly target: ExecutionTarget;
+  embed(input: EmbedInput, signal?: AbortSignal): Promise<EmbedResult>;
+  mapProviderError?(cause: unknown): ExecuteErrorChannel;
+}
+
+export interface EmbeddingModelExecutorProtocol {
+  readonly family: "embedding-model";
+  readonly target: ExecutionTarget;
+  readonly ready: Promise<void>;
+  /** The `model:embed` command. */
+  embed(input: EmbedInput, opts?: ModalityCallOptions): Promise<EmbedResult>;
+}
+
+/** Structural guards for the `images:` / `embeddings:` app slots (ADR 42). */
+export function isImageModelAdapter(v: unknown): v is ImageModelAdapter {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as ImageModelAdapter).generate === "function" &&
+    !("family" in v)
+  );
+}
+export function isEmbeddingModelAdapter(v: unknown): v is EmbeddingModelAdapter {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as EmbeddingModelAdapter).embed === "function" &&
+    !("family" in v)
+  );
 }
 
 // ============================================================================

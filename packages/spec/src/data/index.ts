@@ -56,6 +56,7 @@ export * from "./usage-cost.js";
 export * from "./compiler-diagnostics.js";
 export * from "./tool-handler.js";
 export * from "./connector.js";
+export * from "./modalities.js";
 export * from "./tool-result.js";
 export * from "./tool-output-bound.js";
 export * from "./validator.js";
