@@ -1,6 +1,6 @@
 {
   "name": "@agentick/connector",
-  "version": "1.0.0-next.177",
+  "version": "1.0.0-next.178",
   "description": "Connectors — bind an external event source (Telegram, iMessage, webhooks, queues) to an agent through the gateway's built-in connectors harness. Inbound events → session.send / app.runOnce on the op spine; agent output → platform-native delivery; tool confirmations → the elicitation channel.",
   "keywords": [
     "agent",

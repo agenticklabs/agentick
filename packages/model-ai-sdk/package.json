@@ -1,6 +1,6 @@
 {
   "name": "@agentick/model-ai-sdk",
-  "version": "1.0.0-next.177",
+  "version": "1.0.0-next.178",
   "description": "Vercel AI SDK bridge for Agentick v2 (ADR 52). aisdk(model, options?) wraps any ai-package LanguageModel as a LanguageModelAdapter.",
   "keywords": [
     "agent",

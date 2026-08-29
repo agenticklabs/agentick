@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox-lambda",
-  "version": "1.0.0-next.177",
+  "version": "1.0.0-next.178",
   "description": "AWS Lambda MicroVMs SandboxProvider — one Firecracker microVM per sandbox, an in-VM sandbox-agent serving the contract over HTTP+WS, exec streamed frame-by-frame, atomic editFile via applyEdits, domain-level egress via an in-VM proxy. The prod remote runtime (ADR 60).",
   "bin": {
     "agentick-sandbox-agent": "./src/agent/bin.ts"
