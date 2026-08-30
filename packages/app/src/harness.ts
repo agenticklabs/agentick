@@ -42,6 +42,7 @@ import {
   generateId,
 } from "@agentick/runtime";
 import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation";
+import { CredentialsHarness, inMemoryCredentialProvider } from "@agentick/credentials";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks";
 import type { TaskExecutor, TaskStore } from "@agentick/tasks";
 import type {
@@ -149,6 +150,8 @@ import type {
   ProtocolEvent,
   CompilerProtocol,
   IdentityScopedApp,
+  CredentialProvider,
+  CredentialsHarnessProtocol,
   IngressIdentity,
   RegisteredModel,
   RunOnceInput,
@@ -390,6 +393,21 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
   readonly images?: ImageModelAdapter | ImageModelExecutorProtocol;
   /** The `embedding-model` family slot — as `images`, reaching tools as `ctx.embeddings`. */
   readonly embeddings?: EmbeddingModelAdapter | EmbeddingModelExecutorProtocol;
+  /**
+   * Credential providers for this app (ADR 107) — one per namespace, each
+   * resolving what a principal acts WITH. Registered into the gateway's harness
+   * when this app is hosted by one, so several apps share a store; a standalone
+   * `createApp` gets its own.
+   */
+  readonly credentials?: readonly CredentialProvider[];
+  /**
+   * The hosting gateway's credentials harness, threaded down at construction so
+   * `credentials` above contributes to ONE registry rather than a second that
+   * would occlude it — namespaces resolve by proximity in the bridge tree, so
+   * two harnesses would hide, not collide. Set by the gateway; not an adopter
+   * option.
+   */
+  readonly inheritedCredentials?: CredentialsHarnessProtocol;
   /**
    * Optional override of the model-executor's self-described target. When
    * omitted, `modelExecutor.target` is used. Override at this level when a
@@ -960,6 +978,8 @@ export class AppHarness<P = unknown>
   /** ADR 105 family executors — `undefined` when the slot was not configured. */
   readonly images: ImageModelExecutorProtocol | undefined;
   readonly embeddings: EmbeddingModelExecutorProtocol | undefined;
+  /** ADR 107 — always present: the gateway's registry, or this app's own. */
+  readonly credentials: CredentialsHarnessProtocol;
   private readonly target: ExecutionTarget | undefined;
   /**
    * Adapter→executor builder threaded into every session (ADR 89 §2 ergonomic
@@ -1368,6 +1388,18 @@ export class AppHarness<P = unknown>
             : options.modelExecutor;
     // Resolve target: caller override > modelExecutor.target (undefined when
     // model-less and no explicit target).
+    // ADR 107 — one harness, two contribution points. Hosted: register into the
+    // gateway's. Standalone: build one, seeded with `ephemeral` so a deployment
+    // that configured nothing still has a live, honest registry.
+    this.credentials =
+      options.inheritedCredentials ??
+      new CredentialsHarness(`${appId}:credentials`, this.journal, this.bus, this.inbox, {
+        providers: [inMemoryCredentialProvider()],
+        interceptorParent: this,
+      });
+    for (const provider of options.credentials ?? []) {
+      void (this.credentials as CredentialsHarness).register(provider);
+    }
     this.target = options.target ?? this.modelExecutor?.target;
     // The modality slots resolve like `model:` — a bare adapter becomes an
     // executor on this app's substrate with the interceptor cascade live.

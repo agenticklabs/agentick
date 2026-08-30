@@ -26,6 +26,7 @@ import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { MetricReader } from "@opentelemetry/sdk-metrics";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { IngressIdentity } from "../wire/authorizer.js";
+import type { CredentialsHarnessProtocol } from "./credentials-harness.js";
 import type { IdentityScoped } from "./identity.js";
 import type { ModelFacts } from "../data/model-facts.js";
 import type { SessionStatus } from "./hook-bridges.js";
@@ -639,6 +640,12 @@ export interface AppHarnessProtocol<P = unknown> {
    * `AuthSource` is the door for that); from here on, correct stamping is the
    * framework's job.
    */
+  /**
+   * The built-in credentials harness (ADR 107) — the gateway's instance when
+   * this app is hosted by one, otherwise this app's own. Always present.
+   */
+  readonly credentials: CredentialsHarnessProtocol;
+
   as(identity: IngressIdentity): IdentityScopedApp<P>;
 
   /**

@@ -67,6 +67,7 @@
   "dependencies": {
     "@agentick/cluster": "workspace:*",
     "@agentick/completions": "workspace:*",
+    "@agentick/credentials": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/knobs": "workspace:*",
     "@agentick/loop-executor": "workspace:*",

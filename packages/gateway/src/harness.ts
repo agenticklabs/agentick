@@ -118,6 +118,7 @@ import {
 import { remoteTrace } from "./remote-trace.js";
 import { createWireExtensionRegistry } from "./wire-registry.js";
 import { ConnectorsHarness } from "@agentick/connector";
+import { CredentialsHarness, inMemoryCredentialProvider } from "@agentick/credentials";
 import { unconfiguredAuthorizer } from "./authorizers.js";
 import { createCommandsListHandler, createDynamicCommandResolver } from "./dynamic-commands.js";
 import {
@@ -308,6 +309,11 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions<unknown, "gate
    * when the gateway opens — and stop FIRST at `close()`.
    */
   readonly connectors?: import("@agentick/spec").ConnectorsSlot;
+  /**
+   * Credential providers (ADR 107) — one per namespace, each resolving what a
+   * principal acts WITH. Shared by every app this gateway hosts.
+   */
+  readonly credentials?: readonly import("@agentick/spec").CredentialProvider[];
 
   /**
    * Adopter-supplied wire extensions (ADR 46) installed on this
@@ -445,6 +451,8 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * the adopter handed a pre-built instance via the `connectors:` slot.
    */
   readonly connectors: import("@agentick/spec").Connectors;
+  /** ADR 107 — always present, seeded with the `ephemeral` in-memory provider. */
+  readonly credentials: CredentialsHarness;
   /** Set when THIS gateway constructed the harness — it then owns `close()`. */
   private readonly ownedConnectors: ConnectorsHarness | undefined;
 
@@ -645,6 +653,21 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // `normalized` setting through; do NOT zero the readers here.
     const normalized = normalizeTelemetry(options.telemetry);
     this.telemetryReady = this.initTelemetryExport(normalized);
+
+    // ADR 107 — always constructed, like the connectors harness: nothing asks
+    // whether credentials are installed, and an empty registry is a fine resting
+    // state. Seeded with `ephemeral` (in-memory, named for its lifetime, inert
+    // until adopter code writes to it).
+    this.credentials = new CredentialsHarness(
+      `${this.scopeId}:credentials`,
+      this.journal,
+      this.bus,
+      this.inbox,
+      {
+        providers: [inMemoryCredentialProvider(), ...(options.credentials ?? [])],
+        interceptorParent: this,
+      },
+    );
 
     this.cascadeExtensions = cascade;
 
@@ -1491,6 +1514,10 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       inbox: inbox as AppHarnessOptions<P>["inbox"],
       journal: journal as AppHarnessOptions<P>["journal"],
       ...(inheritedTools.length > 0 ? { inheritedTools } : {}),
+      // One harness, two contribution points (ADR 107 §1): the app registers its
+      // own providers into THIS instance instead of constructing a second that
+      // would occlude it.
+      inheritedCredentials: this.credentials,
       // ADR 102 — the app inherits the gateway's tree, resolver AND registry
       // together, so a session lands on exactly the node a subscriber of the
       // same principal attaches to. An app that names its own `sessionNode`

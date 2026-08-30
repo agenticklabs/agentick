@@ -28,6 +28,7 @@
 
 import type {
   Connectors,
+  CredentialsHarnessProtocol,
   AppHarnessProtocol,
   ConnectionInfo,
   DestroySessionInput,
@@ -58,6 +59,7 @@ export interface FakeGatewayHarnessOptions extends Partial<Omit<GatewayHarnessPr
   readonly apps?: readonly AppHarnessProtocol[];
   /** Backs the default `attachScopeNode` lease. Omit and the seam throws. */
   readonly bus?: EventBus;
+  readonly credentials?: CredentialsHarnessProtocol;
 }
 
 const EMPTY_EVENTS: AsyncIterable<ProtocolEvent> = {
@@ -75,6 +77,26 @@ export function emptyConnectors(): Connectors {
     start: () => Promise.resolve(),
     stop: () => Promise.resolve(),
   };
+}
+
+/**
+ * Inert `gateway.credentials` — an empty registry whose reads refuse, matching
+ * the real harness: an unregistered namespace is an error, never `undefined`.
+ */
+export function emptyCredentials(): CredentialsHarnessProtocol {
+  const unknown = (namespace: string): never => {
+    throw new Error(`credentials: no provider registered for namespace "${namespace}"`);
+  };
+  return {
+    id: "fake:credentials",
+    address: "credentials:fake",
+    get: (namespace: string) => Promise.resolve(unknown(namespace)),
+    set: (namespace: string) => Promise.resolve(unknown(namespace)),
+    delete: (namespace: string) => Promise.resolve(unknown(namespace)),
+    has: (namespace: string) => Promise.resolve(unknown(namespace)),
+    keys: (namespace: string) => Promise.resolve(unknown(namespace)),
+    subscribe: () => () => {},
+  } as unknown as CredentialsHarnessProtocol;
 }
 
 export function fakeGatewayHarness(
@@ -95,6 +117,7 @@ export function fakeGatewayHarness(
     app,
     apps: () => hosted,
     connectors: options.connectors ?? emptyConnectors(),
+    credentials: options.credentials ?? emptyCredentials(),
     as:
       options.as ??
       ((identity: IngressIdentity): IdentityScopedGateway => ({

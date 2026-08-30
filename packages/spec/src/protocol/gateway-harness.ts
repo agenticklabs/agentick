@@ -38,6 +38,7 @@ import type {
 import type { IngressIdentity } from "../wire/authorizer.js";
 import type { IdentityScoped } from "./identity.js";
 import type { Connectors } from "./connectors-harness.js";
+import type { CredentialsHarnessProtocol } from "./credentials-harness.js";
 import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
 import type { CursorPage, PageRequest } from "./paging.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
@@ -257,6 +258,14 @@ export interface GatewayHarnessProtocol {
    * via `createGateway({ connectors: [...] })` or `connectors.register(spec)`.
    */
   readonly connectors: Connectors;
+
+  /**
+   * The built-in credentials harness — what identities act WITH, the twin of
+   * the auth seam's who-is-acting (ADR 107). Always present, even with nothing
+   * configured, seeded with an in-memory provider under `ephemeral`. Populated
+   * via `credentials: [...]` or `credentials.register(provider)`.
+   */
+  readonly credentials: CredentialsHarnessProtocol;
 
   /** Enumerate all registered Apps. */
   apps(): readonly AppHarnessProtocol[];

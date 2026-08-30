@@ -54,6 +54,7 @@
     "@agentick/app": "workspace:*",
     "@agentick/cluster": "workspace:*",
     "@agentick/connector": "workspace:*",
+    "@agentick/credentials": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/utils": "workspace:*",
