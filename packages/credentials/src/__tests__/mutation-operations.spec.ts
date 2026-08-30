@@ -28,8 +28,8 @@ import type { ProtocolEvent } from "@agentick/spec";
 import { stubStoreCtx } from "@agentick/store";
 
 import { CredentialsHarness } from "../harness.js";
-import { inMemoryCredentialsStore } from "../stores/in-memory.js";
-import type { CredentialsStore } from "../store.js";
+import { inMemoryCredentialProvider } from "../providers/in-memory.js";
+import type { CredentialProvider } from "../provider.js";
 
 // ============================================================================
 // Fixtures
@@ -48,22 +48,33 @@ const SECRET_FRAGMENT = "Zq7Wx4TbNv";
 
 interface Rig {
   readonly harness: CredentialsHarness;
-  readonly store: CredentialsStore;
+  readonly providers: ReadonlyMap<string, CredentialProvider>;
   readonly journal: MemoryJournal;
   readonly events: ProtocolEvent[];
   readonly stop: () => Promise<void>;
 }
 
-async function rig(store: CredentialsStore = inMemoryCredentialsStore()): Promise<Rig> {
+/**
+ * Namespaces this spec exercises. Under ADR 107 a provider serves exactly one,
+ * so the rig registers one per namespace instead of a single store demuxing
+ * them — which is also what makes the sibling-namespace veto case meaningful.
+ */
+const NAMESPACES = ["oauth", "locked", "open", "api", "stripe"] as const;
+
+async function rig(overrides: readonly CredentialProvider[] = []): Promise<Rig> {
+  const overridden = new Set(overrides.map((p) => p.namespace));
+  const providerList = [
+    ...overrides,
+    ...NAMESPACES.filter((ns) => !overridden.has(ns)).map((ns) =>
+      inMemoryCredentialProvider({ namespace: ns }),
+    ),
+  ];
+  const providers = new Map(providerList.map((p) => [p.namespace, p] as const));
   const bus = new LocalEventBus();
   const journal = new MemoryJournal({ capacity: 4096 });
-  const harness = new CredentialsHarness(
-    "app-1:credentials",
-    store,
-    journal,
-    bus,
-    new LocalInbox(),
-  );
+  const harness = new CredentialsHarness("app-1:credentials", journal, bus, new LocalInbox(), {
+    providers: providerList,
+  });
   await harness.ready;
 
   const events: ProtocolEvent[] = [];
@@ -77,7 +88,7 @@ async function rig(store: CredentialsStore = inMemoryCredentialsStore()): Promis
 
   return {
     harness,
-    store,
+    providers,
     journal,
     events,
     stop: async () => {
@@ -96,19 +107,22 @@ const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
  * through a `Proxy` that forwards everything except the one overridden member,
  * with `this` still bound to the real instance.
  */
-function withSet(base: CredentialsStore, set: CredentialsStore["set"]): CredentialsStore {
-  return new Proxy(base, {
-    get: (target, prop, receiver) => {
-      if (prop === "set") return set;
-      const value = Reflect.get(target, prop, receiver) as unknown;
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
+function withSet(
+  base: CredentialProvider,
+  set: NonNullable<CredentialProvider["set"]>,
+): CredentialProvider {
+  // A wrapper, not a Proxy: `defineCredentialProvider` freezes its result, and
+  // a proxy cannot report a different value for a frozen own property.
+  return { ...base, set };
 }
 
 /** Read a credential directly off the store, bypassing the harness surface. */
-function read<T>(store: CredentialsStore, ns: string, key: string): Promise<T | undefined> {
-  return store.get<T>(ns, key, stubStoreCtx());
+function read<T>(
+  providers: ReadonlyMap<string, CredentialProvider>,
+  ns: string,
+  key: string,
+): Promise<T | undefined> {
+  return providers.get(ns)!.get<T>(key, stubStoreCtx());
 }
 
 function opsNamed(events: readonly ProtocolEvent[], name: string): readonly ProtocolEvent[] {
@@ -149,7 +163,7 @@ describe("a credential write runs as credentials:command:set", () => {
       expect(e.scope.credentialKey).toBe("github");
     }
     expect(ops.find((e) => e.phase === "terminal")?.outcome).toBe("succeeded");
-    expect(await read(r.store, "oauth", "github")).toBe(SECRET);
+    expect(await read(r.providers, "oauth", "github")).toBe(SECRET);
   });
 
   it("journals BOTH requested and terminal (the fact of the write is audited)", async () => {
@@ -188,13 +202,13 @@ describe("a credential write runs as credentials:command:set", () => {
 
   it("threads the ENRICHED store ctx — the write's own opId reaches the adapter", async () => {
     const seen: Array<Record<string, unknown>> = [];
-    const base = inMemoryCredentialsStore();
-    const r = (active = await rig(
-      withSet(base, async (ns, key, value, ctx) => {
+    const base = inMemoryCredentialProvider({ namespace: "oauth" });
+    const r = (active = await rig([
+      withSet(base, async (key, value, ctx) => {
         seen.push({ ...(ctx as Record<string, unknown>) });
-        return base.set(ns, key, value, ctx);
+        return base.set!(key, value, ctx);
       }),
-    ));
+    ]));
 
     await r.harness.set("oauth", "github", SECRET);
 
@@ -260,16 +274,16 @@ describe("the redaction law — the secret never enters the audit trail", () => 
 
 describe("a guard veto blocks a credential write", () => {
   it("a vetoed set never reaches the store", async () => {
-    const base = inMemoryCredentialsStore();
-    const setSpy = vi.fn(base.set.bind(base));
-    const r = (active = await rig(withSet(base, setSpy)));
+    const base = inMemoryCredentialProvider({ namespace: "oauth" });
+    const setSpy = vi.fn(base.set!.bind(base));
+    const r = (active = await rig([withSet(base, setSpy)]));
     r.harness.guard(() => ({ kind: "veto", reason: "read-only-deployment" }));
 
     await expect(r.harness.set("oauth", "github", SECRET)).rejects.toBeTruthy();
     await settle();
 
     expect(setSpy).not.toHaveBeenCalled();
-    expect(await read(r.store, "oauth", "github")).toBeUndefined();
+    expect(await read(r.providers, "oauth", "github")).toBeUndefined();
     const terminal = opsNamed(r.events, SET_OP).find((e) => e.phase === "terminal");
     expect(terminal?.outcome).toBe("vetoed");
   });
@@ -282,7 +296,7 @@ describe("a guard veto blocks a credential write", () => {
     await expect(r.harness.delete("oauth", "github")).rejects.toBeTruthy();
     await settle();
 
-    expect(await read(r.store, "oauth", "github")).toBe(SECRET);
+    expect(await read(r.providers, "oauth", "github")).toBe(SECRET);
     const terminal = opsNamed(r.events, DELETE_OP).find((e) => e.phase === "terminal");
     expect(terminal?.outcome).toBe("vetoed");
   });
@@ -296,8 +310,8 @@ describe("a guard veto blocks a credential write", () => {
     await expect(r.harness.set("locked", "k", SECRET)).rejects.toBeTruthy();
     await r.harness.set("open", "k", SECRET);
 
-    expect(await read(r.store, "locked", "k")).toBeUndefined();
-    expect(await read(r.store, "open", "k")).toBe(SECRET);
+    expect(await read(r.providers, "locked", "k")).toBeUndefined();
+    expect(await read(r.providers, "open", "k")).toBe(SECRET);
   });
 
   it("a vetoed write publishes no change notification", async () => {

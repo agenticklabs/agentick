@@ -22,19 +22,20 @@ export {
 } from "./fake-credentials.js";
 
 export {
-  stubCredentialsStore,
-  unavailableCredentialsStore,
-  type StubCredentialsStoreOptions,
-} from "./stub-credentials-store.js";
+  stubCredentialProvider,
+  unavailableCredentialProvider,
+  type StubCredentialProviderOptions,
+  type UnavailableCredentialProviderOptions,
+} from "./stub-credential-provider.js";
 
 // Re-export the in-memory store as `fakeCredentialsStore` for adopters
 // who want a working-impl store double without the full harness bundle.
-export { inMemoryCredentialsStore as fakeCredentialsStore } from "../stores/in-memory.js";
+export { inMemoryCredentialProvider as fakeCredentialProvider } from "../providers/in-memory.js";
 
 // ────────── Conformance suite (imports vitest — testing-only) ──────────
 export {
-  runCredentialsStoreConformance,
-  type CredentialsStoreConformanceOptions,
+  runCredentialProviderConformance,
+  type CredentialProviderConformanceOptions,
 } from "../conformance.js";
 export {
   runCredentialsHarnessConformance,

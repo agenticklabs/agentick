@@ -8,9 +8,9 @@ import { runCredentialsHarnessConformance } from "../harness-conformance.js";
 import { fakeCredentialsHarness } from "../testing/index.js";
 
 runCredentialsHarnessConformance({
-  label: "fakeCredentialsHarness (in-memory adapter)",
+  label: "fakeCredentialsHarness (ephemeral in-memory provider)",
   factory: async () => {
     const bundle = fakeCredentialsHarness();
-    return { harness: bundle.harness, store: bundle.store };
+    return { harness: bundle.harness, provider: bundle.providers[0]! };
   },
 });

@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import type { CredentialsHarnessProtocol } from "@agentick/spec";
 import { stubStoreCtx } from "@agentick/store";
 
-import type { CredentialsStore } from "./store.js";
+import type { CredentialProvider } from "./provider.js";
 
 export interface CredentialsHarnessConformanceOptions {
   readonly label: string;
@@ -28,31 +28,33 @@ export interface CredentialsHarnessConformanceOptions {
    */
   readonly factory: () => Promise<{
     readonly harness: CredentialsHarnessProtocol;
-    readonly store: CredentialsStore;
+    readonly provider: CredentialProvider;
   }>;
 }
 
 export function runCredentialsHarnessConformance(opts: CredentialsHarnessConformanceOptions): void {
   describe(`CredentialsHarness conformance — ${opts.label}`, () => {
     it("fans out internal set/delete to subscribers", async () => {
-      const { harness } = await opts.factory();
+      const { harness, provider } = await opts.factory();
+      const ns = provider.namespace;
       const events: Array<{ namespace: string; key: string }> = [];
       const off = harness.subscribe((ev) => {
         events.push({ namespace: ev.namespace, key: ev.key });
       });
-      await harness.set("mcp", "srv-a", { access_token: "t" });
-      await harness.delete("mcp", "srv-a");
+      await harness.set(ns, "srv-a", { access_token: "t" });
+      await harness.delete(ns, "srv-a");
       off();
       expect(events).toEqual([
-        { namespace: "mcp", key: "srv-a" },
-        { namespace: "mcp", key: "srv-a" },
+        { namespace: ns, key: "srv-a" },
+        { namespace: ns, key: "srv-a" },
       ]);
       await harness.close();
     });
 
     it("forwards external store changes to subscribers (when adapter supports onChange)", async () => {
-      const { harness, store } = await opts.factory();
-      if (!store.onChange) {
+      const { harness, provider } = await opts.factory();
+      const ns = provider.namespace;
+      if (!provider.onChange) {
         // Stores without native reactivity can't surface external
         // changes — the harness only sees writes routed through itself.
         // Skip rather than fail.
@@ -65,15 +67,16 @@ export function runCredentialsHarnessConformance(opts: CredentialsHarnessConform
       });
       // Write through the adapter directly — simulates a sibling
       // process editing the keychain.
-      await store.set("mcp", "srv-b", { access_token: "external" }, stubStoreCtx());
+      await provider.set!("srv-b", { access_token: "external" }, stubStoreCtx());
       off();
-      expect(events).toEqual([{ namespace: "mcp", key: "srv-b" }]);
+      expect(events).toEqual([{ namespace: ns, key: "srv-b" }]);
       await harness.close();
     });
 
     it("does NOT double-publish when adapter has native onChange", async () => {
-      const { harness, store } = await opts.factory();
-      if (!store.onChange) {
+      const { harness, provider } = await opts.factory();
+      const ns = provider.namespace;
+      if (!provider.onChange) {
         await harness.close();
         return;
       }
@@ -83,17 +86,18 @@ export function runCredentialsHarnessConformance(opts: CredentialsHarnessConform
       });
       // Internal write routes through both the harness's set AND the
       // adapter's onChange — but should produce exactly one event.
-      await harness.set("mcp", "srv-c", "v");
+      await harness.set(ns, "srv-c", "v");
       off();
       expect(events).toHaveLength(1);
       await harness.close();
     });
 
     it("publishes nothing on a no-op delete (key was absent)", async () => {
-      const { harness } = await opts.factory();
+      const { harness, provider } = await opts.factory();
+      const ns = provider.namespace;
       const events: Array<unknown> = [];
       const off = harness.subscribe((ev) => events.push(ev));
-      const removed = await harness.delete("mcp", "never-set");
+      const removed = await harness.delete(ns, "never-set");
       off();
       expect(removed).toBe(false);
       expect(events).toEqual([]);
@@ -101,43 +105,46 @@ export function runCredentialsHarnessConformance(opts: CredentialsHarnessConform
     });
 
     it("isolates listener errors — one buggy listener doesn't break siblings", async () => {
-      const { harness } = await opts.factory();
+      const { harness, provider } = await opts.factory();
+      const ns = provider.namespace;
       const good: Array<{ namespace: string; key: string }> = [];
       harness.subscribe(() => {
         throw new Error("intentional");
       });
       harness.subscribe((ev) => good.push({ namespace: ev.namespace, key: ev.key }));
-      await harness.set("ns", "k", "v");
-      expect(good).toEqual([{ namespace: "ns", key: "k" }]);
+      await harness.set(ns, "k", "v");
+      expect(good).toEqual([{ namespace: ns, key: "k" }]);
       await harness.close();
     });
 
     it("subscribe() returns Unsubscribe that stops future events", async () => {
-      const { harness } = await opts.factory();
+      const { harness, provider } = await opts.factory();
+      const ns = provider.namespace;
       const events: Array<unknown> = [];
       const off = harness.subscribe((ev) => events.push(ev));
-      await harness.set("ns", "k1", "v");
+      await harness.set(ns, "k1", "v");
       off();
-      await harness.set("ns", "k2", "v");
+      await harness.set(ns, "k2", "v");
       expect(events).toHaveLength(1);
       await harness.close();
     });
 
     it("close() drops subscribers and stops fan-out", async () => {
-      const { harness, store } = await opts.factory();
+      const { harness, provider } = await opts.factory();
+      const ns = provider.namespace;
       const events: Array<unknown> = [];
       harness.subscribe((ev) => events.push(ev));
       await harness.close();
       // Drive a post-close write directly against the adapter — if
       // the harness failed to unsubscribe its forwarder OR failed to
       // clear its notifier, the listener would fire here.
-      if (store.onChange) {
-        await store.set("ns", "post-close", "v", stubStoreCtx());
+      if (provider.onChange) {
+        await provider.set!("post-close", "v", stubStoreCtx());
       }
       // ...and through the harness itself, for impls whose set/delete
       // path publishes independently of the adapter's onChange.
       try {
-        await harness.set("ns", "post-close-harness", "v");
+        await harness.set(ns, "post-close-harness", "v");
       } catch {
         // Adopter impls that throw on post-close writes (#281b.2 candidate)
         // are conformant — what matters is that NO event surfaced.

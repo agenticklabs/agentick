@@ -1,71 +1,82 @@
 /**
- * `@agentick/credentials` — `CredentialsHarness` substrate +
- * pluggable backend adapters.
+ * `@agentick/credentials` — one harness, many providers (ADR 107).
  *
- * v2's unified credential storage primitive. Replaces v1's
- * `@agentick/secrets` (string-only, flat namespace, non-reactive) and
- * supersedes the per-harness `CredentialsStore<T>` shims that
- * accumulated before the substrate landed.
+ * The framework's answer to "what may this principal act with", the twin of the
+ * auth seam's "who is acting". `AuthSource` establishes an identity and the
+ * journal records it; a credential provider resolves the authority that identity
+ * acts with, and the journal records only that a resolution happened.
  *
- * Architecture:
+ * ## Shape
  *
- *   - `CredentialsStore` (interface) — adopter-pluggable backend
- *     adapter. Same shape as `SandboxRuntime` or `TasksExecutor`:
- *     the harness owns substrate concerns, the store owns
- *     persistence.
- *   - Reference adapters bundled here: in-memory, env. Additional
- *     first-party adapters (keychain, libsecret, encrypted-file, KV)
- *     ship in follow-up slices. Adopter-written adapters
- *     (1Password, HashiCorp Vault, AWS Secrets Manager) implement
- *     the interface directly.
- *   - `CredentialsHarness` (slice 281b) — the substrate harness
- *     itself; this slice ships the interfaces + adapters only.
+ * - {@link CredentialProvider} — one namespace's source. `get` is a RESOLUTION
+ *   verb: read from a store, exchange a grant, or mint on demand. Everything
+ *   past `get` is optional, because a minter has nothing to `set` and no
+ *   meaningful `keys`.
+ * - {@link CredentialsHarness} — a registry of providers keyed by namespace,
+ *   with `register` / `unregister` / `start` / `stop`, the same shape the
+ *   connectors harness has. Routing is exact: one owner per namespace, and an
+ *   unregistered namespace is an error rather than an empty result.
+ * - {@link defineCredentialProvider} — the authoring door, validating at
+ *   definition time so a malformed provider fails where it is written.
  *
- * Invariants:
+ * The harness always exists, with one provider pre-registered: an in-memory
+ * store under {@link EPHEMERAL_NAMESPACE}. It is named for its lifetime because
+ * a name promising persistence would invite the failure this package exists to
+ * prevent — a credential silently gone after a restart. Nothing in the framework
+ * writes to it.
  *
- *   - **Server-resident always.** Credentials never cross the wire
- *     (see [[credentials-never-cross-wire]] memory and #279). The
- *     client surface for credential operations exposes verbs
- *     (`reauthenticate()`, `disconnect()`) and status, never tokens.
- *   - **Namespace-scoped.** Convention: `<harness>:<discriminator>`
- *     (`mcp:server-foo`, `gateway:bearer`, `sandbox:runtime-bar`).
- *     Non-credential secrets squat under `secrets:*` if needed —
- *     the store sees only opaque `(namespace, key, T)` triples.
- *   - **Enumeration foundational.** Every backend implements
- *     `keys(namespace)` so adopter UIs can render the topology
- *     without prior knowledge (see [[enumeration-is-foundational]]
- *     memory).
+ * ## Invariants
  *
- * @see #281 — substrate parent ticket
- * @see docs/proposals/v2/blueprint/27-modular-built-ins.md — ADR 27
- *      modularity pattern
+ * - **Server-resident always.** Credentials never cross the wire. A client
+ *   surface exposes verbs (`reauthenticate()`, `disconnect()`) and status, never
+ *   tokens.
+ * - **Never on a tool handler's `ctx`.** The slot lives on `HookBridges`, so
+ *   host and tree code reach it and tools do not. The actor choosing which tool
+ *   to call is a model following untrusted input; a `ctx.credentials` would be a
+ *   credential-exfiltration verb. Host code binds ports that hold authority, and
+ *   tools call those ports.
+ * - **No inbox protocol.** An inbox verb would be a network-reachable secret
+ *   read. The refusal is deliberate.
+ * - **Coordinates, never values.** Writes journal `credentialNamespace` /
+ *   `credentialKey`; change events carry the same. An audit trail that proves
+ *   which credential was read for which operation, without the secret touching
+ *   the journal.
+ *
+ * @see docs/proposals/v2/blueprint/107-credentials-as-builtin.md
  */
 
-// Side-effect import — registers the `credentials` slot on `HookBridges`
-// via TypeScript module augmentation. Per ADR 27, every harness
-// package owns its own slot declaration.
+// Side-effect import — registers the `credentials` slot on `HookBridges` via
+// module augmentation. Per ADR 27, every harness package owns its own slot.
 import "./augment.js";
 
-export type { CredentialsStore } from "./store.js";
+export type { CredentialProvider, CredentialProviderSpec } from "./provider.js";
+export { defineCredentialProvider } from "./define-provider.js";
 
 export {
   CredentialsHarness,
   type CredentialsHarnessOptions,
   type CredentialsMutationInput,
+  type CredentialsRegistryInput,
 } from "./harness.js";
 
-export { withCredentials, type WithCredentialsOptions } from "./extension.js";
+export {
+  EPHEMERAL_NAMESPACE,
+  envCredentialProvider,
+  inMemoryCredentialProvider,
+  type EnvCredentialProviderOptions,
+  type InMemoryCredentialProviderOptions,
+} from "./providers/index.js";
+
+export {
+  CredentialOperationUnsupported,
+  DuplicateCredentialNamespace,
+  UnknownCredentialNamespace,
+} from "./errors.js";
 
 export type { CredentialsChangeEvent, CredentialsHarnessProtocol } from "@agentick/spec";
 
-export {
-  inMemoryCredentialsStore,
-  envCredentialsStore,
-  type EnvCredentialsStoreOptions,
-} from "./stores/index.js";
-
-// Error types re-exported from @agentick/spec for convenience — adopters
-// who only depend on @agentick/credentials get them without a second import.
+// Error types re-exported from @agentick/spec for convenience — adopters who
+// depend only on @agentick/credentials get them without a second import.
 export {
   CredentialsError,
   type CredentialsErrorChannel,

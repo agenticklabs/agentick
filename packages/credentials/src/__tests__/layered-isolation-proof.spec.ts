@@ -1,108 +1,111 @@
 /**
- * ADR 48 proof — "per-scope harness instance over a shared backing
- * resource, isolated by namespace."
- *
- * Validates the load-bearing claim of the layered-isolation model
- * using pieces that already exist (a pluggable `CredentialsStore` +
- * `CredentialsHarness`), and pins the ONE gap the model predicted:
- * isolation is currently caller-supplied per call, not bound to the
- * harness at construction.
+ * ADR 48 / ADR 107 — "per-scope harness instance over a shared backing
+ * resource, isolated by namespace", re-proven against the provider registry.
  *
  * Proven here:
- *   1. RESOURCE SHARING — N per-scope harnesses share ONE store
- *      instance (the "one Pg pool, many scoped views" shape). No
- *      per-scope connection.
- *   2. NAMESPACE ISOLATION — distinct namespaces do not read each
- *      other's values, over the shared store.
  *
- * Gap surfaced (see the final test): `get/set(namespace, key)` takes
- * the namespace as a per-CALL argument. So today isolation is
- * "remember to pass the right namespace" — caller discipline, the same
- * runtime-supplied shape ADR 47 rejected for `notify`. To be
- * STRUCTURALLY per-scope (ADR 48), the harness must bind its scope
- * (namespace prefix) at construction so a scoped view cannot address
- * another scope's namespace. That binding does not exist yet — it is
- * the concrete next step the model calls for.
- *
- * @see docs/proposals/v2/blueprint/48-layered-isolation.md
+ *   1. RESOURCE SHARING — N per-scope harnesses share ONE provider instance
+ *      (the "one Pg pool, many scoped views" shape). No per-scope connection.
+ *   2. ROUTING — a namespace has exactly one provider, an unregistered one is a
+ *      loud error rather than an empty read, and a second claim on a namespace
+ *      is refused instead of silently shadowing the first.
+ *   3. POLICY ON READ — the gap the previous version of this file documented as
+ *      unfixed is now closed. A harness still routes any namespace it is asked
+ *      for, but the PROVIDER receives `StoreCtx` (which extends
+ *      `RuntimeContext`), so it sees the acting principal and can refuse. A
+ *      namespace is a naming scheme; the principal check is the boundary.
  */
 
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { stubStoreCtx } from "@agentick/store";
-import { CredentialsHarness } from "../harness.js";
-import { inMemoryCredentialsStore } from "../stores/in-memory.js";
+import type { StoreCtx } from "@agentick/spec";
 
-/** Construct a per-scope harness bound to a shared store instance. */
-function scopedHarness(scopeId: string, store: ReturnType<typeof inMemoryCredentialsStore>) {
+import { CredentialsHarness } from "../harness.js";
+import { defineCredentialProvider } from "../define-provider.js";
+import { inMemoryCredentialProvider } from "../providers/in-memory.js";
+import { DuplicateCredentialNamespace, UnknownCredentialNamespace } from "../errors.js";
+import type { CredentialProvider } from "../provider.js";
+
+/** A per-scope harness over caller-supplied providers. */
+function scopedHarness(scopeId: string, ...providers: CredentialProvider[]): CredentialsHarness {
   return new CredentialsHarness(
     scopeId,
-    store,
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),
+    { providers },
   );
 }
 
-describe("ADR 48 — per-scope harness over shared resource", () => {
-  it("resource sharing: N scoped harnesses over ONE store; writes land in the shared backing", async () => {
+describe("layered isolation over a shared backing resource", () => {
+  it("N per-scope harnesses share ONE provider instance", async () => {
     // The shared, expensive resource — one instance (imagine a Pg pool).
-    const store = inMemoryCredentialsStore();
+    const shared = inMemoryCredentialProvider({ namespace: "tokens" });
 
-    // Two cheap per-scope harness instances over it.
-    const userA = scopedHarness("cred:user-a", store);
-    const userB = scopedHarness("cred:user-b", store);
+    const userA = scopedHarness("cred:user-a", shared);
+    const userB = scopedHarness("cred:user-b", shared);
 
-    await userA.set("user-a", "linear.token", "tok-A");
-    await userB.set("user-b", "linear.token", "tok-B");
+    await userA.set("tokens", "user-a.linear", "tok-A");
+    await userB.set("tokens", "user-b.linear", "tok-B");
 
-    // Both writes are in the SAME backing store (shared resource) —
-    // readable directly off the store, no second connection.
-    expect(await store.get("user-a", "linear.token", stubStoreCtx())).toBe("tok-A");
-    expect(await store.get("user-b", "linear.token", stubStoreCtx())).toBe("tok-B");
-
-    await userA.close();
-    await userB.close();
-  });
-
-  it("namespace isolation: distinct namespaces don't observe each other over the shared store", async () => {
-    const store = inMemoryCredentialsStore();
-    const userA = scopedHarness("cred:user-a", store);
-    const userB = scopedHarness("cred:user-b", store);
-
-    await userA.set("user-a", "linear.token", "tok-A");
-
-    // User B, reading its OWN namespace, does not see user A's secret.
-    expect(await userB.get("user-b", "linear.token")).toBeUndefined();
-    // The mechanism (namespace = isolation) holds over one shared store.
-    expect(await userA.get("user-a", "linear.token")).toBe("tok-A");
+    // Both writes landed in the same backing instance — readable through either
+    // harness, and directly off the provider, with no second connection.
+    expect(await userB.get("tokens", "user-a.linear")).toBe("tok-A");
+    expect(await shared.get("user-b.linear", stubStoreCtx())).toBe("tok-B");
 
     await userA.close();
     await userB.close();
   });
 
-  it("GAP (ADR 48): isolation is caller-supplied per-call, not construction-bound", async () => {
-    // This test documents the chafe, not a desired property. Today a
-    // harness will happily read ANY namespace it's asked for — the
-    // scope is not bound to the instance. userB can read userA's
-    // secret simply by passing userA's namespace.
-    const store = inMemoryCredentialsStore();
-    const userA = scopedHarness("cred:user-a", store);
-    const userB = scopedHarness("cred:user-b", store);
+  it("routing is exact: an unregistered namespace is an error, not an empty read", async () => {
+    const harness = scopedHarness("cred:routing", inMemoryCredentialProvider({ namespace: "a" }));
 
-    await userA.set("user-a", "linear.token", "tok-A");
+    await expect(harness.get("nope", "k")).rejects.toBeInstanceOf(UnknownCredentialNamespace);
+    expect(await harness.get("a", "k")).toBeUndefined();
 
-    // userB reaches into userA's namespace — nothing structural stops
-    // it, because the namespace is a per-call argument.
-    expect(await userB.get("user-a", "linear.token")).toBe("tok-A");
+    await harness.close();
+  });
 
-    // ADR 48 target (NOT yet implemented): a scoped harness binds its
-    // namespace prefix at construction, so `userB.get("linear.token")`
-    // can only ever resolve within userB's scope — cross-scope reads
-    // become unrepresentable, not merely discouraged. That construction
-    // binding is the next concrete step.
+  it("a namespace has one owner — a second claim is refused, never shadowed", async () => {
+    const harness = scopedHarness("cred:dup", inMemoryCredentialProvider({ namespace: "a" }));
 
-    await userA.close();
-    await userB.close();
+    await expect(harness.register(inMemoryCredentialProvider({ namespace: "a" }))).rejects.toThrow(
+      DuplicateCredentialNamespace,
+    );
+
+    await harness.close();
+  });
+});
+
+describe("policy on read — the provider sees who is asking", () => {
+  it("a provider can serve one principal and refuse another over the same namespace", async () => {
+    // What the previous version of this file recorded as an unfixed gap: a
+    // harness routes any namespace it is handed. It still does — but the
+    // provider is handed the acting principal, so the refusal has a home.
+    const owned = defineCredentialProvider({
+      namespace: "tokens",
+      backend: "principal-scoped",
+      get: <T>(key: string, ctx: StoreCtx): Promise<T | undefined> => {
+        const [owner] = key.split(":");
+        if (owner !== ctx.principal) return Promise.resolve(undefined);
+        return Promise.resolve(`secret-for-${owner}` as unknown as T);
+      },
+    });
+
+    const asA = new CredentialsHarness(
+      "cred:a",
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      { providers: [owned], principal: "user-a" },
+    );
+
+    expect(await asA.get("tokens", "user-a:linear")).toBe("secret-for-user-a");
+    // Reaching for another principal's key over the same namespace resolves
+    // nothing — the provider, not the namespace, is the boundary.
+    expect(await asA.get("tokens", "user-b:linear")).toBeUndefined();
+
+    await asA.close();
   });
 });

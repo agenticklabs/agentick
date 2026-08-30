@@ -1,165 +1,123 @@
 /**
- * Conformance suite for {@link CredentialsStore} implementations.
+ * Conformance suite for {@link CredentialProvider} implementations (ADR 107).
  *
- * Every bundled adapter and adopter-written adapter (1Password, Vault,
- * AWS Secrets Manager, etc.) MUST pass this suite. Behaviors pinned
- * here are the substrate contract the harness layer depends on —
- * adapters that diverge break the harness in subtle ways
- * (lost change notifications, namespace bleed, stale `keys()`).
+ * Every bundled provider and every adopter-written one (1Password, Vault, AWS
+ * Secrets Manager, a token minter) should pass this.
  *
- * Usage from an adapter package's test file:
+ * Runs per PROVIDER rather than per store, because a namespace now has exactly
+ * one owner and a provider never sees another's keys. Namespace isolation is a
+ * property of the harness's routing, tested there — not of a provider that only
+ * ever serves one.
  *
- * ```ts
- * import { runCredentialsStoreConformance } from "@agentick/credentials/testing";
- * import { myCustomCredentialsStore } from "../src/index.js";
- *
- * runCredentialsStoreConformance({
- *   label: "my-custom-store",
- *   factory: () => myCustomCredentialsStore({  ... }),
- * });
- * ```
- *
- * Backends that don't support a behavior (e.g. env-store is read-only
- * by default, doesn't fire change notifications) signal via the
- * `capabilities` option — the suite skips the corresponding cases
- * with a clear reason rather than asserting failure.
+ * Capabilities are declared rather than sniffed: a minter legitimately has no
+ * `set` and no `keys`, and asserting round-trips against one would fail a
+ * correct implementation. Declare what the provider supports, and the suite
+ * checks the OMISSIONS are honest too — an absent verb must be genuinely absent,
+ * because the harness reports one as unsupported and a present one as success.
  */
 
 import { expect, it } from "vitest";
-
 import { stubStoreCtx } from "@agentick/store";
-import { runStoreConformance } from "@agentick/store/testing";
 
-import type { CredentialsStore } from "./store.js";
+import type { CredentialProvider } from "./provider.js";
 
-// The credentials port now threads a `StoreCtx` as the final arg of every DATA
-// method (Run B). The bundled reference adapters ignore it; conformance passes
-// the canned `stubStoreCtx()` per call.
 const ctx = stubStoreCtx();
 
-export interface CredentialsStoreConformanceOptions {
-  /** Display label for the suite (`describe` block heading). */
+export interface CredentialProviderConformanceOptions {
+  /** Display label, prefixed onto each case. */
   readonly label: string;
-  /** Fresh store per test — must be isolated. */
-  readonly factory: () => CredentialsStore | Promise<CredentialsStore>;
-  /** Capabilities the suite should skip if unsupported. */
+  /** Builds a FRESH provider per case. */
+  readonly factory: () => CredentialProvider | Promise<CredentialProvider>;
   readonly capabilities?: {
-    /** Set/delete supported (defaults to true). Read-only stores set this false. */
+    /** `set` / `delete` supported. Defaults to true. */
     readonly writable?: boolean;
-    /** External-change notification supported (defaults to true if `onChange` exists). */
+    /** `keys` supported. Defaults to `writable`. */
+    readonly enumerable?: boolean;
+    /** `onChange` supported. Defaults to true. */
     readonly reactivity?: boolean;
   };
 }
 
-export function runCredentialsStoreConformance(opts: CredentialsStoreConformanceOptions): void {
+export function runCredentialProviderConformance(opts: CredentialProviderConformanceOptions): void {
   const writable = opts.capabilities?.writable ?? true;
+  const enumerable = opts.capabilities?.enumerable ?? writable;
   const reactivity = opts.capabilities?.reactivity ?? true;
+  const setup = async (): Promise<CredentialProvider> => opts.factory();
 
-  const setupStore = async (): Promise<CredentialsStore> => opts.factory();
-
-  // Delegate the three store-agnostic cases (stable backend id, unknown-key →
-  // empty value, idempotent delete-of-absent) to the shared `runStoreConformance`
-  // skeleton. The KV `(namespace, key)` shape is accommodated purely by CLOSURES
-  // that pin a fixed namespace — validating run-#1 finding #2 (the shared probes
-  // work for a keyed-value store, not just a single-key collection). Idempotent
-  // delete is write-dependent, so for a read-only store (`writable: false`) the
-  // probe is a settling no-op rather than a real delete (a read-only store throws
-  // on delete) — the faithful translation of the old `it.skipIf(!writable)`.
-  runStoreConformance<CredentialsStore>({
-    label: opts.label,
-    factory: opts.factory,
-    emptyRead: {
-      read: (store, key) => store.get("ns", key, ctx),
-      expected: undefined,
-    },
-    idempotentDelete: (store, key) => (writable ? store.delete("ns", key, ctx) : Promise.resolve()),
-    // Credentials-specific cases nest under the shared describe. These exercise
-    // the KV composite-key shape the generic skeleton can't: value round-trip,
-    // namespace isolation, per-namespace enumeration, and the credentials
-    // `{ namespace, key }` onChange event.
-    cases: () => {
-      it.skipIf(!writable)("round-trips a value through set/get", async () => {
-        const store = await setupStore();
-        await store.set("ns", "k", { token: "abc", expires: 1000 }, ctx);
-        expect(await store.get<{ token: string; expires: number }>("ns", "k", ctx)).toEqual({
-          token: "abc",
-          expires: 1000,
-        });
-      });
-
-      it.skipIf(!writable)("isolates entries across namespaces", async () => {
-        const store = await setupStore();
-        await store.set("ns-a", "k", "value-a", ctx);
-        await store.set("ns-b", "k", "value-b", ctx);
-        expect(await store.get<string>("ns-a", "k", ctx)).toBe("value-a");
-        expect(await store.get<string>("ns-b", "k", ctx)).toBe("value-b");
-      });
-
-      it.skipIf(!writable)("overwrites prior values on repeat set", async () => {
-        const store = await setupStore();
-        await store.set("ns", "k", "first", ctx);
-        await store.set("ns", "k", "second", ctx);
-        expect(await store.get<string>("ns", "k", ctx)).toBe("second");
-      });
-
-      it.skipIf(!writable)("has() returns true after set, false after delete", async () => {
-        const store = await setupStore();
-        expect(await store.has("ns", "k", ctx)).toBe(false);
-        await store.set("ns", "k", "v", ctx);
-        expect(await store.has("ns", "k", ctx)).toBe(true);
-        const removed = await store.delete("ns", "k", ctx);
-        expect(removed).toBe(true);
-        expect(await store.has("ns", "k", ctx)).toBe(false);
-      });
-
-      it.skipIf(!writable)("delete() returns false on an absent key", async () => {
-        const store = await setupStore();
-        expect(await store.delete("ns", "never-set", ctx)).toBe(false);
-      });
-
-      it.skipIf(!writable)("keys() enumerates only the named namespace", async () => {
-        const store = await setupStore();
-        await store.set("ns-a", "key1", "v1", ctx);
-        await store.set("ns-a", "key2", "v2", ctx);
-        await store.set("ns-b", "key3", "v3", ctx);
-
-        const aKeys = [...(await store.keys("ns-a", ctx))].sort();
-        expect(aKeys).toEqual(["key1", "key2"]);
-
-        const bKeys = await store.keys("ns-b", ctx);
-        expect(bKeys).toEqual(["key3"]);
-
-        const emptyKeys = await store.keys("ns-c", ctx);
-        expect(emptyKeys).toEqual([]);
-      });
-
-      it.skipIf(!writable || !reactivity)(
-        "notifies subscribers of internal set/delete events",
-        async () => {
-          const store = await setupStore();
-          if (!store.onChange) {
-            throw new Error(
-              `${opts.label}: capabilities.reactivity=true but store.onChange is undefined`,
-            );
-          }
-          const events: Array<{ namespace: string; key: string }> = [];
-          const unsubscribe = store.onChange((ev) => {
-            events.push({ namespace: ev.namespace, key: ev.key });
-          });
-
-          await store.set("ns", "k", "v", ctx);
-          await store.delete("ns", "k", ctx);
-
-          expect(events).toEqual([
-            { namespace: "ns", key: "k" },
-            { namespace: "ns", key: "k" },
-          ]);
-
-          unsubscribe();
-          await store.set("ns", "k2", "v2", ctx);
-          expect(events).toHaveLength(2);
-        },
-      );
-    },
+  it(`${opts.label}: declares a namespace and a backend`, async () => {
+    const provider = await setup();
+    expect(provider.namespace.length).toBeGreaterThan(0);
+    expect(provider.backend.length).toBeGreaterThan(0);
   });
+
+  it(`${opts.label}: an absent key resolves undefined, never throws`, async () => {
+    const provider = await setup();
+    expect(await provider.get("no-such-key", ctx)).toBeUndefined();
+  });
+
+  it(`${opts.label}: declared capabilities match the implemented verbs`, async () => {
+    const provider = await setup();
+    expect(typeof provider.set === "function").toBe(writable);
+    expect(typeof provider.delete === "function").toBe(writable);
+    expect(typeof provider.keys === "function").toBe(enumerable);
+  });
+
+  it.skipIf(!writable)(`${opts.label}: round-trips a value through set/get`, async () => {
+    const provider = await setup();
+    await provider.set!("k", { token: "abc", expires: 1000 }, ctx);
+    expect(await provider.get<{ token: string; expires: number }>("k", ctx)).toEqual({
+      token: "abc",
+      expires: 1000,
+    });
+  });
+
+  it.skipIf(!writable)(`${opts.label}: overwrites prior values on repeat set`, async () => {
+    const provider = await setup();
+    await provider.set!("k", "first", ctx);
+    await provider.set!("k", "second", ctx);
+    expect(await provider.get<string>("k", ctx)).toBe("second");
+  });
+
+  it.skipIf(!writable)(`${opts.label}: delete removes, and is idempotent`, async () => {
+    const provider = await setup();
+    await provider.set!("k", "v", ctx);
+    expect(await provider.delete!("k", ctx)).toBe(true);
+    expect(await provider.get("k", ctx)).toBeUndefined();
+    expect(await provider.delete!("k", ctx)).toBe(false);
+  });
+
+  it.skipIf(!writable)(`${opts.label}: has() tracks set and delete`, async () => {
+    const provider = await setup();
+    const present = async (key: string): Promise<boolean> =>
+      provider.has ? provider.has(key, ctx) : (await provider.get(key, ctx)) !== undefined;
+    expect(await present("k")).toBe(false);
+    await provider.set!("k", "v", ctx);
+    expect(await present("k")).toBe(true);
+    await provider.delete!("k", ctx);
+    expect(await present("k")).toBe(false);
+  });
+
+  it.skipIf(!enumerable || !writable)(`${opts.label}: keys() lists what was set`, async () => {
+    const provider = await setup();
+    expect(await provider.keys!(ctx)).toEqual([]);
+    await provider.set!("a", 1, ctx);
+    await provider.set!("b", 2, ctx);
+    expect([...(await provider.keys!(ctx))].sort()).toEqual(["a", "b"]);
+  });
+
+  it.skipIf(!writable || !reactivity)(
+    `${opts.label}: notifies subscribers with the KEY only`,
+    async () => {
+      const provider = await setup();
+      if (!provider.onChange) return;
+      const keys: string[] = [];
+      const unsubscribe = provider.onChange((key) => keys.push(key));
+      await provider.set!("k", "v", ctx);
+      await provider.delete!("k", ctx);
+      expect(keys).toEqual(["k", "k"]);
+      unsubscribe();
+      await provider.set!("k2", "v2", ctx);
+      expect(keys).toHaveLength(2);
+    },
+  );
 }
