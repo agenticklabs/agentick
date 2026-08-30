@@ -20,6 +20,9 @@ solved here. See "What this does not solve".
    constructor and `namespace` is a key prefix that store must interpret itself.
 3. **`namespace` becomes the routing key**: it selects a provider. Exact match,
    no chaining, unknown namespace is an error rather than a miss.
+   The harness always ships with an empty-but-live registry, seeded with one
+   in-memory provider under `ephemeral` — named for its lifetime, inert until
+   adopter code writes to it, and reachable only by naming it.
 4. **A provider may store OR mint.** `get` is a resolution verb, not a lookup —
    which is what lets a static Redis-backed store and an on-demand token minter
    sit side by side under one interface, as Vault's static and dynamic secret
@@ -169,6 +172,38 @@ with policy on read. A session slot would conflate the value axis with the
 infrastructure axis and produce per-principal registries that all do the same
 thing.
 
+### 1a. The harness always ships; the registry starts nearly empty
+
+The harness is constructed unconditionally, whether or not anyone supplied a
+provider — the same as `ConnectorsHarness`, which the gateway builds even when
+the slot is `undefined`. No deployment asks "is credentials installed?"; the
+bridge is always live and a registry with nothing in it is a fine resting state.
+Requiring a provider would make every trivial local agent carry a secrets
+concept it does not want.
+
+It starts with exactly one provider registered: an in-memory store under the
+namespace **`ephemeral`**.
+
+**Named for its lifetime, deliberately.** `local` was considered and rejected: it
+reads as machine-local — keychain, file, something that survives a restart —
+while the implementation lives and dies with the process. The single failure this
+whole ADR traces back to is a credential silently vanishing across a restart, and
+a namespace whose name advertises persistence it does not have would invite that
+mistake a second time. `ephemeral` states the lifetime before anything is stored
+in it.
+
+Two constraints keep the default safe:
+
+- **The framework never writes to it.** The tempting move is for `authenticate`
+  to cache a verified credential there so point-of-use can read it back. That
+  would make "ships with an in-memory default" mean "the framework caches bearer
+  tokens by default" — the adopter's module-global `Map`, with a blessing. The
+  default store is INERT unless adopter code writes to it.
+- **It is a pre-registered namespace, not a fallback.** §4's routing is exact and
+  an unknown namespace is an error, so no unqualified lookup can silently land
+  here. `get("kauth", …)` with no `kauth` provider still fails loudly. That is
+  what makes shipping a default safe at all.
+
 ### 2. Many providers under one harness
 
 The harness holds a registry keyed by namespace and gains the connector-shaped
@@ -235,8 +270,8 @@ each will be under pressure once credentials are "first-class".
 2. **No inbox protocol.** Being a harness buys lifecycle, interceptors,
    journaling, and the op spine. An inbox verb would buy remote credential reads.
    The existing refusal stands as a documented decision.
-3. **No persistent default store.** `env` (read-only) and `in-memory` (ephemeral)
-   only. A DB-backed default with its own encryption makes agentick the owner of
+3. **No persistent default store.** `env` (read-only) and `in-memory` (the
+   `ephemeral` default of §1a) only. A DB-backed default with its own encryption makes agentick the owner of
    key management — the Airflow-Fernet trap, and the thing Temporal is right to
    refuse.
 
