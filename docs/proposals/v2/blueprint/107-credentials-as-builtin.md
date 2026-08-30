@@ -116,15 +116,58 @@ an INTERFACE and adapters, never a persistent store (see Non-goals).
 
 ## Decision
 
-### 1. A permanent slot, as connectors have
+### 1. A permanent slot at BOTH levels — and one harness
 
 ```ts
-createGateway({ credentials: [ redisKauth(), smsMinter(), keychain() ] })
-createApp({ credentials: [ ... ] })
+createGateway({ credentials: [redisKauth(), smsMinter()] });
+createApp({ credentials: [keychain()] });
 ```
 
-Resolved as an ADR 42 slot with the app/gateway cascade, replacing the
-`withCredentials({ store })` extension install.
+A slot, not an extension, replacing the `withCredentials({ store })` install.
+Both levels are needed and neither alone suffices: an app-level slot is the only
+one a single-user local agent can use (`createApp` with no gateway), and a
+gateway-level slot is the only way several apps share one store. Connectors are
+gateway-only because a connector is an ingress edge and only the gateway has a
+wire; credentials are consumed by host-bound ports and tree code, which are
+app-level concerns, so that precedent does not transfer.
+
+**But "both levels" must NOT mean two installs.** The current extension does:
+
+```ts
+installer.registerNamespace("credentials", harness);
+```
+
+and namespaces resolve by PROXIMITY in the bridge tree. Two installs would give
+two harnesses, and the app's would not collide with the gateway's — it would
+OCCLUDE it wholesale. Every gateway-registered provider disappears for that app,
+silently, all of them. That is worse than the duplicate-registration case §4
+forbids, and it is what happens by default if both targets are simply allowed.
+
+So: **one harness, two contribution points.** The gateway CONSTRUCTS it; an
+app-level slot REGISTERS INTO the inherited one rather than creating its own:
+
+```
+app slot → inherited `credentials` namespace present?
+             yes → harness.register(spec)     // contribute
+             no  → construct one              // the local-agent case
+```
+
+No new machinery — `register` is already a harness command and the bridge tree
+already threads the gateway's instance into the app. It needs a lookup.
+
+**A cross-level namespace collision is a construction-time ERROR, never a
+cascade.** This is where credentials must diverge from `model` / `images` /
+`embeddings`, where app-overrides-gateway is right: picking the wrong model is a
+quality bug, whereas silently intercepting credential resolution is not. It also
+protects the audit property this ADR leans on — `credentialNamespace` identifies
+which provider served a read only if a namespace has exactly one owner.
+
+**No session-level slot.** A session is per-principal; providers are
+infrastructure. The per-principal part is already handled PER CALL by
+`StoreCtx.principal` (§5), which is what lets one provider serve every principal
+with policy on read. A session slot would conflate the value axis with the
+infrastructure axis and produce per-principal registries that all do the same
+thing.
 
 ### 2. Many providers under one harness
 
@@ -250,9 +293,11 @@ first three drafts collapse.
 
 ## Open questions
 
-1. **Where does the slot live — gateway, app, or both?** Connectors landed on the
-   gateway with an app cascade. Credentials plausibly want the same, but a
-   single-user local agent has no gateway.
+1. ~~Where does the slot live — gateway, app, or both?~~ **Settled in §1:** both,
+   as one harness with two contribution points, because two installs would
+   occlude rather than collide. What remains is narrower — the app-level lookup
+   ("is there an inherited credentials harness?") has no existing helper, so it
+   wants either a small installer affordance or a documented pattern.
 2. **Does a provider see the namespace it was registered under**, or is that the
    harness's bookkeeping? Matters for a provider serving several namespaces.
 3. **Does `keys(namespace)` survive?** Enumerating credential keys is a
