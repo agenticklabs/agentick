@@ -169,6 +169,12 @@ createGateway({
   `DuplicateCredentialNamespace`. Silently shadowing a credential source is a
   security event, not a convenience.
 
+**Name a namespace for what the credential is _for_.** `namespace` is the
+audience in the RFC 8693 sense — the downstream thing being called — so
+`"query-api"` and `"stripe"` read better than `"tokens"` and `"secrets"`. It is
+stamped on every credential operation in the journal, so audience-shaped names
+turn the audit trail into "which service was this operation authorized against".
+
 The harness always exists, even with nothing configured, and ships one provider:
 an in-memory store under `ephemeral`. It is named for its lifetime — it dies with
 the process — so nothing about the name suggests your credentials will survive a
@@ -262,6 +268,10 @@ an absent `set` must be genuinely absent, not one that quietly does nothing.
 - **The framework stores nothing and expires nothing.** It defines an interface,
   routes to your implementation, and records that a resolution happened. Caching,
   rotation, and lifetime are yours — if your provider is expensive, memoize it.
+- **Short-lived credentials cost nothing to adopt.** There is no TTL field and no
+  refresh loop, because `get` runs at the point of use every time — a minting
+  provider issues fresh, a caching one serves stale, and neither needs the
+  framework to model a lifetime.
 
 See ADR 107 for the reasoning, including the prior art (Vault's mounted secret
 engines, Airflow's pluggable backends, Temporal's refusal to own credentials at

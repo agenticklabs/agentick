@@ -27,7 +27,11 @@ solved here. See "What this does not solve".
    which is what lets a static Redis-backed store and an on-demand token minter
    sit side by side under one interface, as Vault's static and dynamic secret
    engines do.
-5. **Three security properties are load-bearing and do not change**: credentials
+5. **The framework is a resolution seam, not a credential authority.** It
+   never originates, stores, forwards, refreshes, or expires a credential —
+   and because `get` runs at the point of use, short-lived credentials come
+   free without modelling lifetime. `namespace` is the RFC 8693 audience.
+6. **Three security properties are load-bearing and do not change**: credentials
    never reach a tool handler's `ctx`; the harness ships no inbox protocol; the
    journal records credential COORDINATES and never values.
 
@@ -258,6 +262,81 @@ namespace is a naming scheme, not a boundary. Note the deliberate consequence:
 with many providers, "who may read whose credential" is answered N times rather
 than once. That is correct — a keychain provider and a minting provider SHOULD
 have different rules — but it is a consequence to state, not to discover.
+
+## Where we stand — the position and what it rallies around
+
+**The framework is a resolution seam, not a credential authority.** It never
+originates, stores, forwards, refreshes, or expires a credential. It routes a
+request to the adopter's resolver and records that a resolution happened.
+
+Four commitments, each traceable to something outside this repo:
+
+| commitment                                                              | rallying point                                                                                                            |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Credentials never enter durable state or cross the wire; identity does  | Temporal (workflow history holds identifiers, not secrets); OpenTelemetry (no secrets in Baggage); ADR 92's redaction law |
+| The unit is a RESOLUTION REQUEST, not a key lookup                      | RFC 8693 (OAuth 2.0 Token Exchange)                                                                                       |
+| Resolution happens at the point of use, per call                        | NIST SP 800-207 zero-trust least privilege; SPIFFE-style short-lived workload credentials                                 |
+| The framework ships an interface and adapters, never a persistent store | Airflow's pluggable secrets backends; Temporal's refusal to own secrets at all                                            |
+
+### The API is token-exchange-shaped, not KV-shaped
+
+`get(namespace, key, ctx)` already carries RFC 8693's semantics without its wire
+format:
+
+```
+get(namespace, key, ctx)
+     │          │     └─ who is asking          ≈ actor
+     │          └─ who it is for                ≈ subject
+     └─ what it is for                          ≈ audience / resource
+```
+
+**`namespace` IS the audience** — the downstream thing a credential is _for_.
+That is a naming rule, not just an analogy, and it changes how adopters should
+name: `"query-api"` and `"stripe"` (audiences), not `"tokens"` and `"secrets"`
+(buckets). Since `credentialNamespace` is stamped on every credential operation,
+audience-named namespaces make the audit trail self-describing — "which
+credential was read for which operation" becomes "which downstream service was
+this operation authorized against".
+
+`namespace` is KEPT over renaming to `audience`: the generality is real (a local
+agent's `github` credential is not an audience in the OAuth sense), and the
+alignment survives as documented convention. Recorded as a considered fork, not
+an oversight.
+
+### Short-lived credentials come free, without modelling lifetime
+
+The framework has no expiry field, no TTL, no refresh loop, no lease — the three
+or four things that drag a framework into owning secrets and into the
+Airflow-Fernet trap.
+
+It does not need them. **Because `get` is called at the point of use, every
+time**, a minting provider naturally issues fresh and a caching provider
+naturally serves stale. The shape of the API makes the best practice the
+default without mandating it, and long-lived storage stays available as the
+adopter's explicit, visible choice.
+
+That is the whole technique for being standards-aligned without being
+opinionated: do not model lifetime, move the call site.
+
+### Pass-through versus exchange
+
+Best practice is close to unanimous that a service should not forward its
+caller's token downstream — audience validation stops meaning anything, the
+downstream call gets the caller's full scope rather than a slice, and a
+compromise holds replayable user credentials. RFC 8693 is the specified
+alternative.
+
+The argument is sharper for an agent framework than for a request-response
+server: **agent work outlives the request that started it.** A forwarded token
+was issued for a request that has ended, and using it forty minutes into a
+background execution is exactly what short-lived credentials exist to prevent.
+And forwarding cannot cover the origins an agent system actually has — a
+connector's inbound message, a scheduled run, an execution resumed after a
+restart all have no incoming token to forward.
+
+**The framework still does not decide this.** It resolves; it does not mint,
+exchange, or forward. But `get`-at-point-of-use makes exchange the path of least
+resistance, and the origins above make it the only one that covers every case.
 
 ## Non-goals — the three refusals
 
