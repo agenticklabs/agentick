@@ -23,7 +23,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { fakeCredentialsHarness } from "@agentick/credentials/testing";
+import { fakeCredentialsHarness, fakeCredentialProvider } from "@agentick/credentials/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { McpCredentialsRequiredError } from "@agentick/spec";
@@ -33,7 +33,9 @@ import { InMemoryMcpTransport, McpClientHarness, NoneAuth } from "../index.js";
 
 describe("DefaultOAuthProvider — credentials read-through", () => {
   it("tokens round-trip via the substrate store", async () => {
-    const { harness: creds } = fakeCredentialsHarness();
+    const { harness: creds } = fakeCredentialsHarness({
+      providers: [fakeCredentialProvider({ namespace: "mcp" })],
+    });
     const provider = new DefaultOAuthProvider({
       serverName: "linear",
       serverUrl: "https://example.invalid",
@@ -56,7 +58,9 @@ describe("DefaultOAuthProvider — credentials read-through", () => {
   });
 
   it("client info round-trips independently of tokens", async () => {
-    const { harness: creds } = fakeCredentialsHarness();
+    const { harness: creds } = fakeCredentialsHarness({
+      providers: [fakeCredentialProvider({ namespace: "mcp" })],
+    });
     const provider = new DefaultOAuthProvider({
       serverName: "linear",
       serverUrl: "https://example.invalid",
@@ -72,7 +76,9 @@ describe("DefaultOAuthProvider — credentials read-through", () => {
   });
 
   it("onInvalidateCredentials('tokens') deletes from the store", async () => {
-    const { harness: creds } = fakeCredentialsHarness();
+    const { harness: creds } = fakeCredentialsHarness({
+      providers: [fakeCredentialProvider({ namespace: "mcp" })],
+    });
     const provider = new DefaultOAuthProvider({
       serverName: "linear",
       serverUrl: "https://example.invalid",
@@ -90,7 +96,9 @@ describe("DefaultOAuthProvider — credentials read-through", () => {
   });
 
   it("rejects `credentials` set without `keyOf`", () => {
-    const { harness: creds } = fakeCredentialsHarness();
+    const { harness: creds } = fakeCredentialsHarness({
+      providers: [fakeCredentialProvider({ namespace: "mcp" })],
+    });
     expect(
       () =>
         new DefaultOAuthProvider({
