@@ -23,14 +23,21 @@
 import { omitUndefined } from "@agentick/utils";
 import { buildSessionElicit } from "@agentick/elicitation";
 
-import { Cause, Effect, Exit, Option } from "effect";
-import { deriveContext, getContext, runHarnessProtocol, generateId } from "@agentick/runtime";
+import { Cause, Effect, Exit, Option, type Runtime } from "effect";
+import {
+  deriveContext,
+  getContext,
+  runHarnessProtocol,
+  runHarnessProtocolOn,
+  generateId,
+} from "@agentick/runtime";
 import { BaseHarness, type RequestError, type TelemetryRuntime } from "@agentick/runtime";
 import type {
   AbortInput,
   ChannelPublisher,
   ChannelSnapshotProvider,
   ContentBlock,
+  DispatchContext,
   Derived,
   DispatchInput,
   DispatchResult,
@@ -292,6 +299,39 @@ export class ToolExecutorHarness
    * pre-handle path. Pattern A by default (awaits a returned `TaskHandle`);
    * opt into Pattern B with `{ task: "ref" }`.
    */
+  /**
+   * A {@link ToolsHandle} bound to ONE dispatch, so tools it starts inherit
+   * that dispatch's context. The harness-level `this.tools` stays context-free
+   * for host callers outside any crossing.
+   */
+  private toolsFor(caller: DispatchContext, runtime: Runtime.Runtime<never>): ToolsHandle {
+    return createToolsHandle({
+      compileSync: (filter) => this.registry.compileForTick(filter),
+      getSync: (name) => this.registry.get(name),
+      // Run on the CALLER'S runtime, the `buildSessionElicit` precedent. A tool
+      // handler is a Promise, so by the time it calls this the ambient
+      // operation is gone — and a dispatch started without one is a root op
+      // with no principal, no execution, no parent span. Composing on the
+      // captured runtime puts it back inside the calling dispatch, where it
+      // belongs: a child operation that INHERITS rather than one handed a copy.
+      dispatch: async (name, input, opts) => {
+        const result = await runHarnessProtocolOn(
+          runtime,
+          this.dispatchFx({
+            toolCallId: `host:${generateId()}`,
+            name,
+            input,
+            // The same crossing, a possibly different door.
+            context: { ...caller, via: opts?.via ?? caller.via },
+            ...(opts?.task !== undefined ? { task: opts.task } : {}),
+          }),
+        );
+        return opts?.envelope ? result : result.content;
+      },
+      subscribe: (listener) => this.registry.subscribe(listener),
+    });
+  }
+
   private async hostDispatch(
     name: string,
     input: unknown,
@@ -302,6 +342,8 @@ export class ToolExecutorHarness
       name,
       input,
       // NOT AN EVENT SCOPE — the call's data context. `scopeId` IS the session id here.
+      // The harness's own public door: a host call with no crossing to inherit.
+      // A dispatch STARTED BY A TOOL goes through `toolsFor` instead.
       context: { via: opts?.via ?? "dispatch", sessionId: this.scopeId },
       ...(opts?.task !== undefined ? { task: opts.task } : {}),
     });
@@ -905,12 +947,10 @@ export class ToolExecutorHarness
           // `session/__tests__/dispatch-scope-inheritance.spec.tsx`.
           elicit: buildSessionElicit({ harness: this.elicitation, runtime: capturedRuntime }),
           ...omitUndefined({ tasks: this.tasks }),
-          // #273 phase 1 — the raw handle. A sub-dispatch journals as a fresh
-          // host-door call, not yet as a child of THIS dispatch's op.
-          // TODO(ctx-tools-scope): bind caller identity into the sub-dispatch
-          // context (the `buildSessionElicit` runtime-binding precedent) so
-          // code-mode tool calls nest under the calling tool's span.
-          tools: this.tools,
+          // #273 — bound to THIS dispatch, so a tool this handler starts
+          // inherits the crossing that reached here (principal, executionId,
+          // tickId) rather than beginning as a context-free host call.
+          tools: this.toolsFor(input.context, capturedRuntime),
           // ADR 62 — the session's read-projection seam. Handlers resolve
           // readable content by URI (`ctx.resource.read(uri)`); the
           // AppHarness wired the single per-session ResourcesHarness here.
