@@ -203,6 +203,9 @@ function headerString(value: string | string[] | undefined): string | undefined 
   return Array.isArray(value) ? value.join(", ") : value;
 }
 
+/** Sentinel: {@link readBody} could not parse the body and already wrote a 400. */
+const BODY_ERROR = Symbol("mcp:body-error");
+
 /** Buffer + JSON-parse a request body, enforcing a size cap. */
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -447,17 +450,38 @@ function createHttpCore(options: {
     authenticatedUser?: McpAuthenticatedUser | null,
   ): Promise<void> {
     const sessionId = headerString(req.headers["mcp-session-id"]);
+    // A stale id + `initialize` recovers transparently across a restart, so its
+    // 404 must read "please re-initialize", not the bare "unknown session" that
+    // some clients (Claude Code) surface as ENDPOINT_NOT_FOUND and give up on.
+    const STALE = "Session not found. The server may have restarted. Please re-initialize.";
 
     // Existing session → route straight to its SDK transport. Passing
     // `parsedBody` (undefined when no host parser ran) is equivalent to
     // omitting it — the SDK reads the stream itself in that case.
     if (sessionId !== undefined) {
       const existing = sessions.get(sessionId);
-      if (existing === undefined) {
-        writeJsonRpcError(res, 404, `Unknown session: ${sessionId}`);
+      if (existing !== undefined) {
+        await existing.handleRequest(req, res, parsedBody);
         return;
       }
-      await existing.handleRequest(req, res, parsedBody);
+      // Stale/unknown session id — the server restarted or the session was
+      // evicted. A GET (SSE reopen) or a non-`initialize` POST can only 404 so
+      // the client re-initializes; but a POST carrying an `initialize` opens a
+      // FRESH session, IGNORING the stale id — that is how a reconnecting
+      // client recovers across a restart without the user re-adding the server.
+      // Dropping this fall-through (present in the v1 handler) stranded every
+      // reconnecting streamable-http client on a hard 404.
+      if (req.method === "GET") {
+        writeJsonRpcError(res, 404, STALE);
+        return;
+      }
+      const staleBody = await readBody(req, res, parsedBody);
+      if (staleBody === BODY_ERROR) return;
+      if (!isInitializeRequest(staleBody)) {
+        writeJsonRpcError(res, 404, STALE);
+        return;
+      }
+      await openSession(accept, req, res, staleBody, authenticatedUser);
       return;
     }
 
@@ -466,26 +490,44 @@ function createHttpCore(options: {
       writeJsonRpcError(res, 400, "Missing Mcp-Session-Id header");
       return;
     }
-
-    // Use the host-parsed body when present; otherwise read the stream.
-    let body = parsedBody;
-    if (body === undefined) {
-      try {
-        body = await readJsonBody(req);
-      } catch (err) {
-        writeJsonRpcError(res, 400, `Invalid request body: ${String(err)}`);
-        return;
-      }
-    }
+    const body = await readBody(req, res, parsedBody);
+    if (body === BODY_ERROR) return;
     if (!isInitializeRequest(body)) {
       writeJsonRpcError(res, 400, "Missing Mcp-Session-Id header (non-initialize request)");
       return;
     }
+    await openSession(accept, req, res, body, authenticatedUser);
+  }
 
-    // New session. Build the SDK transport, hand it to the harness
-    // (await = backpressure + SDK-Server wiring), then let it process
-    // the initialize — that mints the session id + registers us via
-    // `onsessioninitialized`.
+  /** Host-parsed body when present, else read the stream. {@link BODY_ERROR} on a malformed body (response already written). */
+  async function readBody(
+    req: IncomingMessage,
+    res: ServerResponse,
+    parsedBody: unknown,
+  ): Promise<unknown> {
+    if (parsedBody !== undefined) return parsedBody;
+    try {
+      return await readJsonBody(req);
+    } catch (err) {
+      writeJsonRpcError(res, 400, `Invalid request body: ${String(err)}`);
+      return BODY_ERROR;
+    }
+  }
+
+  /**
+   * Open a brand-new session from an `initialize` POST — reached both by a
+   * sessionless initialize and by one that carried a STALE id (restart
+   * recovery). Builds the SDK transport, hands it to the harness (await =
+   * backpressure + SDK-Server wiring), then lets it process the initialize,
+   * which mints the session id and registers us via `onsessioninitialized`.
+   */
+  async function openSession(
+    accept: AcceptHandler,
+    req: IncomingMessage,
+    res: ServerResponse,
+    body: unknown,
+    authenticatedUser?: McpAuthenticatedUser | null,
+  ): Promise<void> {
     const sdkTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: options.sessionIdGenerator ?? (() => randomUUID()),
       onsessioninitialized: (sid) => {

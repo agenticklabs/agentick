@@ -375,3 +375,71 @@ describe("httpMiddlewareTransport — RFC 9728 metadata serving", () => {
     await mcp.close();
   });
 });
+
+describe("httpMiddlewareTransport — stale-session recovery (restart survivability)", () => {
+  const INIT = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "raw", version: "0" },
+    },
+  });
+  const post = (base: string, body: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...headers,
+      },
+      body,
+    });
+
+  it("a POST carrying a STALE session id + initialize opens a FRESH session (does not 404)", async () => {
+    const ctx = await standUp({ parseBody: false });
+    try {
+      // A session id the server has never heard of (the pre-restart one).
+      const res = await post(ctx.base, INIT, {
+        "mcp-session-id": "stale-00000000-0000-0000-0000-000000000000",
+      });
+      // Recovered: a brand-new session, NOT a hard 404.
+      expect(res.status).toBe(200);
+      expect(res.headers.get("mcp-session-id")).toBeTruthy();
+      expect(res.headers.get("mcp-session-id")).not.toBe(
+        "stale-00000000-0000-0000-0000-000000000000",
+      );
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it("a non-initialize POST with a stale session id 404s with a re-initialize hint", async () => {
+    const ctx = await standUp({ parseBody: false });
+    try {
+      const res = await post(
+        ctx.base,
+        JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+        { "mcp-session-id": "stale-11111111-1111-1111-1111-111111111111" },
+      );
+      expect(res.status).toBe(404);
+      const json = (await res.json()) as { error?: { message?: string } };
+      expect(json.error?.message ?? "").toMatch(/re-initialize/i);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it("a sessionless initialize still opens a session (unchanged happy path)", async () => {
+    const ctx = await standUp({ parseBody: false });
+    try {
+      const res = await post(ctx.base, INIT);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("mcp-session-id")).toBeTruthy();
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+});
