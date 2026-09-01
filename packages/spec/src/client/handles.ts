@@ -9,6 +9,8 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md §"The developer surface"
  */
 
+import type { ToolInfo } from "../protocol/tool-executor.js";
+import type { ToolGroupInfo } from "../data/declarations.js";
 import type { EventQuery } from "../data/events.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type {
@@ -338,7 +340,14 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
    * The response carries the entire prompt — system instructions, retrieved
    * context, identity. Treat it as the most sensitive read on this handle.
    */
-  dryRun(): Promise<{ readonly tree: unknown; readonly input: unknown }>;
+  dryRun(): Promise<{
+    readonly tree: unknown;
+    readonly input: unknown;
+    /** The model-exposed registry rows behind `input.tools`. */
+    readonly catalog?: readonly ToolInfo[];
+    /** Capability-tree prose for the catalog's `group` paths. */
+    readonly toolGroups?: readonly ToolGroupInfo[];
+  }>;
   /** Rung 1 alone — the rendered IR. Needs no model on the server. */
   compile(): Promise<unknown>;
   /** Rung 2 alone — the canonical input the model sees. */

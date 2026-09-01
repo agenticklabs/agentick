@@ -256,6 +256,7 @@ describe("@agentick/spec — tool executor protocol", () => {
         | "dispatch"
         | "abort"
         | "list"
+        | "groups"
         | "removeBoundTools"
         | "replaceCompilerTools"
         | "compileForTick"

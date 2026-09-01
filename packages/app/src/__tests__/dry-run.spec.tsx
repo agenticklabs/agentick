@@ -163,7 +163,7 @@ describe("session.dryRun", () => {
       journal,
       bus,
       inbox,
-      tools: [greet],
+      tools: [{ ...greet, group: ["greetings"] }],
       toolExecutor: {
         initialToolGroups: [{ path: ["greetings"], title: "Greetings", summary: "hi" }],
       },
@@ -172,6 +172,13 @@ describe("session.dryRun", () => {
     try {
       const tree = await session.compile();
       expect(JSON.stringify(tree)).toContain("groups: Greetings");
+      // And the full dry run hands the catalog rows + prose beside the input,
+      // so a preview surface can file the flat tool list by its groups.
+      const run = await session.dryRun();
+      expect(run.catalog?.map((t) => [t.name, t.group?.join("/")])).toEqual([
+        ["greet", "greetings"],
+      ]);
+      expect(run.toolGroups?.map((g) => g.title)).toEqual(["Greetings"]);
     } finally {
       await app.close();
     }

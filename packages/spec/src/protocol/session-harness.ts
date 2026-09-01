@@ -33,6 +33,8 @@
  * @see docs/proposals/v2/blueprint/08-session-harness.md
  */
 
+import type { ToolInfo } from "./tool-executor.js";
+import type { ToolGroupInfo } from "../data/declarations.js";
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
 import type { ModelInfoResult } from "../wire/params.js";
 import type { EventEnvelope } from "../data/events.js";
@@ -774,6 +776,10 @@ export interface SessionDryRunResult {
   readonly input: LanguageModelInput;
   /** What would go on the wire. Absent when the executor has no adapter. */
   readonly request?: unknown;
+  /** The model-exposed registry rows behind `input.tools` — name, group, summary. */
+  readonly catalog?: readonly ToolInfo[];
+  /** Capability-tree prose for the catalog's `group` paths. */
+  readonly toolGroups?: readonly ToolGroupInfo[];
 }
 
 /**

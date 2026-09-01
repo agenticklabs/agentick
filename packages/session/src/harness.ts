@@ -39,6 +39,8 @@ import type {
   JournalingPolicy,
   LoopExecutorProtocol,
   ModelInfoResult,
+  ToolInfo,
+  ToolGroupInfo,
 } from "@agentick/spec";
 import type {
   AppendEntryInput,
@@ -260,6 +262,10 @@ export interface SessionDryRun {
   readonly input: LanguageModelInput;
   /** What would go on the wire. Absent when the executor has no adapter. */
   readonly request?: unknown;
+  /** The model-exposed registry rows behind `input.tools` — name, group, summary. */
+  readonly catalog?: readonly ToolInfo[];
+  /** Capability-tree prose for the catalog's `group` paths. */
+  readonly toolGroups?: readonly ToolGroupInfo[];
 }
 
 export interface SessionHarnessOptions<P = unknown> {
@@ -1677,7 +1683,14 @@ export class SessionHarness<P = unknown>
     const tree = await this.compile();
     const input = await this.project(tree);
     const request = this.prepareRequest(input);
-    return omitUndefined({ tree, input, request }) as SessionDryRun;
+    const toolGroups = this.toolExecutor.groups?.list() ?? [];
+    return omitUndefined({
+      tree,
+      input,
+      request,
+      catalog: this.toolExecutor.tools.list({ exposure: "model" }),
+      ...(toolGroups.length > 0 ? { toolGroups } : {}),
+    }) as SessionDryRun;
   }
 
   /**

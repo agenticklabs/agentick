@@ -280,8 +280,13 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
     // and the model input — cross intact.
     "session/dry_run": async ({ sessionId }, ctx) => {
       const sess = ctx.session ?? findSession(ctx, sessionId);
-      const { tree, input } = await sess.dryRun();
-      return { tree, input };
+      const { tree, input, catalog, toolGroups } = await sess.dryRun();
+      return {
+        tree,
+        input,
+        ...(catalog !== undefined ? { catalog } : {}),
+        ...(toolGroups !== undefined ? { toolGroups } : {}),
+      };
     },
     "session/compile": async ({ sessionId }, ctx) => {
       const sess = ctx.session ?? findSession(ctx, sessionId);

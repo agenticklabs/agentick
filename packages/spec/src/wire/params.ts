@@ -8,6 +8,7 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md §"Method namespaces"
  */
 
+import type { ToolGroupInfo } from "../data/declarations.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { ClientToolDeclaration, ToolExposure } from "../data/declarations.js";
 import type { ToolInfo } from "../protocol/tool-executor.js";
@@ -462,6 +463,10 @@ export interface SessionPreviewParams extends WireRequestParams {
 export interface SessionDryRunWireResult {
   readonly tree: unknown;
   readonly input: unknown;
+  /** The model-exposed registry rows behind `input.tools`. */
+  readonly catalog?: readonly ToolInfo[];
+  /** Capability-tree prose for the catalog's `group` paths. */
+  readonly toolGroups?: readonly ToolGroupInfo[];
 }
 
 export interface SessionCompileResult {
