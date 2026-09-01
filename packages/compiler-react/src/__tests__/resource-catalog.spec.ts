@@ -126,6 +126,18 @@ describe("the catalog is a tree", () => {
 });
 
 describe("what the catalog stopped carrying", () => {
+  it("drops a name that only echoes the shown slug — 'clients (clients)' says nothing twice", () => {
+    const text = resourcesCatalogText(
+      bridgesWith([
+        { uri: "knowledge://clients", name: "clients", description: "Client records." },
+        { uri: "knowledge://notes", name: "Personal notes", description: "Notes." },
+      ]),
+    )!;
+    expect(text).not.toContain("(clients)");
+    // A name that ADDS something still renders.
+    expect(text).toContain("(Personal notes)");
+  });
+
   it("drops the mime type — it was on every line and decides nothing", () => {
     const text = resourcesCatalogText(
       bridgesWith([{ uri: "app://a", description: "A.", mimeType: "text/markdown" }]),

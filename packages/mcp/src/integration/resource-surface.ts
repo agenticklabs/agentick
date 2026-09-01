@@ -103,7 +103,9 @@ export async function surfaceRemoteResources(
     for (const r of page.resources) {
       const aliased = aliasResourceUri(alias, r.uri);
       const meta = omitUndefined({
-        name: `${alias}: ${r.name}`,
+        // An empty alias (verbatim first-party surfacing) prefixes nothing —
+        // `": name"` in every catalog line is punctuation with no referent.
+        name: alias === "" ? r.name : `${alias}: ${r.name}`,
         description: r.description,
         mimeType: r.mimeType,
         size: r.size,
@@ -141,7 +143,7 @@ export async function surfaceRemoteResources(
     for (const t of page.templates) {
       const aliasedTemplate = aliasResourceUri(alias, t.uriTemplate);
       const meta = omitUndefined({
-        name: `${alias}: ${t.name}`,
+        name: alias === "" ? t.name : `${alias}: ${t.name}`,
         description: t.description,
         mimeType: t.mimeType,
         title: t.title,

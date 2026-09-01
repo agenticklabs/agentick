@@ -175,7 +175,7 @@ export function resourcesCatalogText(bridges: HookBridges): string | undefined {
   // `withResources()` exposes `resource_read` (whose own description tells the
   // model how to read); resources can also be surfaced (e.g. via withMCP)
   // without that tool present.
-  return `Readable resources the application exposes on request (by uri):\n${lines.join("\n")}`;
+  return `Readable resources the application exposes on request (by uri):\n\n${lines.join("\n")}`;
 }
 
 export function resourcesDefaultProjection(bridges: HookBridges): DefaultProjection {
@@ -261,7 +261,10 @@ function groupByPrefix(entries: readonly CatalogEntry[]): string[] {
   const out: string[] = [];
   for (const [stem, bucket] of groups) {
     const grouped = stem !== "" && bucket.length > 1;
-    if (grouped) out.push(`${stem}`);
+    // The stem is a LIST ITEM, not a bare line: markdown absorbs a bare line
+    // into the previous bullet's continuation, gluing the next tree's root
+    // onto an unrelated entry. Members nest beneath it as a sublist.
+    if (grouped) out.push(`- ${stem}`);
     for (const entry of bucket) {
       out.push(formatCatalogLine(entry, grouped ? stem : ""));
     }
@@ -273,7 +276,11 @@ function formatCatalogLine(entry: CatalogEntry, stem: string): string {
   const shown =
     stem !== "" && entry.uri.startsWith(stem) ? entry.uri.slice(stem.length) : entry.uri;
   let line = `${stem !== "" ? "  " : ""}- ${shown}`;
-  if (entry.name !== undefined && entry.name !== entry.uri) line += ` (${entry.name})`;
+  // A name that only repeats what the line already shows — the full uri, or
+  // the stem-stripped slug — is a token spent saying nothing; measured on a
+  // real catalog it doubled nearly every line ("clients (clients)").
+  if (entry.name !== undefined && entry.name !== entry.uri && entry.name !== shown)
+    line += ` (${entry.name})`;
   if (entry.description !== undefined) line += ` — ${gloss(entry.description)}`;
   // The mime type is dropped: it was on every line, it is `text/markdown` for
   // almost all of them, and nothing the model decides turns on it.
@@ -361,7 +368,9 @@ export function mcpServersText(bridges: HookBridges): string | undefined {
   for (const info of infos) {
     lines.push(mcpServerLine(info));
   }
-  let out = `Connected MCP servers:\n${lines.join("\n")}`;
+  // No lead-in line: the section this text renders under is already titled
+  // "Connected MCP servers", and the duplicate read as a stutter.
+  let out = lines.join("\n");
 
   // A server's own `instructions` — the one field in `InitializeResult` whose
   // entire purpose is to reach the prompt. It was captured and then dropped:
@@ -374,7 +383,13 @@ export function mcpServersText(bridges: HookBridges): string | undefined {
     const instructions = typeof info.instructions === "string" ? info.instructions.trim() : "";
     if (instructions === "") continue;
     const alias = typeof info.serverId === "string" ? info.serverId : "(unknown)";
-    out += `\n\n### ${alias} — server instructions\n${instructions}`;
+    // The instructions are the SERVER's markdown — its own `# Heading`s would
+    // outrank this section's, so every embedded heading is demoted below the
+    // server's own `###` (capped at markdown's six levels).
+    const demoted = instructions.replace(/^(#{1,6})(?=\s)/gm, (h) =>
+      "#".repeat(Math.min(h.length + 3, 6)),
+    );
+    out += `\n\n### ${alias} — server instructions\n\n${demoted}`;
   }
   return out;
 }

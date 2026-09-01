@@ -115,15 +115,33 @@ function formatNode(node: SemanticNode): string {
       // Generic inline container (`<span>`). Wrap in `<span>` so
       // the inline structure round-trips in xml output.
       return `<span>${childText}</span>`;
-    case "custom":
+    case "custom": {
+      const tag = String(node.props?.tag ?? "custom");
+      const selfClosing = node.props?.selfClosing === true;
+      // Pretty-print structure: an element whose children are THEMSELVES
+      // elements lays them out one per line, indented — inline join rendered
+      // `<message_metadata>` (and every other element tree) as one run-on
+      // wall. Text content stays inline in its own tags; whitespace-only text
+      // nodes between elements (JSX gaps) are layout, not content, and drop.
+      const kids = node.children ?? [];
+      const elementKids = kids.filter((k) => k.semantic !== undefined);
+      if (!selfClosing && elementKids.length > 0) {
+        const parts = kids
+          .filter((k) => !(k.semantic === undefined && (k.text ?? "").trim() === ""))
+          .map((k) => formatNode(k).replace(/^/gm, "  "));
+        const head = renderCustomTag(tag, node.props?.attrs, "", false, {
+          attr: escapeXml,
+          content: (c) => c,
+        });
+        const open = head.slice(0, head.length - `</${tag}>`.length);
+        return `${open}\n${parts.join("\n")}\n</${tag}>`;
+      }
       // The children are already escaped — they came through this walk.
-      return renderCustomTag(
-        String(node.props?.tag ?? "custom"),
-        node.props?.attrs,
-        childText,
-        node.props?.selfClosing === true,
-        { attr: escapeXml, content: (c) => c },
-      );
+      return renderCustomTag(tag, node.props?.attrs, childText, selfClosing, {
+        attr: escapeXml,
+        content: (c) => c,
+      });
+    }
     default:
       return childText;
   }

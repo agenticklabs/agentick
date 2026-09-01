@@ -51,12 +51,14 @@ function escapeAttr(s: string): string {
 /** Content stays verbatim — markdown's raw-HTML passthrough, same as `<custom>`. */
 const markdownEscapers: TagEscapers = { attr: escapeAttr, content: (s) => s };
 
-function formatNode(node: SemanticNode): string {
+function formatNode(node: SemanticNode, inItem = false): string {
   if (node.text !== undefined && node.semantic === undefined) {
     return node.text;
   }
 
-  const childText = (node.children ?? []).map(formatNode).join("");
+  const childText = (node.children ?? [])
+    .map((child) => formatNode(child, node.semantic === "list-item"))
+    .join("");
 
   switch (node.semantic) {
     case "strong":
@@ -85,13 +87,27 @@ function formatNode(node: SemanticNode): string {
       return `${childText}\n\n`;
     case "list": {
       const ordered = node.props?.ordered === true;
-      return (node.children ?? [])
-        .map((item, i) => {
-          const inner = formatNode(item);
-          return ordered ? `${i + 1}. ${inner}` : `- ${inner}`;
-        })
-        .join("\n")
-        .concat("\n\n");
+      // A list opening MID-ITEM must break the line first, or its first
+      // marker glues onto the item's own text ("…summary.- `name`").
+      const lead = inItem ? "\n" : "";
+      return (
+        lead +
+        (node.children ?? [])
+          .map((item, i) => {
+            // Continuation lines — a nested list inside the item included —
+            // indent under their marker, which is what makes `<ul>` in `<li>`
+            // an actual nested list instead of a flat run at column 0.
+            const inner = formatNode(item).trimEnd();
+            const [first = "", ...rest] = inner.split("\n");
+            const indented = [
+              first,
+              ...rest.map((line) => (line === "" ? line : `  ${line}`)),
+            ].join("\n");
+            return ordered ? `${i + 1}. ${indented}` : `- ${indented}`;
+          })
+          .join("\n")
+          .concat("\n\n")
+      );
     }
     case "list-item":
       return childText;
@@ -99,9 +115,11 @@ function formatNode(node: SemanticNode): string {
       const rows = node.children ?? [];
       if (rows.length === 0) return "";
       const header = rows[0]!;
-      const headerCells = (header.children ?? []).map(formatNode);
+      const headerCells = (header.children ?? []).map((child) => formatNode(child));
       const separator = headerCells.map(() => "---");
-      const body = rows.slice(1).map((r) => (r.children ?? []).map(formatNode).join(" | "));
+      const body = rows
+        .slice(1)
+        .map((r) => (r.children ?? []).map((child) => formatNode(child)).join(" | "));
       const lines = [
         `| ${headerCells.join(" | ")} |`,
         `| ${separator.join(" | ")} |`,
