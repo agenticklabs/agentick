@@ -1054,12 +1054,24 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
     if (parts.length === 0) continue;
 
     // Coalesce same-role consecutive entries (Google supports both
-    // alternation and same-role coalescing, but coalescing is cleaner).
-    const last = out[out.length - 1];
-    if (last && last.role === role) {
-      (last.parts as Part[]).push(...parts);
-    } else {
-      out.push({ role, parts });
+    // alternation and same-role coalescing, but coalescing is cleaner) —
+    // EXCEPT after a functionResponse. Vertex rejects any non-functionResponse
+    // part following a functionResponse within one content ("Requests ending
+    // with a model turn are not supported", a misleading 400); the Developer
+    // API accepts it. Splitting into a fresh same-role content is accepted by
+    // both. Real shapes that hit this: retrieved-context/grounding rendered
+    // after a tool result, and a user message sent after an execution died
+    // between a tool result and its answer.
+    for (const part of parts) {
+      const last = out[out.length - 1];
+      const lastPart = last?.parts?.[last.parts.length - 1];
+      const mustSplit =
+        lastPart !== undefined && "functionResponse" in lastPart && !("functionResponse" in part);
+      if (last && last.role === role && !mustSplit) {
+        (last.parts as Part[]).push(part);
+      } else {
+        out.push({ role, parts: [part] });
+      }
     }
   }
 

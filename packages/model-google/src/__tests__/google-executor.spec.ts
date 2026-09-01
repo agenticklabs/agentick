@@ -183,6 +183,73 @@ describe("google() adapter — system extraction", () => {
     expect(contents[0]!.parts).toHaveLength(2);
     expect(contents[0]!.parts.map((p) => p.text)).toEqual(["first", "second"]);
   });
+
+  it("splits after a functionResponse instead of coalescing text into it — Vertex rejects the mix", async () => {
+    // fr → text within one content is a Vertex 400 ("Requests ending with a
+    // model turn are not supported"); the Developer API tolerates it. Split
+    // same-role contents are accepted by both, so the coalescer breaks the
+    // run at every functionResponse→other boundary. Shapes that hit this:
+    // grounding rendered after a tool result, and a user message arriving
+    // after an execution died between a tool result and its answer.
+    const stub = new StubGoogleClient([
+      { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub);
+    const tree: RenderedTree = {
+      specVersion: "2026-05-08",
+      context: {
+        entries: [
+          { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "go" }] },
+          {
+            kind: "message",
+            id: "m2",
+            role: "assistant",
+            content: [{ type: "tool_use", toolUseId: "call_1", name: "calc", input: {} }],
+          },
+          {
+            kind: "message",
+            id: "m3",
+            role: "tool",
+            toolCallId: "call_1",
+            content: [
+              {
+                type: "tool_result",
+                toolUseId: "call_1",
+                name: "calc",
+                content: [{ type: "text", text: "3" }],
+              },
+            ],
+          },
+          {
+            kind: "message",
+            id: "m4",
+            role: "user",
+            content: [{ type: "text", text: "and again?" }],
+          },
+          {
+            kind: "message",
+            id: "m5",
+            role: "grounding",
+            content: [{ type: "text", text: "<hud>ctx</hud>" }],
+          },
+        ],
+      },
+    };
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    const contents = stub.calls[0]!.params.contents as Array<{
+      role: string;
+      parts: Array<Record<string, unknown>>;
+    }>;
+    // [user go], [model fc], [user fr], [user "and again?" + hud] — the fr
+    // stands alone; the texts after it coalesce with each other, not with it.
+    expect(contents.map((c) => c.role)).toEqual(["user", "model", "user", "user"]);
+    const frContent = contents[2]!;
+    expect(frContent.parts).toHaveLength(1);
+    expect(frContent.parts[0]).toHaveProperty("functionResponse");
+    const tail = contents[3]!;
+    expect(tail.parts.every((part) => "text" in part)).toBe(true);
+    expect(tail.parts).toHaveLength(2);
+  });
 });
 
 // ============================================================================
