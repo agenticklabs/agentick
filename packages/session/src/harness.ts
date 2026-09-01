@@ -1748,8 +1748,10 @@ export class SessionHarness<P = unknown>
     const target = this.modelFacade.current?.target;
     const contextWindow =
       target !== undefined ? effectiveModelInfo(target, this.models)?.contextWindow : undefined;
+    const toolGroups = this.toolExecutor.groups?.list() ?? [];
     return {
       tools: this.toolExecutor.tools.list({ exposure: "model" }),
+      ...(toolGroups.length > 0 ? { toolGroups } : {}),
       ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
       ...(target !== undefined
         ? {

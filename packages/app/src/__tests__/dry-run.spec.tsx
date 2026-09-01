@@ -46,6 +46,15 @@ function CatalogAgent() {
   );
 }
 
+function GroupsAgent() {
+  const groups = useRenderContext().toolGroups ?? [];
+  return React.createElement(
+    "section" as never,
+    { id: "system", audience: "model" },
+    `groups: ${groups.map((g) => g.title).join(", ")}`,
+  );
+}
+
 const mkTarget = (): ExecutionTarget =>
   ({ kind: "language-model", provider: "fake", modelId: "m", capabilities: {} }) as ExecutionTarget;
 
@@ -135,6 +144,34 @@ describe("session.dryRun", () => {
       // A preview that renders no catalog is a preview of a prompt the model
       // never sees — the tick's render supplies one, so this must too.
       expect(JSON.stringify(tree)).toContain("tools: greet");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("compiles against the same group prose a tick would supply", async () => {
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const executor = new FakeLanguageModelExecutor("dry-5", journal, bus, inbox, {
+      scripted: [{ kind: "text", text: "ok" }] as never,
+    });
+    await executor.ready;
+    const app = await createApp(React.createElement(GroupsAgent), {
+      modelExecutor: executor,
+      target: mkTarget(),
+      journal,
+      bus,
+      inbox,
+      tools: [greet],
+      toolExecutor: {
+        initialToolGroups: [{ path: ["greetings"], title: "Greetings", summary: "hi" }],
+      },
+    });
+    const session = await app.createSession({ sessionId: "dry-5" });
+    try {
+      const tree = await session.compile();
+      expect(JSON.stringify(tree)).toContain("groups: Greetings");
     } finally {
       await app.close();
     }
