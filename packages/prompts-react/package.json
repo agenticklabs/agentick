@@ -1,6 +1,6 @@
 {
   "name": "@agentick/prompts-react",
-  "version": "1.0.0-next.191",
+  "version": "1.0.0-next.192",
   "description": "React binding for @agentick/prompts. Exports `reactPromptRenderer` (ReactNode → MessageEntry[] via compileTemplate) and the `withReactPrompts` convenience extension.",
   "keywords": [
     "agent",
