@@ -306,6 +306,14 @@ export interface AppInstaller extends BaseInstaller {
   registerExtensionTool(registration: import("./tool-executor.js").ToolRegistration): Unsubscribe;
 
   /**
+   * Declare capability-tree group prose (upsert by path — see
+   * `ToolGroupsHandle`). Accumulated before the per-session executor is
+   * constructed and seeded into its `groups` registry, the same lifecycle as
+   * extension tools. No unregister: prose is description, not capability.
+   */
+  registerToolGroups(groups: readonly import("../data/declarations.js").ToolGroupInfo[]): void;
+
+  /**
    * Subscribe to the app's bus. Used by telemetry / observability /
    * external-driver extensions (e.g., a scheduler listening for
    * subscription-intent events).
@@ -444,6 +452,14 @@ export interface SessionInstaller extends BaseInstaller {
    * app-extension tools and below caller-supplied session tools.
    */
   registerExtensionTool(registration: import("./tool-executor.js").ToolRegistration): Unsubscribe;
+
+  /**
+   * Declare capability-tree group prose (upsert by path — see
+   * `ToolGroupsHandle`). Accumulated before the per-session executor is
+   * constructed and seeded into its `groups` registry, the same lifecycle as
+   * extension tools. No unregister: prose is description, not capability.
+   */
+  registerToolGroups(groups: readonly import("../data/declarations.js").ToolGroupInfo[]): void;
 
   /**
    * Subscribe to the session's bus. Wraps the substrate's bus

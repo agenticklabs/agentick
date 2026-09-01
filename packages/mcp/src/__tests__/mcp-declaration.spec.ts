@@ -146,9 +146,13 @@ describe("mcpDeclaration — catalog metadata", () => {
     expect(decl.summary).toBeUndefined();
   });
 
-  it("leaves both absent when the server sent no `_meta`", () => {
+  it("files a group-less tool under the SERVER — a foreign server's tools are one capability", () => {
+    // The old contract left `group` absent, which dumped every unannotated
+    // server's tools into a renderer's "other" bucket. `[serverId]` is the
+    // honest default taxonomy, and `surfaceRemoteTools` registers a matching
+    // synthesized ToolGroupInfo so the bucket carries prose.
     const decl = mcpDeclaration("sess-1", "knowify", tool, "knowify__search", undefined);
-    expect("group" in decl).toBe(false);
+    expect(decl.group).toEqual(["knowify"]);
     expect("summary" in decl).toBe(false);
   });
 });

@@ -421,4 +421,6 @@ export interface McpToolDescriptor {
 export interface McpToolPage {
   readonly tools: readonly McpToolDescriptor[];
   readonly nextCursor?: string;
+  /** The RESULT-level `_meta` — carries `agentick/toolGroups` when the server declares group prose. */
+  readonly _meta?: Readonly<Record<string, unknown>>;
 }

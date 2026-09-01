@@ -79,6 +79,25 @@ describe("toDeclaration", () => {
     });
     expect("handler" in declaration).toBe(false);
   });
+
+  it("carries summary and group across the wire — the capability-tree fields (BACKLOG A)", () => {
+    // The gap this closes: the projection used to be an allowlist that dropped
+    // these, so a client tool could author a summary/group and they never
+    // reached the server. Now it spreads the rest, so they cross by construction.
+    const tool = createTool({
+      name: "navigate_to",
+      description: "Navigate this tab",
+      summary: "Take the user to a screen in the Knowify app.",
+      group: ["The user's screen"],
+      inputSchema: schema,
+      handler: async () => "ok",
+    });
+
+    const declaration = toDeclaration(tool);
+
+    expect(declaration.summary).toBe("Take the user to a screen in the Knowify app.");
+    expect(declaration.group).toEqual(["The user's screen"]);
+  });
 });
 
 describe("dispatch", () => {

@@ -34,6 +34,7 @@ import {
   type Prompts,
   type Resources,
   type ToolDeclaration,
+  type ToolGroupInfo,
   type ToolResultInput,
 } from "@agentick/spec";
 import {
@@ -400,6 +401,14 @@ export interface McpServerOptions {
   readonly transports: readonly ServerTransport[];
   /** Tool registry + per-connection projection. Absent = tools capability NOT advertised. */
   readonly tools?: McpServerToolsOptions;
+
+  /**
+   * Capability-tree group prose for the tools above — stamped on every
+   * `tools/list` result's `_meta` as `agentick/toolGroups` (one declaration
+   * per group; member tools carry the matching path in their own
+   * `_meta["agentick/group"]`). Ignored by group-unaware clients.
+   */
+  readonly toolGroups?: readonly ToolGroupInfo[];
   /** Prompts registry + per-connection projection. Absent = prompts capability NOT advertised. Lands #171d. */
   readonly prompts?: McpServerPromptsOptions;
   /**

@@ -178,6 +178,7 @@ import type {
   Middleware,
   NamespaceSlots,
   OperationJournalFactory,
+  ToolGroupInfo,
 } from "@agentick/spec";
 
 // ADR 82 / ADR 83 amendment — declarative per-session hooks. `CommandHooks` is
@@ -1048,6 +1049,9 @@ export class AppHarness<P = unknown>
   // tools take precedence (the extension list installs FIRST, then
   // adopter `toolDefaults.initialTools` overlays).
   private readonly extensionTools: ToolRegistration[] = [];
+  // Group prose contributed by app-level extensions — seeded into every
+  // session executor's `groups` registry, same lifecycle as extensionTools.
+  private readonly extensionToolGroups: ToolGroupInfo[] = [];
 
   private readonly registry = new Map<string, InternalSessionEntry<P>>();
   /**
@@ -1762,6 +1766,9 @@ export class AppHarness<P = unknown>
           if (idx >= 0) self.extensionTools.splice(idx, 1);
         };
       },
+      registerToolGroups(groups): void {
+        self.extensionToolGroups.push(...groups);
+      },
       subscribeBus(filter, listener): Unsubscribe {
         // Per-event error isolation + atomic Fiber.interrupt teardown —
         // see forkBusSubscription (single source of truth for the
@@ -1804,6 +1811,7 @@ export class AppHarness<P = unknown>
     resources: ResourcesHarness,
     bridges: Map<string, unknown>,
     extensionTools: ToolRegistration[],
+    extensionToolGroups: ToolGroupInfo[],
     closeHandlers: Array<() => void | Promise<void>>,
     toolHandlerUnregs: Array<() => void>,
     busUnregs: Array<() => void>,
@@ -1886,6 +1894,9 @@ export class AppHarness<P = unknown>
           const idx = extensionTools.indexOf(registration);
           if (idx >= 0) extensionTools.splice(idx, 1);
         };
+      },
+      registerToolGroups(groups): void {
+        extensionToolGroups.push(...groups);
       },
       subscribeBus(filter, listener): Unsubscribe {
         // forkBusSubscription = shared fork/interrupt semantics; the
@@ -2850,6 +2861,7 @@ export class AppHarness<P = unknown>
     // Close-handlers fire on session.close.
     const sessionExtensionBridges = new Map<string, unknown>(this.extensionBridges);
     const sessionExtensionTools: ToolRegistration[] = [];
+    const sessionExtensionToolGroups: ToolGroupInfo[] = [];
     const sessionCloseHandlers: Array<() => void | Promise<void>> = [];
     const sessionToolHandlerUnregs: Array<() => void> = [];
     const sessionBusUnregs: Array<() => void> = [];
@@ -2861,6 +2873,7 @@ export class AppHarness<P = unknown>
         resources,
         sessionExtensionBridges,
         sessionExtensionTools,
+        sessionExtensionToolGroups,
         sessionCloseHandlers,
         sessionToolHandlerUnregs,
         sessionBusUnregs,
@@ -2983,6 +2996,17 @@ export class AppHarness<P = unknown>
           ...this.toolDefaults,
           ...omitUndefined({ principal: input.principal }),
           ...omitUndefined({ initialTools: mergedInitialTools }),
+          ...(this.extensionToolGroups.length > 0 ||
+          sessionExtensionToolGroups.length > 0 ||
+          (this.toolDefaults.initialToolGroups?.length ?? 0) > 0
+            ? {
+                initialToolGroups: [
+                  ...this.extensionToolGroups,
+                  ...sessionExtensionToolGroups,
+                  ...(this.toolDefaults.initialToolGroups ?? []),
+                ],
+              }
+            : {}),
           handlerResolver: this.handlerResolver,
           elicitation,
           tasks,

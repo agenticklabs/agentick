@@ -210,6 +210,30 @@ attributed to the server rather than the framework's default. It's an in-process
 stamp on a field absent from the client-facing annotation type, so a remote
 client can't forge it.
 
+**Group.** `_meta["agentick/group"]` (a path array, or a single string) files
+the tool into the capability tree. A tool that declares none files under
+`[serverId]` — a foreign server's tools ARE one capability — and the client
+registers a synthesized group declaration ("Tools from `<serverId>`", prose
+from the server's identity) so that bucket renders with a paragraph, not a raw
+key. A server can do better: put a group-prose manifest on the `tools/list`
+RESULT's `_meta` —
+
+```jsonc
+"_meta": {
+  "agentick/toolGroups": [
+    { "path": ["knowify-write", "service"], "title": "Service work",
+      "summary": "Service tickets and visits: …", "order": 24 }
+  ]
+}
+```
+
+— and the client registers it into the session's `toolExecutor.groups`,
+upserting over the synthesized default (one declaration per group, matching the
+paths member tools carry; malformed entries are dropped rather than costing the
+tools). Serving side: pass `toolGroups` in `McpServerOptions` and the harness
+stamps this `_meta` on every `tools/list` result. Group-unaware clients ignore
+result `_meta` per spec.
+
 **Task support.** MCP's `execution.taskSupport` maps onto the framework's own
 vocabulary: `required` → `required`, `optional` → `supported`,
 `forbidden` → `unsupported`. A `required` tool always goes through the task wire.

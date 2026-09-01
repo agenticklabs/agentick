@@ -12,7 +12,6 @@
 
 import {
   toJsonSchema,
-  type ClientToolAnnotations,
   type ClientToolDeclaration,
   type ClientRuntimeContext,
   type ProgressUpdate,
@@ -64,13 +63,18 @@ export interface ToolCtx extends ClientRuntimeContext, ToolCtxExtensions {
   readonly progress?: (update: ProgressUpdate) => void;
 }
 
-/** A tool the client executes: the declaration and the handler, joined. */
-export interface Tool<TInput = unknown> {
-  readonly name: string;
-  readonly description: string;
+/**
+ * A tool the client executes: the declaration and the handler, joined.
+ *
+ * The declaration half is DERIVED from the wire type {@link ClientToolDeclaration}
+ * (via `Omit`), never re-declared — so every serializable field (`summary`,
+ * `group`, `aliases`, `annotations`, …) is inherited, and a field added to the
+ * wire contract reaches the author here for free. Only `inputSchema` differs:
+ * authored as a live `StandardSchemaV1`, projected to JSON Schema by
+ * {@link toDeclaration}.
+ */
+export interface Tool<TInput = unknown> extends Omit<ClientToolDeclaration, "inputSchema"> {
   readonly inputSchema: StandardSchemaV1<unknown, TInput>;
-  readonly aliases?: readonly string[];
-  readonly annotations?: ClientToolAnnotations;
   /**
    * Runs the call. Takes ctx FLAT as the second argument, unlike the server's
    * `(input, { ctx })` — that envelope exists to merge `use()` deps, and the
@@ -91,11 +95,14 @@ export function createTool<TInput = unknown>(tool: Tool<TInput>): Tool<TInput> {
 
 /** The wire declaration for a tool — what the server is told, and nothing more. */
 export function toDeclaration(tool: Tool): ClientToolDeclaration {
+  // Structural, not an allowlist: destructure out the handler (not serializable)
+  // and the two fields that need transforming, and spread the REST verbatim — so
+  // `summary`, `group`, and any field the wire contract gains later cross without
+  // a touch here. `ignoreRestSiblings` covers the intentionally-unused `handler`.
+  const { handler: _handler, inputSchema, annotations, ...rest } = tool;
   return {
-    name: tool.name,
-    description: tool.description,
-    inputSchema: toJsonSchema(tool.inputSchema),
-    ...(tool.aliases !== undefined ? { aliases: tool.aliases } : {}),
+    ...rest,
+    inputSchema: toJsonSchema(inputSchema),
     // `requiresResponse` DEFAULTS ON here, unlike the raw wire declaration.
     //
     // A `Tool`'s handler is typed to return a `ToolResultInput` and cannot
@@ -107,6 +114,6 @@ export function toDeclaration(tool: Tool): ClientToolDeclaration {
     // `requiresResponse: false` is the opt-out, and is what a broadcast tool
     // wants — with several clients answering there is no single authoritative
     // reply anyway.
-    annotations: { requiresResponse: true, ...tool.annotations },
+    annotations: { requiresResponse: true, ...annotations },
   };
 }

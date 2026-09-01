@@ -40,6 +40,7 @@
 
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
+import type { ToolGroupInfo } from "../data/declarations.js";
 import type { ToolInfo } from "./tool-executor.js";
 
 export interface RenderContext {
@@ -90,4 +91,12 @@ export interface RenderContext {
    * Each carries `summary` / `group` / `binding` for grouping and prose.
    */
   readonly tools?: readonly ToolInfo[];
+
+  /**
+   * The declared prose for the groups those tools file under —
+   * {@link ToolGroupInfo} per group path, from the executor's `groups` handle.
+   * A group a tool names without a declaration here still exists (the tree is
+   * the set of paths); it just renders without prose.
+   */
+  readonly toolGroups?: readonly ToolGroupInfo[];
 }

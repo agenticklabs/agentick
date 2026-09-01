@@ -50,6 +50,7 @@ import type {
   ToolBinding,
   ToolDeclaration,
   ToolExposure,
+  ToolGroupInfo,
   ToolPresentation,
 } from "../data/declarations.js";
 import type { Unsubscribe } from "./inbox.js";
@@ -354,6 +355,24 @@ export interface ToolHandle {
  * `ToolInfo` is the wire-safe projection; `session.toolExecutor` remains for
  * power users who need the live declaration.
  */
+/**
+ * The capability-tree's PROSE registry — {@link ToolGroupInfo} per group path,
+ * beside the tool registry whose `group` paths it annotates. Register is an
+ * UPSERT keyed by path (same shape → no-op), because the writers are layered
+ * the same way tool registrations are (app config, extensions, the MCP client
+ * surfacing a server manifest) and a re-install must be idempotent.
+ */
+export interface ToolGroupsHandle {
+  register(groups: readonly ToolGroupInfo[]): void;
+  /**
+   * Sorted: `order` ascending (unset last), then path. With `root`, only the
+   * subtree at that path — the root's own declaration included, so a renderer
+   * scoped to one capability family gets its heading and its children in one
+   * read.
+   */
+  list(root?: readonly string[]): readonly ToolGroupInfo[];
+}
+
 export interface ToolsHandle {
   /** Current registered tools as {@link ToolInfo} rows, optionally filtered by exposure. */
   list(query?: { readonly exposure?: ToolExposure }): readonly ToolInfo[];
@@ -860,6 +879,13 @@ export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, k
    * own registry; the session getter forwards it.
    */
   readonly tools: ToolsHandle;
+
+  /**
+   * The capability-tree prose registry. See {@link ToolGroupsHandle}.
+   * Optional so existing executor doubles stay valid; readers treat absence
+   * as an empty registry.
+   */
+  readonly groups?: ToolGroupsHandle;
 
   /**
    * Add a tool to the registry. Idempotent on `registration.declaration.name`

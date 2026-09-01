@@ -421,6 +421,46 @@ describe("LoopExecutorHarness — the render sees the tools it declares", () => 
     });
   }
 
+  it("carries the executor's group prose into the render context, beside the catalog", async () => {
+    const seen: Array<readonly string[]> = [];
+    const base = mkCompiler([]);
+    const compiler: CompilerProtocol = {
+      ...base,
+      fx: {
+        ...base.fx,
+        renderTree: (input) => {
+          seen.push(
+            (
+              (input.renderContext as { toolGroups?: readonly { title: string }[] })?.toolGroups ??
+              []
+            ).map((g) => g.title),
+          );
+          return base.fx.renderTree(input);
+        },
+      },
+    };
+    const sub = mkSubstrate();
+    const loop = new LoopExecutorHarness("loop_tg", sub.journal, sub.bus, sub.inbox);
+    await loop.ready;
+    const executor = new FakeLanguageModelExecutor("tg_exec", sub.journal, sub.bus, sub.inbox);
+    const toolExecutor = await mkToolExecutor("tools_tg", sub);
+    toolExecutor.groups.register([
+      { path: ["memory"], title: "Memory", summary: "what you learned" },
+    ]);
+    await loop.runExecution({
+      sessionId: "s_tg",
+      mountId: "m_tg",
+      compiler,
+      modelExecutor: executor,
+      toolExecutor,
+      target: executor.target,
+      stateApplicator: noopApplicator(),
+      executionId: "exec_tg",
+      maxTicks: 1,
+    });
+    expect(seen[0]).toEqual(["Memory"]);
+  });
+
   it("re-renders once on the first tick so the tree's own tools reach the render context", async () => {
     const { compiler, seen } = recordingCompiler([calc]);
     await runOnce(compiler);

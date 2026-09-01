@@ -90,6 +90,7 @@ import type {
   ToolDeclaration,
   ToolHandler,
   ToolResultEnvelope,
+  ToolGroupInfo,
 } from "@agentick/spec";
 import { jsonSchema, toRegistration } from "@agentick/spec";
 
@@ -409,7 +410,7 @@ export function mcpDeclaration(
     name: localName,
     description: tool.description ?? `MCP tool ${serverId}/${tool.name}`,
     ...omitUndefined({
-      group: metaStrings(tool._meta?.["agentick/group"]),
+      group: metaStrings(tool._meta?.["agentick/group"]) ?? [serverId],
       summary: metaString(tool._meta?.["agentick/summary"]),
     }),
     inputSchema,
@@ -418,6 +419,34 @@ export function mcpDeclaration(
     handlerRef: mcpHandlerRef(sessionId, serverId, tool.name),
     annotations,
   };
+}
+
+/**
+ * Parse `_meta["agentick/toolGroups"]` from a `tools/list` RESULT — the group
+ * prose manifest (one declaration per group; the shape SEP-993/-1300 style
+ * proposals converge on). Malformed entries are dropped, not fatal: prose is
+ * decoration, and a bad manifest must not cost the tools.
+ */
+export function toolGroupManifest(
+  meta: Readonly<Record<string, unknown>> | undefined,
+): ToolGroupInfo[] {
+  const raw = meta?.["agentick/toolGroups"];
+  if (!Array.isArray(raw)) return [];
+  const out: ToolGroupInfo[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const g = entry as Record<string, unknown>;
+    const path = metaStrings(g.path);
+    if (path === undefined || typeof g.title !== "string" || typeof g.summary !== "string")
+      continue;
+    out.push({
+      path,
+      title: g.title,
+      summary: g.summary,
+      ...(typeof g.order === "number" ? { order: g.order } : {}),
+    });
+  }
+  return out;
 }
 
 function metaString(v: unknown): string | undefined {
@@ -620,9 +649,19 @@ async function discoverAndRegisterTools(
   // register a silently truncated tool set — the model would simply never see
   // the rest, with no error to explain it.
   let cursor: string | undefined;
+  // The capability-tree contract for proxied tools (mirrors `agentick/group`
+  // on each tool): a group-less tool files under `[serverId]`, and a synthesized
+  // server-level group gives that bucket prose from the server's own identity.
+  // A server that ships a real manifest (`_meta["agentick/toolGroups"]` on the
+  // list RESULT) upserts over the synthesized default — registration order
+  // below makes the manifest win.
+  let sawGroupless = false;
+  const manifests: ToolGroupInfo[] = [];
   do {
     const page = await harness.listTools(cursor);
+    manifests.push(...toolGroupManifest(page._meta));
     for (const tool of page.tools) {
+      if (tool._meta?.["agentick/group"] === undefined) sawGroupless = true;
       const localName = `${prefix}${tool.name}`;
       const handlerRef = mcpHandlerRef(installer.sessionId, config.serverId, tool.name);
       // Detect REMOTE task support from MCP's canonical
@@ -690,6 +729,17 @@ async function discoverAndRegisterTools(
     }
     cursor = page.nextCursor;
   } while (cursor !== undefined);
+
+  if (sawGroupless) {
+    installer.registerToolGroups([
+      {
+        path: [config.serverId],
+        title: `Tools from ${config.serverId}`,
+        summary: `Tools provided by the connected "${config.serverId}" MCP server.`,
+      },
+    ]);
+  }
+  if (manifests.length > 0) installer.registerToolGroups(manifests);
   return unsubscribes;
 }
 

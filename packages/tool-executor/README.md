@@ -92,7 +92,21 @@ const off = session.tools.subscribeAll(() => rerender()); // registry topology
 
 `ToolInfo` is the wire-safe row — `name`, `description`, `summary?`, `group?`, `exposure`, `aliases?`, `annotations?`, `hasInputSchema`. The live `StandardSchemaV1` validator never crosses; power users who need it keep `session.toolExecutor`.
 
-**`summary` and `group`.** A tool's one-sentence `summary` and its capability-tree `group` path (`["api", "jobs"]`) ride the row so a client can render a grouped catalog — the model's lay of the land — without a schema per tool. The registry has no concept of a group: the tree IS the set of paths, and `createToolGroup` in `@agentick/tool` is the authoring sugar that stamps them.
+**`summary` and `group`.** A tool's one-sentence `summary` and its capability-tree `group` path (`["api", "jobs"]`) ride the row so a client can render a grouped catalog — the model's lay of the land — without a schema per tool. The tree IS the set of paths; `createToolGroup` in `@agentick/tool` is the authoring sugar that stamps them.
+
+### Names and paths — the `__` convention
+
+`__` is the namespace separator in tool names (SEP-993's convention; LLM APIs
+reject `/` and `.`) — `serverId__tool` from the MCP client is the same idea. A
+RENDERER may derive a filing path from a `__`-bearing name when the tool
+declares no `group`; the registry itself does not rewrite either half. Full
+canonical identity — deriving names from paths and vice versa at registration —
+is under study in blueprint 108 (canonical tool identity) and deliberately NOT
+shipped: it renames the model-visible fleet, which is a migration, not a patch.
+
+### Group prose — `toolExecutor.groups`
+
+What a group IS lives on the tools (their `group` paths). What a group MEANS lives in one declaration per path — `ToolGroupInfo { path, title, summary, order? }` — registered through `toolExecutor.groups.register(...)` (upsert by path), seeded via `initialToolGroups`, or contributed by an extension through `installer.registerToolGroups(...)`. `groups.list(root?)` reads them back sorted `order`-then-path, optionally scoped to one subtree (the root's own declaration included). The loop injects the result as `RenderContext.toolGroups`, so a prompt section can render the paragraph above the names. Prose is per-GROUP, never per-tool — carrying it on members would mean N wire copies and a dedupe with no authority rule.
 
 Subscriptions fire only from registration mutations (`register` / `unregister` / `removeBoundTools` / `replaceCompilerTools`), never from the hot dispatch read path — so subscribing costs nothing per call.
 

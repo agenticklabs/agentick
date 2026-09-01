@@ -26,7 +26,12 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
-import { toJsonSchema, type ToolDeclaration, type Unsubscribe } from "@agentick/spec";
+import {
+  toJsonSchema,
+  type ToolDeclaration,
+  type ToolGroupInfo,
+  type Unsubscribe,
+} from "@agentick/spec";
 import type { ToolCatalog } from "@agentick/tool";
 import {
   McpServerError,
@@ -141,6 +146,14 @@ export interface ToolsProjectionOptions {
   /** Per-connection filter + transforms — narrow slice of `McpServerOptions.tools`. */
   readonly projection?: ToolsProjectionRules;
   /**
+   * Capability-tree group prose, stamped on the `tools/list` RESULT's `_meta`
+   * as `agentick/toolGroups` — one declaration per group, matching the
+   * `agentick/group` paths individual tools carry in their own `_meta`. A
+   * group-aware client (withMCP) surfaces these into its render catalog;
+   * every other client ignores result `_meta` per spec.
+   */
+  readonly toolGroups?: readonly ToolGroupInfo[];
+  /**
    * The crossing-operation runner for this connection (ADR 92 §Slice A). Owns
    * admission, the `mcp:command:<verb>` envelope, the security stages on the
    * guard seam, and the per-request ctx mint.
@@ -182,6 +195,9 @@ export function installToolsHandlers(
           const { page, nextCursor } = paginate(projected, request.params?.cursor);
           const result: ListToolsResult = { tools: page.map(toWireTool) };
           if (nextCursor !== undefined) result.nextCursor = nextCursor;
+          if (options.toolGroups !== undefined && options.toolGroups.length > 0) {
+            result._meta = { ...result._meta, "agentick/toolGroups": options.toolGroups };
+          }
           return result;
         },
       }),

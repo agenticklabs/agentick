@@ -927,6 +927,9 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
             this.codec.decodeTool(t as unknown as Readonly<Record<string, unknown>>),
           ),
           ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+          ...(res._meta !== undefined
+            ? { _meta: res._meta as Readonly<Record<string, unknown>> }
+            : {}),
         };
       },
       catch: (cause) => cause as McpClientError,

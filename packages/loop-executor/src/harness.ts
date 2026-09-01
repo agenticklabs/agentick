@@ -1076,12 +1076,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // ticks pay none.
       const listModelTools = (): readonly ToolInfo[] =>
         input.toolExecutor.tools.list({ exposure: "model" });
+      // Group prose rides beside the catalog — same registry, same freshness.
+      const toolGroups = input.toolExecutor.groups?.list() ?? [];
       const renderWith = (tools: readonly ToolInfo[]) =>
         input.compiler.fx.renderTree({
           mountId: input.mountId,
           sessionId: input.sessionId,
           executionId,
-          renderContext: { ...renderContext, tools },
+          renderContext: {
+            ...renderContext,
+            tools,
+            ...(toolGroups.length > 0 ? { toolGroups } : {}),
+          },
         });
       const compilerBinding = { scope: "compiler", mountId: input.mountId } as const;
       const syncCompilerTools = (tree: RenderedTree) =>

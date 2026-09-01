@@ -297,6 +297,8 @@ createApp(Agent, { tools: [...jobTools] });
 
 A nested group is just a nested array — that _is_ the recursion. Each group prepends its own name onto whatever path its members already carry, so a tool that declared `group: ["x"]` inside a `"jobs"` group ends up at `["jobs", "x"]`. Members may be `createTool` bundles or raw declarations, mixed freely; the flattening keeps the declaration and drops the wrapper, so register handlers the way you always did.
 
+A group's PROSE — the paragraph a prompt renders above the member names — is its own declaration (`ToolGroupInfo`), registered on `toolExecutor.groups`; see the `@agentick/tool-executor` README, "Group prose". Deriving names from paths (and vice versa) at registration is under study in blueprint 108 — today the path files, the name identifies, and neither rewrites the other.
+
 ## Catalogs
 
 When the tool set changes at runtime — auth state, feature flags, late registration — hand consumers a catalog instead of an array. Consumers re-read on every list and subscribe for change notifications; the MCP server projection turns those notifications into `notifications/tools/list_changed`.

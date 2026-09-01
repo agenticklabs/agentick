@@ -395,10 +395,11 @@ export interface ToolDeclaration {
   readonly summary?: string;
   /**
    * Where this tool sits in the capability tree, as a PATH:
-   * `["api", "jobs"]`. The tree is the SET of paths — no registry or runtime
-   * concept of a group exists, and dispatch never consults this. A client
-   * derives its tree view by grouping the flat tool list on this field;
-   * `createToolGroup` is the authoring sugar that stamps it.
+   * `["api", "jobs"]`. The tree is the SET of paths — dispatch never consults
+   * this. A renderer derives its tree view by grouping the flat tool list on
+   * this field; {@link ToolGroupInfo} is where a group's PROSE lives (one
+   * declaration per group, never repeated per tool — the cardinality every
+   * grouping proposal converges on: MCP SEP-993/-1300, WebMCP collections).
    */
   readonly group?: readonly string[];
   /**
@@ -544,6 +545,35 @@ export interface ClientToolAnnotations {
  * callable seams are server-only and absent). `id` is not carried — the
  * server derives it from `name`.
  */
+/**
+ * One capability-tree group's prose — the paragraph a prompt renders above the
+ * tool names filed under {@link ToolDeclaration.group}. Declared ONCE per group:
+ * a group is a per-group fact, so carrying its prose on member tools would mean
+ * N wire copies and a dedupe with no authority rule.
+ *
+ * Reaches a render as {@link RenderContext.toolGroups}, registered through the
+ * tool executor's `groups` handle — by the app (config), an extension, or the
+ * MCP client surfacing a server's manifest (`_meta["agentick/toolGroups"]` on
+ * the `tools/list` result).
+ */
+export interface GroupInfo {
+  /** The group's address — the same path its members carry. */
+  readonly path: readonly string[];
+  readonly title: string;
+  /** The paragraph the model reads. Hand-written prompt-craft, not derived. */
+  readonly summary: string;
+  /** Render order among siblings; unset sorts after every set value. */
+  readonly order?: number;
+}
+
+/**
+ * {@link GroupInfo}, in the tool namespace. The shape is namespace-agnostic on
+ * purpose: prompts, resources and skills group the same way (MCP discussion
+ * #1772 treats Group as one primitive across all three), and each namespace
+ * gets its own registry and wire key (`agentick/toolGroups`, …) when it lands.
+ */
+export type ToolGroupInfo = GroupInfo;
+
 export interface ClientToolDeclaration {
   readonly name: string;
   readonly description: string;

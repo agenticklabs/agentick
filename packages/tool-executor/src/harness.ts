@@ -72,6 +72,8 @@ import type {
   ToolRegistration,
   ToolResultInput,
   ToolsHandle,
+  ToolGroupInfo,
+  ToolGroupsHandle,
   UnregisterToolInput,
 } from "@agentick/spec";
 import { createProgress, normalizeToolResult, TOOL_NARRATION_FIELD } from "@agentick/spec";
@@ -195,6 +197,7 @@ export class ToolExecutorHarness
    * change-notification). Built once here; the session getter forwards it.
    */
   readonly tools: ToolsHandle;
+  readonly groups: ToolGroupsHandle;
 
   constructor(
     scopeId: string,
@@ -283,6 +286,31 @@ export class ToolExecutorHarness
     // `session.tools` (three-audiences-plan §F). Reads live off the registry
     // (sync View), dispatches through the host door, and subscribes to registry
     // topology changes. Built last so it closes over a fully-initialized `this`.
+    // The capability-tree prose registry (spec `ToolGroupsHandle`): an upsert
+    // map keyed by the group path. Same-shape re-register is a no-op so a
+    // re-installed extension or a reconnected MCP server cannot churn it; a
+    // DIFFERENT shape wins last, because prose has one author per layer and
+    // the latest writer is the one holding the current copy.
+    const groupsByPath = new Map<string, ToolGroupInfo>();
+    this.groups = {
+      register: (groups) => {
+        for (const g of groups) groupsByPath.set(g.path.join("/"), g);
+      },
+      list: (root?: readonly string[]) => {
+        const inSubtree = (g: ToolGroupInfo): boolean =>
+          root === undefined ||
+          (g.path.length >= root.length && root.every((seg, i) => g.path[i] === seg));
+        return [...groupsByPath.values()]
+          .filter(inSubtree)
+          .sort(
+            (a, b) =>
+              (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) ||
+              a.path.join("/").localeCompare(b.path.join("/")),
+          );
+      },
+    };
+    if (options.initialToolGroups) this.groups.register(options.initialToolGroups);
+
     this.tools = createToolsHandle({
       compileSync: (filter) => this.registry.compileForTick(filter),
       getSync: (name) => this.registry.get(name),

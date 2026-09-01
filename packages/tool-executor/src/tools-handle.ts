@@ -108,8 +108,12 @@ export function createToolsHandle(deps: ToolsHandleDeps): ToolsHandle {
     subscribe: (name, listener) =>
       deps.subscribe((changed) => {
         // A single-name change hits only that name; a bulk change (undefined)
-        // may have touched it, so it fires too.
-        if (changed === undefined || changed === name) listener();
+        // may have touched it, so it fires too. The subscribed name may be an
+        // ALIAS (a short name `qualifyToolNames` canonicalized) — resolve it
+        // through the same name-then-alias door every other read uses, so a
+        // rename cannot orphan a subscription.
+        if (changed === undefined || changed === name) return listener();
+        if (deps.getSync(name)?.declaration.name === changed) listener();
       }),
     subscribeAll: (listener) => deps.subscribe(() => listener()),
   };

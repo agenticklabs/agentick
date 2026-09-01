@@ -23,6 +23,7 @@ import type {
   ToolConfirmationPolicy,
   ToolHandler,
   ToolRegistration,
+  ToolGroupInfo,
   Validator,
 } from "@agentick/spec";
 import type { BaseHarness, Middleware, TelemetryProvider } from "@agentick/runtime";
@@ -79,6 +80,8 @@ export interface ToolExecutorHarnessOptions {
    * `await`s.
    */
   readonly initialTools?: readonly ToolRegistration[];
+  /** Capability-tree group prose seeded at construction. See {@link ToolGroupsHandle}. */
+  readonly initialToolGroups?: readonly ToolGroupInfo[];
 
   /**
    * Default per-dispatch timeout (milliseconds). Overridden by
