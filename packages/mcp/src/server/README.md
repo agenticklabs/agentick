@@ -616,11 +616,39 @@ string. It never carries headers or credential material.
 
 | Stage             | Default                          | Adopter override                                 |
 | ----------------- | -------------------------------- | ------------------------------------------------ |
-| `connectionGuard` | `allowAll` (stdio) / `localOnly` | `allowListGuard({ peers })`                      |
+| `connectionGuard` | `allowAll` (stdio) / `localOnly` | `allowListGuard({ addresses, origins })`         |
 | `authenticator`   | `allowAll` (stdio) / `rejectAll` | `bearerTokenAuth({ tokens })`                    |
 | `authorizer`      | `allow`                          | `roleBasedAuthz({ rules })`                      |
 | `rateLimiter`     | no-op                            | `slidingWindowLimiter({ window, max })`          |
 | `inputSanitizer`  | identity                         | adopter-supplied — must return the request input |
+
+`allowListGuard` is the low-level connection guard the two defaults build
+on: `localOnlyGuard` is `allowListGuard({ addresses: [loopback…] })`, and
+`allowAllGuard` is the trivial accept-everything base beneath it. It
+matches the socket `remoteAddress` against exact IPs / IPv4 CIDRs / IPv6
+prefixes, and `origin` against globs (`https://*.example.com`); an empty
+allowlist rejects everything.
+
+**Behind a load balancer, `remoteAddress` is the balancer, not the
+client** — so a bare address allowlist sees only the LB's IP, and the
+`localOnly` default rejects every real client (the LB's private IP is not
+loopback). Either admit at the connection layer and gate on the bearer
+token (`connectionGuard: allowAllGuard`), or match the real client by its
+forwarded address:
+
+```ts
+import { allowListGuard } from "@agentick/mcp/server";
+
+auth: {
+  // Match the client the proxy saw, not the proxy socket. Enable
+  // trustForwardedFor ONLY behind a proxy that sets X-Forwarded-For —
+  // on a directly-exposed server any client can spoof it.
+  connectionGuard: allowListGuard({
+    addresses: ["203.0.113.0/24"],
+    trustForwardedFor: true,
+  }),
+}
+```
 
 ```ts
 import {

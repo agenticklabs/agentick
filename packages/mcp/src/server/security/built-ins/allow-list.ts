@@ -8,6 +8,17 @@
  * Empty allowlist = reject everything. Use this when you need to
  * lock down a public-facing HTTP/WS server to specific known clients.
  *
+ * Behind a reverse proxy or load balancer the socket `remoteAddress` is
+ * the proxy, not the client, so an address allowlist would only ever see
+ * the proxy's IP. Set `trustForwardedFor` to match the client hop from the
+ * `X-Forwarded-For` header against `addresses` instead — enable it ONLY
+ * when a trusted proxy sets that header, since a directly-exposed server
+ * lets any client spoof it.
+ *
+ * This is the low-level connection guard: the transport-default
+ * `localOnlyGuard` is `allowListGuard({ addresses: [loopback…] })`, and
+ * `allowAllGuard` is the trivial accept-everything base beneath it.
+ *
  * Ported from v1 `packages/mcp/src/server/security/stages.ts`. IPv4
  * CIDR + IPv6 prefix support is included; full IPv6 CIDR (with
  * non-byte-aligned masks) intentionally simplified to byte-aligned
@@ -28,18 +39,30 @@ export interface AllowListGuardOptions {
    *   - `"all"` — must match BOTH (rare; only useful for defense-in-depth)
    */
   readonly mode?: "any" | "all";
+  /**
+   * Also match the client hop from the `X-Forwarded-For` header against
+   * `addresses` (in addition to the socket `remoteAddress`). Enable ONLY
+   * behind a trusted proxy that sets the header — on a directly-exposed
+   * server any client can spoof it. Off by default.
+   */
+  readonly trustForwardedFor?: boolean;
 }
 
 export function allowListGuard(options: AllowListGuardOptions): ConnectionGuard {
   const addresses = (options.addresses ?? []).map(parseAddressPattern).filter((m) => m !== null);
   const origins = (options.origins ?? []).map(globToRegex);
   const mode = options.mode ?? "any";
+  const trustForwardedFor = options.trustForwardedFor ?? false;
 
   return async (info: McpConnectionInfo) => {
+    const candidateAddresses = [
+      info.remoteAddress,
+      trustForwardedFor ? forwardedClient(info.headers) : undefined,
+    ].filter((a): a is string => a !== undefined);
     const addressMatch =
       addresses.length === 0
         ? null
-        : addresses.some((matcher) => (info.remoteAddress ? matcher!(info.remoteAddress) : false));
+        : candidateAddresses.some((addr) => addresses.some((matcher) => matcher!(addr)));
     const originMatch =
       origins.length === 0
         ? null
@@ -52,6 +75,15 @@ export function allowListGuard(options: AllowListGuardOptions): ConnectionGuard 
     if (addressMatch === null && originMatch === null) return false;
     return Boolean(addressMatch) || Boolean(originMatch);
   };
+}
+
+/** Left-most `X-Forwarded-For` hop — the original client the proxy saw. */
+function forwardedClient(
+  headers: Readonly<Record<string, string | undefined>> | undefined,
+): string | undefined {
+  const header = headers?.["x-forwarded-for"];
+  const client = header?.split(",")[0]?.trim();
+  return client !== undefined && client.length > 0 ? client : undefined;
 }
 
 type AddressMatcher = (remote: string) => boolean;

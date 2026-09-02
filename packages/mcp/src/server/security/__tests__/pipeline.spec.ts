@@ -207,6 +207,16 @@ describe("localOnlyGuard", () => {
     expect(await localOnlyGuard({ transportKind: "http", remoteAddress: "10.0.0.1" })).toBe(false);
     expect(await localOnlyGuard({ transportKind: "http" })).toBe(false);
   });
+
+  it("does not honor a spoofable X-Forwarded-For", async () => {
+    expect(
+      await localOnlyGuard({
+        transportKind: "http",
+        remoteAddress: "10.0.0.1",
+        headers: { "x-forwarded-for": "127.0.0.1" },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("bearerTokenAuth", () => {
@@ -366,6 +376,51 @@ describe("allowListGuard", () => {
         transportKind: "http",
         remoteAddress: "1.2.3.4",
         origin: "https://evil.com",
+      }),
+    ).toBe(false);
+  });
+
+  it("trustForwardedFor matches the client hop, not the proxy socket", async () => {
+    const stage = allowListGuard({ addresses: ["1.2.3.4"], trustForwardedFor: true });
+    expect(
+      await stage({
+        transportKind: "http",
+        remoteAddress: "10.0.0.1", // the load balancer
+        headers: { "x-forwarded-for": "1.2.3.4" },
+      }),
+    ).toBe(true);
+  });
+
+  it("trustForwardedFor uses the left-most hop from a proxy chain", async () => {
+    const stage = allowListGuard({ addresses: ["1.2.3.4"], trustForwardedFor: true });
+    expect(
+      await stage({
+        transportKind: "http",
+        remoteAddress: "10.0.0.1",
+        headers: { "x-forwarded-for": "1.2.3.4, 10.0.0.9, 10.0.0.1" },
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores X-Forwarded-For unless trustForwardedFor is set", async () => {
+    const stage = allowListGuard({ addresses: ["1.2.3.4"] });
+    expect(
+      await stage({
+        transportKind: "http",
+        remoteAddress: "10.0.0.1",
+        headers: { "x-forwarded-for": "1.2.3.4" },
+      }),
+    ).toBe(false);
+  });
+
+  it("still matches the socket remoteAddress with trustForwardedFor on", async () => {
+    const stage = allowListGuard({ addresses: ["1.2.3.4"], trustForwardedFor: true });
+    expect(await stage({ transportKind: "http", remoteAddress: "1.2.3.4" })).toBe(true);
+    expect(
+      await stage({
+        transportKind: "http",
+        remoteAddress: "10.0.0.1",
+        headers: { "x-forwarded-for": "9.9.9.9" },
       }),
     ).toBe(false);
   });

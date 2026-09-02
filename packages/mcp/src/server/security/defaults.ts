@@ -18,21 +18,30 @@ import type {
   ResolvedSecurity,
 } from "./stages.js";
 import type { McpServerAuthOptions } from "../config.js";
+import { allowListGuard } from "./built-ins/allow-list.js";
 
 const TRUSTED_TRANSPORTS = new Set<string>(["stdio", "in-memory"]);
 
-/** Accepts every connection. Default for trusted transports. */
+/**
+ * Accepts every connection. Default for trusted transports.
+ *
+ * The irreducible base beneath {@link allowListGuard}: an allowlist floors
+ * at reject-unless-matched and only matches when `remoteAddress`/`origin`
+ * are present, so accept-everything (including a connection with neither)
+ * cannot be expressed as an allowlist config — it stays this identity.
+ */
 export const allowAllGuard: ConnectionGuard = async () => true;
+
+const LOOPBACK_ADDRESSES = ["127.0.0.1", "::1", "::ffff:127.0.0.1"] as const;
 
 /**
  * Accepts only loopback addresses (`127.0.0.1`, `::1`,
- * `::ffff:127.0.0.1`). Default for HTTP/WS until adopter overrides.
+ * `::ffff:127.0.0.1`). Default for HTTP/WS until adopter overrides — a
+ * thin {@link allowListGuard} over the loopback addresses.
  */
-export const localOnlyGuard: ConnectionGuard = async (info) => {
-  const addr = info.remoteAddress;
-  if (!addr) return false;
-  return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
-};
+export const localOnlyGuard: ConnectionGuard = allowListGuard({
+  addresses: [...LOOPBACK_ADDRESSES],
+});
 
 export const allowAllAuth: Authenticator = async () => ({
   authenticated: true,
