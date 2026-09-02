@@ -545,6 +545,19 @@ function createHttpCore(options: {
       ...(options.eventStore !== undefined ? { eventStore: options.eventStore } : {}),
     });
 
+    // A transport can close WITHOUT a client DELETE — a dropped connection,
+    // an error, harness teardown, an idle sweep. `onsessionclosed` fires only
+    // on DELETE, so without this the closed transport LINGERS in the map and
+    // the next request routed to it gets the SDK's bare -32001 "Session not
+    // found" (which some clients, Claude Code among them, surface as
+    // ENDPOINT_NOT_FOUND). Prune on ANY close so the id reads as unknown and
+    // the stale-id path above re-initializes it. Ports the v1 handler's
+    // `transport.onclose` (master server.ts).
+    sdkTransport.onclose = () => {
+      const sid = sdkTransport.sessionId;
+      if (sid !== undefined) sessions.delete(sid);
+    };
+
     if (closed) {
       writeJsonRpcError(res, 503, "Server shutting down");
       return;
