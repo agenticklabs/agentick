@@ -182,6 +182,23 @@ export interface HttpTransportOptions {
    * @see {@link OAuthTransportOptions}
    */
   readonly oauth?: OAuthTransportOptions;
+
+  /**
+   * Close a session after it sits idle this long. Complements the
+   * close-driven prune (a wedged/abandoned connection never fires
+   * `onclose`). Defaults to 30 minutes; `<= 0` disables the sweep.
+   */
+  readonly idleTtlMs?: number;
+
+  /**
+   * Concurrent-session ceiling. When a new session would exceed it, the
+   * least-recently-active session is evicted first. Defaults to 1000;
+   * `<= 0` disables the cap.
+   */
+  readonly maxSessions?: number;
+
+  /** How often the idle sweep runs. Defaults to 60s. */
+  readonly cleanupIntervalMs?: number;
 }
 
 /**
@@ -339,6 +356,19 @@ function writeJsonRpcError(res: ServerResponse, status: number, message: string)
   );
 }
 
+/** Concurrent-session ceiling when `maxSessions` is unset. */
+const DEFAULT_MAX_SESSIONS = 1000;
+/** How often the idle sweep runs when `cleanupIntervalMs` is unset. */
+const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
+/** How long a session may sit idle before the sweep closes it. */
+const DEFAULT_IDLE_TTL_MS = 30 * 60_000;
+
+/** A live SDK transport plus the last time a request touched its session. */
+interface ManagedSession {
+  readonly transport: StreamableHTTPServerTransport;
+  lastActivityAt: number;
+}
+
 /**
  * Shared request-routing core for BOTH HTTP transport shapes — the
  * listening {@link httpTransport} and the mount-door
@@ -353,6 +383,9 @@ function createHttpCore(options: {
   readonly sessionIdGenerator?: () => string;
   readonly enableJsonResponse?: boolean;
   readonly eventStore?: EventStore;
+  readonly idleTtlMs?: number;
+  readonly maxSessions?: number;
+  readonly cleanupIntervalMs?: number;
 }) {
   // OAuth resource-server discovery (RFC 9728). When a metadata document
   // is configured, resolve the well-known path(s) it is served at, keyed
@@ -375,8 +408,60 @@ function createHttpCore(options: {
     (oauthMetadata !== undefined ? deriveResourceMetadataUrl(oauthMetadata.resource) : undefined);
 
   /** Live SDK transports keyed by `Mcp-Session-Id`. */
-  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  const sessions = new Map<string, ManagedSession>();
   let closed = false;
+
+  // Idle-driven cleanup, complementing the close-driven prune in
+  // `openSession`. A session whose connection wedges or is abandoned without
+  // a DELETE never fires `onclose`, so without a sweep it lingers forever;
+  // and an unbounded map lets a burst of connects exhaust memory. Both are
+  // ON by default (v1 parity) — set a value <= 0 to disable that axis.
+  const idleTtlMs = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
+  const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+  const cleanupIntervalMs = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
+
+  /** Close the least-recently-active sessions until the map is under the cap. */
+  function evictUntilUnderCap(): void {
+    if (maxSessions <= 0) return;
+    while (sessions.size >= maxSessions) {
+      let stalestSid: string | undefined;
+      let stalestAt = Infinity;
+      for (const [sid, session] of sessions) {
+        if (session.lastActivityAt < stalestAt) {
+          stalestAt = session.lastActivityAt;
+          stalestSid = sid;
+        }
+      }
+      if (stalestSid === undefined) return;
+      // `close()` triggers the transport's `onclose`, which prunes the map.
+      void sessions
+        .get(stalestSid)
+        ?.transport.close()
+        .catch(() => {});
+      sessions.delete(stalestSid);
+    }
+  }
+
+  // Sweep timer — closes sessions idle longer than the TTL. `unref()` so it
+  // never keeps the process alive; cleared on `markClosed`.
+  const cleanupTimer =
+    idleTtlMs > 0
+      ? setInterval(() => {
+          const now = Date.now();
+          const stale: string[] = [];
+          for (const [sid, session] of sessions) {
+            if (now - session.lastActivityAt > idleTtlMs) stale.push(sid);
+          }
+          for (const sid of stale) {
+            void sessions
+              .get(sid)
+              ?.transport.close()
+              .catch(() => {});
+            sessions.delete(sid);
+          }
+        }, cleanupIntervalMs)
+      : undefined;
+  cleanupTimer?.unref?.();
 
   /** True iff `pathname` is a well-known metadata path this core serves. */
   function isMetadataPath(pathname: string): boolean {
@@ -461,7 +546,8 @@ function createHttpCore(options: {
     if (sessionId !== undefined) {
       const existing = sessions.get(sessionId);
       if (existing !== undefined) {
-        await existing.handleRequest(req, res, parsedBody);
+        existing.lastActivityAt = Date.now();
+        await existing.transport.handleRequest(req, res, parsedBody);
         return;
       }
       // Stale/unknown session id — the server restarted or the session was
@@ -528,10 +614,13 @@ function createHttpCore(options: {
     body: unknown,
     authenticatedUser?: McpAuthenticatedUser | null,
   ): Promise<void> {
+    // Make room BEFORE minting a new session, so the cap is a true ceiling.
+    evictUntilUnderCap();
+
     const sdkTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: options.sessionIdGenerator ?? (() => randomUUID()),
       onsessioninitialized: (sid) => {
-        sessions.set(sid, sdkTransport);
+        sessions.set(sid, { transport: sdkTransport, lastActivityAt: Date.now() });
       },
       onsessionclosed: (sid) => {
         sessions.delete(sid);
@@ -572,14 +661,27 @@ function createHttpCore(options: {
         ? { ...buildConnectionInfo(req), authenticatedUser }
         : buildConnectionInfo(req);
     await accept(sdkTransport, info);
+
+    // Count inbound messages as activity too, not just the HTTP requests
+    // tracked in `routeMcp` — a long-lived POST stream can carry traffic
+    // between requests. Wrap AFTER `accept`, which installed the harness's
+    // `onmessage`, and call through to it. `sessionId` resolves at call time.
+    const deliver = sdkTransport.onmessage;
+    sdkTransport.onmessage = (message, extra): void => {
+      const sid = sdkTransport.sessionId;
+      const session = sid !== undefined ? sessions.get(sid) : undefined;
+      if (session !== undefined) session.lastActivityAt = Date.now();
+      deliver?.(message, extra);
+    };
+
     await sdkTransport.handleRequest(req, res, body);
   }
 
   /** Tear down every live SDK session (closes their SSE streams). */
   async function closeSessions(): Promise<void> {
-    for (const sdkTransport of sessions.values()) {
+    for (const { transport } of sessions.values()) {
       try {
-        await sdkTransport.close();
+        await transport.close();
       } catch {
         // Best-effort: a failing close shouldn't block teardown.
       }
@@ -595,6 +697,7 @@ function createHttpCore(options: {
     closeSessions,
     markClosed: (): void => {
       closed = true;
+      if (cleanupTimer !== undefined) clearInterval(cleanupTimer);
     },
   };
 }
@@ -759,6 +862,23 @@ export interface HttpMiddlewareTransportOptions {
    * @see {@link OAuthTransportOptions}
    */
   readonly oauth?: OAuthTransportOptions;
+
+  /**
+   * Close a session after it sits idle this long. Complements the
+   * close-driven prune (a wedged/abandoned connection never fires
+   * `onclose`). Defaults to 30 minutes; `<= 0` disables the sweep.
+   */
+  readonly idleTtlMs?: number;
+
+  /**
+   * Concurrent-session ceiling. When a new session would exceed it, the
+   * least-recently-active session is evicted first. Defaults to 1000;
+   * `<= 0` disables the cap.
+   */
+  readonly maxSessions?: number;
+
+  /** How often the idle sweep runs. Defaults to 60s. */
+  readonly cleanupIntervalMs?: number;
 }
 
 /**

@@ -128,6 +128,9 @@ async function standUp(opts: {
   readonly parseBody?: boolean;
   readonly oauth?: boolean;
   readonly auth?: McpServerAuthOptions;
+  readonly idleTtlMs?: number;
+  readonly maxSessions?: number;
+  readonly cleanupIntervalMs?: number;
 }): Promise<{
   readonly harness: McpServerHarness;
   readonly mcp: HttpMiddlewareTransportHandle;
@@ -135,7 +138,12 @@ async function standUp(opts: {
   readonly base: string;
   readonly cleanup: () => Promise<void>;
 }> {
-  const mcp = httpMiddlewareTransport(opts.oauth ? { oauth: { metadata: OAUTH_METADATA } } : {});
+  const mcp = httpMiddlewareTransport({
+    ...(opts.oauth ? { oauth: { metadata: OAUTH_METADATA } } : {}),
+    ...(opts.idleTtlMs !== undefined ? { idleTtlMs: opts.idleTtlMs } : {}),
+    ...(opts.maxSessions !== undefined ? { maxSessions: opts.maxSessions } : {}),
+    ...(opts.cleanupIntervalMs !== undefined ? { cleanupIntervalMs: opts.cleanupIntervalMs } : {}),
+  });
   const harness = new McpServerHarness(
     `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
@@ -441,5 +449,80 @@ describe("httpMiddlewareTransport — stale-session recovery (restart survivabil
     } finally {
       await ctx.cleanup();
     }
+  });
+});
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe("httpMiddlewareTransport — session reaper", () => {
+  it("idle sweep closes a session that goes quiet past the TTL", async () => {
+    const ctx = await standUp({ parseBody: false, idleTtlMs: 60, cleanupIntervalMs: 20 });
+    const { client } = await connectClient(ctx.base);
+    expect(ctx.harness.connections()).toHaveLength(1);
+
+    await sleep(220); // no activity — the sweep closes it
+    expect(ctx.harness.connections()).toHaveLength(0);
+
+    try {
+      await client.close();
+    } catch {
+      /* session already reaped */
+    }
+    await ctx.cleanup();
+  });
+
+  it("activity resets idleness — a busy session is NOT reaped", async () => {
+    const ctx = await standUp({ parseBody: false, idleTtlMs: 120, cleanupIntervalMs: 20 });
+    const { client } = await connectClient(ctx.base);
+
+    // Calls spaced under the TTL keep it alive well past one TTL window.
+    for (let i = 0; i < 6; i++) {
+      await client.callTool({ name: "echo", arguments: { q: `${i}` } });
+      await sleep(40);
+    }
+    expect(ctx.harness.connections()).toHaveLength(1);
+
+    // Now go quiet — it gets reaped.
+    await sleep(260);
+    expect(ctx.harness.connections()).toHaveLength(0);
+
+    try {
+      await client.close();
+    } catch {
+      /* already reaped */
+    }
+    await ctx.cleanup();
+  });
+
+  it("maxSessions evicts the least-recently-active session", async () => {
+    // Sweep disabled (idleTtlMs: 0) so eviction is the only thing closing sessions.
+    const ctx = await standUp({ parseBody: false, idleTtlMs: 0, maxSessions: 2 });
+    const a = await connectClient(ctx.base);
+    const b = await connectClient(ctx.base);
+    expect(ctx.harness.connections()).toHaveLength(2);
+
+    // Touch A so B is the least-recently-active of the two. Space it so A's
+    // activity timestamp is strictly newer than B's (LRU ties break by
+    // insertion order, which would otherwise evict A).
+    await sleep(10);
+    await a.client.callTool({ name: "echo", arguments: { q: "keepalive" } });
+
+    // Opening C exceeds the cap → the stalest (B) is evicted, A survives.
+    const c = await connectClient(ctx.base);
+    await sleep(50); // let B's close propagate to the harness registry
+    expect(ctx.harness.connections()).toHaveLength(2);
+
+    // A was most-recently-active, so it's still live and serving.
+    const still = await a.client.callTool({ name: "echo", arguments: { q: "alive" } });
+    expect((still.content as { text: string }[])[0]!.text).toBe("echo: alive");
+
+    for (const conn of [a, b, c]) {
+      try {
+        await conn.client.close();
+      } catch {
+        /* evicted session's client may already be dead */
+      }
+    }
+    await ctx.cleanup();
   });
 });
