@@ -60,6 +60,7 @@ export * from "./prompts-harness.js";
 export * from "./prompts-store.js";
 export * from "./resources-harness.js";
 export * from "./resources-store.js";
+export * from "./pending-request-store.js";
 export * from "./completions-harness.js";
 export * from "./mcp-server-harness.js";
 export * from "./state-harness.js";

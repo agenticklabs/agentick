@@ -60,6 +60,8 @@ import type {
   OperationJournal,
   OperationJournalFactory,
   OperationOrigin,
+  PendingRequestStore,
+  PendingRequestStoreFactory,
   ProtocolEvent,
   StandardSchemaV1,
   StoreCtx,
@@ -85,7 +87,18 @@ import {
   type RegisteredCommand,
   type StreamCommand,
 } from "./command-runner.js";
-import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
+import {
+  RequestResponseRegistry,
+  type RequestError,
+  type PendingRequestSnapshot,
+} from "./request-response-registry.js";
+import {
+  RequestResponder,
+  type DurableRequestOptions,
+  type ResumeOutcome,
+} from "./request-responder.js";
+import type { RequestStateCodec } from "./request-state-codec.js";
+import { createInMemoryPendingRequestStore } from "./pending-request-store-memory.js";
 import {
   type InterceptorKind,
   type OperationSignal,
@@ -220,34 +233,14 @@ export {
 } from "./middleware.js";
 
 // ============================================================================
-// Pending-request projection (§6.1)
+// Pending-request projection (§6.1) — the types live with their owners
+// (`PendingRequestSnapshot` on the registry, `ResumeOutcome` on the responder);
+// re-exported here so the runtime barrel and subclasses keep importing them from
+// BaseHarness.
 // ============================================================================
 
-/**
- * The projectable pending-state of ONE in-flight {@link BaseHarness.request}
- * (§6.1, the Design-B watch-list). Carries exactly what a channel-snapshot
- * provider needs to re-present an outstanding ask to a mid-ask subscriber —
- * the correlation key, the reply address, the channel it rode, and the wire
- * payload — mirroring, field for field, what a LIVE request delta exposes
- * (`envelope.metadata.correlationId` / `.replyTo`, `envelope.payload`). A
- * subscriber that seeds from these frames is in the same state as one that
- * observed the live delta.
- *
- * A FLOOR, not a ceiling: `payload` is opaque (`unknown`) — a harness's own
- * request payload rides through untouched. `pendingRequests` returns these;
- * per-harness snapshot providers (`ElicitationHarness`, `ToolExecutorHarness`)
- * fold them into their channel's opening frame.
- */
-export interface PendingRequestSnapshot {
-  /** Correlation key (the value on the live request envelope's `metadata.correlationId`). */
-  readonly correlationId: string;
-  /** Inbox address a response routes back to (the live envelope's `metadata.replyTo`). */
-  readonly replyTo: string;
-  /** Bare channel name the request was published on (`session:channel:<channel>`). */
-  readonly channel: string;
-  /** The wire request payload (opaque; the live envelope's `payload`). */
-  readonly payload: unknown;
-}
+export type { PendingRequestSnapshot } from "./request-response-registry.js";
+export type { ResumeOutcome } from "./request-responder.js";
 
 // ============================================================================
 // BaseHarness
@@ -389,6 +382,21 @@ export interface BaseHarnessOptions<
   readonly inbox?: MessageInbox | MessageInboxFactory<HarnessShell>;
   readonly journal?: OperationJournal | OperationJournalFactory<HarnessShell>;
   /**
+   * Durable backing for this harness's suspended request/response state
+   * (the input-required capability). Cascades like `bus`/`inbox`/`journal`;
+   * defaults to an in-memory `MemoryCollection`.
+   */
+  readonly pendingStore?: PendingRequestStore | PendingRequestStoreFactory<HarnessShell>;
+  /**
+   * Sealed-handle codec for the `requestState` wire binding (MRTR). When set, the
+   * harness can mint/verify opaque handles for durable requests via
+   * {@link BaseHarness.mintRequestState} / {@link BaseHarness.resumeWithState}.
+   * Absent ⇒ no wire handles (in-process `resume` by correlationId still works);
+   * a wire transport that speaks `requestState` supplies one (e.g. the app's
+   * AES-GCM keyring via `createRequestStateCodec`).
+   */
+  readonly requestStateCodec?: RequestStateCodec;
+  /**
    * Span-attribute namespace (ADR 78) — the prefix on every telemetry
    * attribute key. Defaults to `"agentick"`; whitelabel deployments override
    * it. Threaded from the app so a deployment sets it once.
@@ -520,6 +528,15 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * the subclass's `handleMessage` is consulted.
    */
   protected readonly requests = new RequestResponseRegistry<unknown, PendingRequestSnapshot>();
+
+  /**
+   * The durable dimension of request/response — wraps {@link requests} + the
+   * lazy {@link pendingStore} and owns `track` (persist + single-finalizer evict)
+   * and `resume`. `request`/`resume` delegate to it; the pure live paths
+   * (`dispatchMessage` resolve, `pendingRequests`) stay on {@link requests}.
+   * Assigned in the constructor once `address` and the store slot are settled.
+   */
+  protected readonly responder: RequestResponder;
 
   /**
    * Span-attribute namespace (ADR 78). The prefix on every `spanAttributes`
@@ -1066,6 +1083,19 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   protected readonly journal: OperationJournal;
   protected readonly bus: EventBus;
   protected readonly inbox: MessageInbox;
+  private _pendingStore?: PendingRequestStore;
+
+  /**
+   * Durable backing for suspended requests (the input-required capability).
+   * LAZY: the in-memory default is constructed on first use, so the many
+   * harnesses that never issue a `durable` request or call `resume` allocate no
+   * store at all. An explicitly supplied `options.pendingStore` is resolved
+   * eagerly at construction (below) — a provided store is intentional, not dead
+   * weight. Cascades like `bus`/`inbox`/`journal` when supplied.
+   */
+  protected get pendingStore(): PendingRequestStore {
+    return (this._pendingStore ??= createInMemoryPendingRequestStore());
+  }
 
   /**
    * The operation-execution substrate (Tier 2) as a per-harness instance —
@@ -1150,6 +1180,32 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       HarnessShell,
       MessageInboxFactory<HarnessShell>
     >(options.inbox, shell, () => defaultInbox, `${surface}.inbox`);
+    // Resolve an explicitly supplied store eagerly (instance | factory); leave
+    // the default unmaterialized so the lazy `pendingStore` getter creates it
+    // only if this harness ever suspends a durable request.
+    if (options.pendingStore !== undefined) {
+      this._pendingStore = resolveSyncSubstrateSlot<
+        PendingRequestStore,
+        HarnessShell,
+        PendingRequestStoreFactory<HarnessShell>
+      >(
+        options.pendingStore,
+        shell,
+        () => createInMemoryPendingRequestStore(),
+        `${surface}.pendingStore`,
+      );
+    }
+    // Durable request/response facade over the live registry + the lazy store.
+    // `store`/`storeCtx` are closures so the pending store stays lazily resolved
+    // on this harness; `surface`/`address` are the identity the responder stamps.
+    this.responder = new RequestResponder({
+      registry: this.requests,
+      store: () => this.pendingStore,
+      storeCtx: () => this.storeCtx(),
+      surface,
+      address: this.address,
+      ...(options.requestStateCodec !== undefined ? { codec: options.requestStateCodec } : {}),
+    });
     // Replay buffered close handlers onto this (the now-real harness).
     for (const h of pendingCloseHandlers) this.onClose(h);
 
@@ -2176,20 +2232,16 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
        * Defaults to the harness's captured RuntimeContext scope.
        */
       readonly scope?: EventScope;
+      /**
+       * Turn this request into a DURABLE suspension (see {@link RequestResponder.track}):
+       * the pending record is persisted before publish and evicted on settle, so an
+       * answer can arrive out-of-band, on a fresh process, via {@link resume}. Omit
+       * for transient in-process RPC (the live fast path only).
+       */
+      readonly durable?: DurableRequestOptions;
     } = {},
   ): Effect.Effect<TResp, RequestError, never> {
-    const correlationId = `req:${generateId()}`;
     const replyTo = this.address;
-    // Register WITH a projectable snapshot (§6.1). Retained for the request's
-    // lifetime, evicted with the Deferred; `pendingRequests(channel)` reads it
-    // back so a channel-snapshot provider can seed a mid-ask subscriber. The
-    // fields mirror the live request delta below (correlationId/replyTo in
-    // metadata, payload as the body) so a seeded subscriber matches a live one.
-    const registered = this.requests.register({
-      correlationId,
-      snapshot: { correlationId, replyTo, channel, payload },
-      ...omitUndefined({ timeoutMs: opts.timeoutMs, signal: opts.signal }),
-    });
     // Subscribers filter on `scope.sessionId` etc.; harnesses that publish from
     // within a session pass `opts.scope` explicitly (e.g., ElicitationHarness
     // stamps its parent sessionId). Defaults to empty when the caller doesn't
@@ -2197,28 +2249,36 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     // construction" fallback. Effect-typed call sites should `yield* getContext`
     // to populate scope if they need it.
     const scope = this.stampScope(opts.scope ?? {});
-    // Publish the request envelope on the bus. The channel name pattern
-    // matches `ChannelHandle.publish` — `session:channel:<channel>`.
-    const fullName = `session:channel:${channel}`;
-    const envelope: ProtocolEvent = {
-      id: generateId(),
-      surface: "session",
-      name: fullName,
-      phase: "delta",
-      timestamp: Date.now(),
-      scope,
-      payload,
-      metadata: {
-        requestType: "request",
-        correlationId,
-        replyTo,
+    // The responder owns correlation + durable persistence (register the live
+    // Deferred, persist the record before we publish, evict on settle); `request`
+    // owns only the TRANSPORT — build + publish the channel envelope, then await.
+    return Effect.flatMap(
+      Effect.promise(() =>
+        this.responder.track(channel, payload, {
+          ...omitUndefined({ timeoutMs: opts.timeoutMs, signal: opts.signal }),
+          ...(opts.durable !== undefined ? { durable: opts.durable } : {}),
+        }),
+      ),
+      ({ correlationId, promise }) => {
+        // The channel name pattern matches `ChannelHandle.publish` —
+        // `session:channel:<channel>`. `metadata` mirrors the snapshot fields.
+        const envelope: ProtocolEvent = {
+          id: generateId(),
+          surface: "session",
+          name: `session:channel:${channel}`,
+          phase: "delta",
+          timestamp: Date.now(),
+          scope,
+          payload,
+          metadata: { requestType: "request", correlationId, replyTo },
+        } as ProtocolEvent;
+        return Effect.flatMap(this.bus.append(envelope), () =>
+          Effect.tryPromise<TResp, RequestError>({
+            try: () => promise as Promise<TResp>,
+            catch: (cause): RequestError => cause as RequestError,
+          }),
+        );
       },
-    } as ProtocolEvent;
-    return Effect.flatMap(this.bus.append(envelope), () =>
-      Effect.tryPromise<TResp, RequestError>({
-        try: () => registered.promise as Promise<TResp>,
-        catch: (cause): RequestError => cause as RequestError,
-      }),
     );
   }
 
@@ -2276,6 +2336,44 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   protected pendingRequests(channel?: string): readonly PendingRequestSnapshot[] {
     const all = this.requests.pendingSnapshots();
     return channel === undefined ? all : all.filter((p) => p.channel === channel);
+  }
+
+  /**
+   * Deliver an out-of-band answer to a durable {@link request} — an answer that
+   * arrives on another channel, from another process, or after a recycle.
+   * Delegates to {@link RequestResponder.resume}: fast path resolves a live
+   * parked `Deferred`; slow path hydrates the record from the store, records the
+   * answer, and marks it consumed. See {@link ResumeOutcome}.
+   */
+  protected resume(
+    correlationId: string,
+    response: unknown,
+    ctx?: StoreCtx,
+  ): Promise<ResumeOutcome> {
+    return this.responder.resume(correlationId, response, ctx);
+  }
+
+  /**
+   * Seal a durable request into its opaque `requestState` wire handle (MRTR) —
+   * for a transport that suspends a request to the client. `undefined` when no
+   * {@link BaseHarnessOptions.requestStateCodec} is configured or the record is
+   * gone. Delegates to {@link RequestResponder.mintHandle}.
+   */
+  protected mintRequestState(correlationId: string, ctx?: StoreCtx): Promise<string | undefined> {
+    return this.responder.mintHandle(correlationId, ctx);
+  }
+
+  /**
+   * Resume a durable request from a client-echoed `requestState` handle — verify
+   * (integrity/expiry/key), enforce the principal binding, then resume by the
+   * handle's correlationId. Delegates to {@link RequestResponder.resumeWithState}.
+   */
+  protected resumeWithState(
+    requestState: string,
+    response: unknown,
+    opts?: { readonly principal?: string; readonly ctx?: StoreCtx },
+  ): Promise<ResumeOutcome> {
+    return this.responder.resumeWithState(requestState, response, opts);
   }
 
   // ──────── lifecycle ────────

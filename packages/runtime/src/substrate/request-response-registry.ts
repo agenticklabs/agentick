@@ -35,6 +35,23 @@ export type RequestError =
       readonly reason?: unknown;
     };
 
+/**
+ * The projectable pending-state of one in-flight {@link RequestResponseRegistry}
+ * request — the read-side a channel-snapshot provider folds into the opening
+ * frame a mid-ask subscriber receives. Lives here (not on `BaseHarness`) because
+ * it is the registry's own snapshot shape; `BaseHarness` re-exports it.
+ */
+export interface PendingRequestSnapshot {
+  /** Correlation key (the value on the live request envelope's `metadata.correlationId`). */
+  readonly correlationId: string;
+  /** Inbox address a response routes back to (the live envelope's `metadata.replyTo`). */
+  readonly replyTo: string;
+  /** Bare channel name the request was published on (`session:channel:<channel>`). */
+  readonly channel: string;
+  /** The wire request payload (opaque; the live envelope's `payload`). */
+  readonly payload: unknown;
+}
+
 export interface RegisterOptions<TSnapshot = unknown> {
   readonly correlationId: string;
   readonly timeoutMs?: number;
@@ -49,6 +66,15 @@ export interface RegisterOptions<TSnapshot = unknown> {
    * not projected (the map stays empty; `pending()` skips them).
    */
   readonly snapshot?: TSnapshot;
+  /**
+   * Run once when this request settles (answered, timed out, aborted, or
+   * cancelled) — in the SAME `Effect.ensuring` that evicts the maps, so a single
+   * finalizer owns all teardown. Store-agnostic on purpose: the durable-request
+   * owner passes a `() => store.delete(id)` here so the durable record is evicted
+   * on the one settle path, without the registry knowing what a store is. Failures
+   * are swallowed (cleanup must not resurface on an already-settled request).
+   */
+  readonly onSettle?: () => void | Promise<void>;
 }
 
 export interface RegisteredRequest<TResp> {
@@ -90,7 +116,7 @@ export class RequestResponseRegistry<TResp = unknown, TSnapshot = unknown> {
    * The registry map entry is removed atomically via `Effect.ensuring`.
    */
   register(opts: RegisterOptions<TSnapshot>): RegisteredRequest<TResp> {
-    const { correlationId, timeoutMs, signal, snapshot } = opts;
+    const { correlationId, timeoutMs, signal, snapshot, onSettle } = opts;
     const deferred = Effect.runSync(Deferred.make<TResp, RequestError>());
     this.pending.set(correlationId, deferred);
     if (snapshot !== undefined) this.snapshots.set(correlationId, snapshot);
@@ -136,12 +162,17 @@ export class RequestResponseRegistry<TResp = unknown, TSnapshot = unknown> {
       }
     }
 
+    const evict = Effect.sync(() => {
+      this.pending.delete(correlationId);
+      this.snapshots.delete(correlationId);
+    });
     program = program.pipe(
       Effect.ensuring(
-        Effect.sync(() => {
-          this.pending.delete(correlationId);
-          this.snapshots.delete(correlationId);
-        }),
+        onSettle === undefined
+          ? evict
+          : Effect.flatMap(evict, () =>
+              Effect.promise(() => Promise.resolve(onSettle()).catch(() => undefined)),
+            ),
       ),
     );
 

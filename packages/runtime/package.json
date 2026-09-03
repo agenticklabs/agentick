@@ -67,6 +67,7 @@
   },
   "dependencies": {
     "@agentick/spec": "workspace:*",
+    "@agentick/store": "workspace:*",
     "@agentick/utils": "workspace:*",
     "@opentelemetry/sdk-metrics": "^2.0.0",
     "@opentelemetry/sdk-trace-base": "^2.0.0",
