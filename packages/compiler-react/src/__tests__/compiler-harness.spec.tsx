@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
@@ -170,5 +170,28 @@ describe("CompilerHarness — end-to-end", () => {
       }),
     );
     expect(ack.messageId).toBe("msg_recompile_1");
+  });
+
+  it("unmount runs effect cleanups (releases subscriptions)", async () => {
+    const { harness } = await makeHarness();
+    const bridges = fakeBridges({ sessionId: "s_1" });
+    const cleanup = vi.fn();
+
+    const Agent = () => {
+      React.useEffect(() => cleanup, []);
+      return React.createElement("message", { role: "system" }, "hi");
+    };
+
+    await harness.mount({
+      mountId: "m_unmount",
+      sessionId: "s_1",
+      element: React.createElement(Agent),
+      bridges,
+      defaultFormatter: { id: "markdown", format: "markdown" },
+    });
+    expect(cleanup).not.toHaveBeenCalled();
+
+    await harness.unmount({ mountId: "m_unmount" });
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 });

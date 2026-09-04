@@ -416,6 +416,14 @@ export class CompilerHarness
   async unmount(input: UnmountInput): Promise<void> {
     const state = this.mounts.get(input.mountId);
     if (!state) return;
+    // React-unmount the tree so effect cleanups (useOn*/createTool/model
+    // registrations) run and release their subscriptions. Mirrors template.ts.
+    try {
+      state.compiler.render(null, state.root);
+      state.compiler.flushPassiveEffects();
+    } catch {
+      // best-effort cleanup
+    }
     state.lifecycle.clear();
     state.commandInterceptors.clear();
     state.container.children.length = 0;
