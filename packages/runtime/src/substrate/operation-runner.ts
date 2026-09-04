@@ -96,6 +96,7 @@ import {
 } from "@agentick/spec";
 import { getEmissionBus } from "./emission-target.js";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
+import { withFreshChildScope } from "./positional-op-id.js";
 import { generateId } from "@agentick/utils";
 import {
   composeMiddleware,
@@ -402,7 +403,7 @@ class OperationRunnerImpl implements OperationRunner {
             // emits terminal:succeeded. `catchAll` sees only the typed-failure
             // channel — defects/interrupts pass through untouched, exactly as
             // the prior `tapError` did.
-            const core = composed(resolvedOp.input).pipe(
+            const core = withFreshChildScope(composed(resolvedOp.input)).pipe(
               Effect.tap((value) =>
                 this.publishTerminal(resolvedOp, scope, "succeeded", { result: value }),
               ),
