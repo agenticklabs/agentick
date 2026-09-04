@@ -26,6 +26,7 @@ import { BaseHarness } from "../substrate/base-harness.js";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
 import { LocalInbox } from "../substrate/local-inbox.js";
 import { MemoryJournal } from "../substrate/memory-journal.js";
+import { positionalOpId } from "../substrate/positional-op-id.js";
 
 let randomCounter = 0;
 
@@ -330,6 +331,46 @@ describe("positional-replay proof — auto-derived keys + the determinism failur
     expect(charge).toBe("emailed"); // charge got email's cached value
     expect(h.runsOf("wf:0")).toBe(1); // neither new body executed — wrongly replayed
     expect(h.runsOf("wf:1")).toBe(1);
+
+    await h.close();
+  });
+});
+
+describe("positional-replay proof — explicit injection across an orphan boundary", () => {
+  it("an orphan dispatch (fresh fiber, Promise-land, no inherited context) replays when the positional opId is injected explicitly", async () => {
+    const h = new ReplayProbe();
+    await h.ready;
+    const PARENT = "code:exec-42"; // the stable code:execute op id (the logical execution)
+
+    // A "program" running in Promise-land — NO Effect fiber, NO ambient context.
+    // Its dispatch closure carries the parent opId + a per-run counter EXPLICITLY
+    // (plain data), and each step is its own orphan runOperation. No FiberRef, no ALS.
+    const runProgram = async (
+      charge: () => string,
+      email: () => string,
+    ): Promise<readonly string[]> => {
+      let index = 0;
+      const dispatch = (produce: () => string): Promise<string> =>
+        h.step(positionalOpId(PARENT, index++), produce);
+      return [await dispatch(charge), await dispatch(email)];
+    };
+
+    expect(
+      await runProgram(
+        () => "charged",
+        () => "emailed",
+      ),
+    ).toEqual(["charged", "emailed"]);
+    // Re-run the SAME program (same parent, same order); bodies would return sentinels if they ran:
+    expect(
+      await runProgram(
+        () => "should-not-recharge",
+        () => "should-not-resend",
+      ),
+    ).toEqual(["charged", "emailed"]);
+
+    expect(h.runsOf(positionalOpId(PARENT, 0))).toBe(1); // charge executed once — replayed on re-run
+    expect(h.runsOf(positionalOpId(PARENT, 1))).toBe(1); // email once
 
     await h.close();
   });
