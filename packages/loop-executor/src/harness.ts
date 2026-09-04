@@ -118,6 +118,8 @@ import {
   HandlerError,
   MultipleStructuredOutputs,
   NoModelForExecutionError,
+  NormalizationFailed,
+  ProjectionFailed,
   ProviderAborted,
   ProviderRejected,
   ResponseValidationError,
@@ -1272,17 +1274,25 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // forwards each AdapterDelta (including the symmetric summary
         // events) as a `model` event — NO loop-side synthesis on this
         // path (adapter already owns symmetric event emission).
-        const projected = yield* tickModelExecutor.fx.project({
-          compiled: tickCompiled,
-          target: tickTarget,
-          scope: modelScope,
-          tools: modelToolsForRun,
-          ...(providerTools.length > 0 ? { providerTools } : {}),
-          ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
-        });
-        // #182 Option A: a provider failure lands on the twin's E
-        // channel; `Effect.either` catches it exactly where the Promise
-        // version caught the `.result` rejection → a failed terminal.
+        // All three phases fold to a failed terminal, not a rejected run: a
+        // rejection exits through the run's `catchAll` as an `ExecutionError`,
+        // which reaches the boundary record with no cause and the decide fold
+        // never (ADR 99). The Promise version caught exactly the `.result`
+        // rejection here (#182 Option A); project and normalize threw past it.
+        const projectedOrFailure = yield* Effect.either(
+          tickModelExecutor.fx.project({
+            compiled: tickCompiled,
+            target: tickTarget,
+            scope: modelScope,
+            tools: modelToolsForRun,
+            ...(providerTools.length > 0 ? { providerTools } : {}),
+            ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
+          }),
+        );
+        if (Either.isLeft(projectedOrFailure)) {
+          return failedTickResult(input, streamTerminal(projectedOrFailure.left));
+        }
+        const projected = projectedOrFailure.right;
         const streamed = yield* Effect.either(
           tickModelExecutor.fx.executeStream(
             {
@@ -1300,11 +1310,17 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // inline `break` before the tick-end bridge).
           return failedTickResult(input, streamTerminal(streamed.left));
         }
-        const normalized = yield* tickModelExecutor.fx.normalize({
-          targetOutput: streamed.right,
-          target: tickTarget,
-          scope: modelScope,
-        });
+        const normalizedOrFailure = yield* Effect.either(
+          tickModelExecutor.fx.normalize({
+            targetOutput: streamed.right,
+            target: tickTarget,
+            scope: modelScope,
+          }),
+        );
+        if (Either.isLeft(normalizedOrFailure)) {
+          return failedTickResult(input, streamTerminal(normalizedOrFailure.left));
+        }
+        const normalized = normalizedOrFailure.right;
         // The non-streaming `run` stamps this inside the executor, where one
         // call sees both halves. Here the loop composes the three phases
         // itself, so `normalize` never meets the input that was sent and the
@@ -1778,6 +1794,9 @@ function streamTerminal(cause: unknown): ExecutorTerminal<LanguageModelExecution
   // `_tag` — wrapping would flatten every class into `ProviderRejected`, which
   // is exactly the distinction recovery policy reads.
   if (isExecuteError(cause)) return { outcome: "failed", error: cause };
+  if (cause instanceof ProjectionFailed || cause instanceof NormalizationFailed) {
+    return { outcome: "failed", error: cause };
+  }
   return { outcome: "failed", error: new ProviderRejected({ cause }) };
 }
 

@@ -100,6 +100,7 @@ import type {
   SessionRunOutcome,
   SessionStatus,
   SessionStatusFrame,
+  StopCause,
   SessionStore,
   SessionSubstrateParent,
   ForkInput,
@@ -130,9 +131,11 @@ import {
   DEFAULT_JOURNALING_POLICY,
   DEFAULT_TERMINAL_TOOL_NAME,
   BranchSourceEntryNotFoundError,
+  ExecutionError,
   ExecutionFailed,
   foldUsageRollup,
   HandlerError,
+  isAgentickError,
   isChannelSnapshotProvider,
   isBranchCapable,
   isCheckpointCapable,
@@ -3975,6 +3978,10 @@ export class SessionHarness<P = unknown>
             .endTurn({
               executionId,
               outcome: "failed",
+              // The rejection's cause rides the record exactly as a resolved
+              // failure's does: this boundary is the only durable account of a
+              // turn that died before it appended anything.
+              stopCause: rejectionStopCause(err),
               // Execution rung (backlog F) — still set here; the rail clears in .finally.
               ...(this.runtime.currentExecutionInternal() ? { internal: true } : {}),
               ...omitUndefined({
@@ -4485,4 +4492,21 @@ function boundaryTarget(
   if (target === undefined) return undefined;
   const fields = omitUndefined({ provider: target.provider, modelId: target.modelId });
   return Object.keys(fields).length > 0 ? fields : undefined;
+}
+
+/**
+ * The cause a REJECTED execution leaves on its boundary. The loop wraps every
+ * uncaught twin failure in `ExecutionError`; the wrapped cause is the error a
+ * reader wants, so it is unwrapped when it is one of ours.
+ */
+function rejectionStopCause(err: unknown): StopCause {
+  const inner = err instanceof ExecutionError && isAgentickError(err.cause) ? err.cause : err;
+  if (isAgentickError(inner)) return { kind: "failed", error: inner.toJSON() };
+  return {
+    kind: "failed",
+    error: {
+      _tag: "ExecutionError",
+      message: inner instanceof Error ? inner.message : String(inner),
+    },
+  };
 }

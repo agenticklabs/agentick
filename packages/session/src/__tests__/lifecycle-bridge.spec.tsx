@@ -586,6 +586,63 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
     await tools.close();
   });
 
+  it("a REJECTED execution still leaves its cause on the turn boundary", async () => {
+    // The other way a turn ends badly: not a provider refusal the loop folds
+    // into a terminal, but a defect that escapes the run entirely. The caller's
+    // `.result` rejects — and until now the boundary said `failed` and nothing
+    // else, so a reloaded client (and the operator reading the record) had an
+    // outcome with no account of it.
+    const stack = await mkStack(`err-reject-${Math.random()}`);
+    const healthy = new FakeLanguageModelExecutor(
+      `exec-reject-${Math.random()}`,
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        scripted: {
+          result: {
+            specVersion: "2026-05-08",
+            output: [{ type: "text", text: "never" }],
+            stopReason: "end",
+            usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          },
+        },
+      },
+    );
+    await healthy.ready;
+    // A synchronous throw inside the run twin — the shape of a defect in code
+    // that is not itself an Effect. Nothing on the tick path folds it, so the
+    // run fiber dies and the send rejects.
+    const exploding = Object.create(healthy) as FakeLanguageModelExecutor;
+    Object.defineProperty(exploding, "fx", {
+      get() {
+        throw new Error("projection exploded");
+      },
+    });
+    const { session, tools } = await mkSession(
+      stack,
+      `err-reject-${Math.random()}`,
+      React.createElement(function Agent() {
+        return React.createElement(System, null, "err");
+      }),
+      exploding,
+    );
+
+    const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
+    await expect(handle.result).rejects.toThrow("projection exploded");
+
+    const boundary = session.timeline.read().entries.find((e) => e.kind === "boundary");
+    if (boundary?.kind !== "boundary") throw new Error("expected a boundary entry");
+    expect(boundary.boundary.outcome).toBe("failed");
+    if (boundary.boundary.stopCause?.kind !== "failed") {
+      throw new Error("expected the boundary to carry the failure cause");
+    }
+    expect(boundary.boundary.stopCause.error.message).toContain("projection exploded");
+
+    await session.close();
+    await tools.close();
+  });
+
   it("error projection: a HARD tool-handler throw fires tool-end (failed) AND useOnError (phase 'tool')", async () => {
     const stack = await mkStack(`err-tool-${Math.random()}`);
 
