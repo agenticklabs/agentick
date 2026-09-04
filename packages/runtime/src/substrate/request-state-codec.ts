@@ -83,7 +83,13 @@ function utf8(value: string): Uint8Array<ArrayBuffer> {
   return new Uint8Array(textEncoder.encode(value));
 }
 
-async function importAesKey(secret: Uint8Array | string): Promise<CryptoKey> {
+/**
+ * The imported AES key type, derived from the Web Crypto API in scope — avoids
+ * naming the DOM-lib `AesKey` global, which not every consuming tsconfig has.
+ */
+type AesKey = Awaited<ReturnType<typeof globalThis.crypto.subtle.importKey>>;
+
+async function importAesKey(secret: Uint8Array | string): Promise<AesKey> {
   const raw =
     typeof secret === "string"
       ? new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", utf8(secret)))
@@ -107,9 +113,9 @@ export function createRequestStateCodec(config: AesGcmCodecConfig): RequestState
     throw new Error(`createRequestStateCodec: currentKid "${currentKid}" is not in keys`);
   }
   const secretByKid = new Map(config.keys.map((k) => [k.kid, k.secret] as const));
-  const keyCache = new Map<string, Promise<CryptoKey>>();
+  const keyCache = new Map<string, Promise<AesKey>>();
 
-  function keyFor(kid: string): Promise<CryptoKey> | undefined {
+  function keyFor(kid: string): Promise<AesKey> | undefined {
     const secret = secretByKid.get(kid);
     if (secret === undefined) return undefined;
     let cached = keyCache.get(kid);

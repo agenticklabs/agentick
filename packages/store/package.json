@@ -69,9 +69,6 @@
     "@agentick/spec": "workspace:*",
     "effect": "^3.22.0"
   },
-  "devDependencies": {
-    "@agentick/runtime": "workspace:*"
-  },
   "peerDependencies": {
     "vitest": "^4.0.0"
   },

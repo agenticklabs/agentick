@@ -8,11 +8,10 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { MemoryJournal } from "@agentick/runtime";
+import { MemoryJournal } from "../substrate/memory-journal.js";
 import type { ProtocolEvent } from "@agentick/spec";
 
-import { JournalProjectedStore } from "../journal-projected.js";
-import { stubStoreCtx } from "../stub-store-ctx.js";
+import { JournalProjectedStore, stubStoreCtx } from "@agentick/store";
 
 interface Cell {
   readonly id: string;
