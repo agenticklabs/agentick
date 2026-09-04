@@ -6,9 +6,10 @@
  * rejection never reaches the decide fold, so a deployment that turns streaming
  * off got no tick retry at all, for any failure class.
  *
- * What does NOT fold: a projection or normalization defect. Those reproduce
- * exactly on a re-issued request, so they stay rejections rather than becoming
- * terminals a policy could waste a tick on.
+ * Projection and normalization defects fold too. They once stayed rejections on
+ * the theory that a retry would reproduce them — but a rejection reaches only
+ * the promise's awaiter, and the turn boundary recorded `failed` with no cause.
+ * The decide fold already defaults to stop; not retrying is its call to make.
  *
  * @see docs/proposals/v2/blueprint/99-tick-failure-recovery.md
  */
@@ -135,18 +136,31 @@ describe("run() folds a classified provider failure into a failed terminal", () 
   });
 });
 
-describe("run() keeps rejecting for deterministic local failures", () => {
-  it("a normalization defect rejects — a retry would reproduce it exactly", async () => {
-    const exec = await makeExecutor("run-reject-normalize", {
+describe("run() folds local defects to a failed terminal that names the phase", () => {
+  // A rejection carries the cause to exactly one reader: whoever awaits the
+  // promise. A failed terminal carries it to the tick result, the stop cause,
+  // and the turn boundary — the record a deployment actually reads back when a
+  // turn "failed for no reason". Whether a retry would reproduce the defect is
+  // the decide fold's call (ADR 99), and its default is to stop.
+  it("a normalization defect", async () => {
+    const exec = await makeExecutor("run-fold-normalize", {
       normalizeThrows: new Error("cannot read property 'candidates' of undefined"),
     });
-    await expect(exec.run(mkInput())).rejects.toMatchObject({ _tag: "NormalizationFailed" });
+    const terminal = await exec.run(mkInput());
+    expect(terminal.outcome).toBe("failed");
+    if (terminal.outcome !== "failed") throw new Error("expected a failed terminal");
+    expect(terminal.error._tag).toBe("NormalizationFailed");
+    expect(terminal.error.message).toContain("candidates");
   });
 
-  it("a projection failure never becomes a terminal", async () => {
-    const exec = await makeExecutor("run-reject-project", {
+  it("a projection defect", async () => {
+    const exec = await makeExecutor("run-fold-project", {
       projectThrows: new Error("projection blew up"),
     });
-    await expect(exec.run(mkInput())).rejects.toBeTruthy();
+    const terminal = await exec.run(mkInput());
+    expect(terminal.outcome).toBe("failed");
+    if (terminal.outcome !== "failed") throw new Error("expected a failed terminal");
+    expect(terminal.error._tag).toBe("ProjectionFailed");
+    expect(terminal.error.message).toContain("projection blew up");
   });
 });

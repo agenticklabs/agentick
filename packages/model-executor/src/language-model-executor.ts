@@ -669,8 +669,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     return this.runOperation(op, (i) =>
       Effect.try({
         try: () => this.projectImpl(i),
-        catch: (cause): ProjectionError =>
-          new ProjectionFailed({ reason: "projection threw", cause }),
+        catch: (cause): ProjectionError => projectionThrew(cause),
       }),
     );
   }
@@ -1183,11 +1182,15 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       }
 
       // 1. project (pure)
-      const projected = this.projectImpl({
-        compiled: input.compiled,
-        target: input.target,
-        tools: input.tools,
-        ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
+      const projected = yield* Effect.try({
+        try: () =>
+          this.projectImpl({
+            compiled: input.compiled,
+            target: input.target,
+            tools: input.tools,
+            ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
+          }),
+        catch: (cause): ExecutorError => projectionThrew(cause),
       });
 
       // 2. execute (provider call; may stream + emit deltas)
@@ -1266,8 +1269,24 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         (cause): cause is ExecuteErrorChannel => isExecuteError(cause),
         (error) => Effect.succeed(executeErrorToTerminal(error)),
       ),
+      // Project and normalize defects are failures of THIS tick too — the only
+      // thing that distinguishes them from a provider rejection is that they
+      // name a phase; a run that rejects on them loses even that.
+      Effect.catchIf(
+        (cause): cause is ProjectionFailed | NormalizationFailed =>
+          cause instanceof ProjectionFailed || cause instanceof NormalizationFailed,
+        (error) =>
+          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
+            outcome: "failed",
+            error,
+          }),
+      ),
     );
   }
+}
+
+function projectionThrew(cause: unknown): ProjectionFailed {
+  return new ProjectionFailed({ reason: `projection threw: ${String(cause)}`, cause });
 }
 
 // ============================================================================
