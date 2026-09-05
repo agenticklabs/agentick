@@ -50,6 +50,42 @@ result.usage; // UsageStats — thinking and cached tokens broken out
 
 The SDK client is constructed lazily on first use, so declaring an adapter needs no credentials until a call actually happens. Env fallbacks: `GOOGLE_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENAI_BASE_URL`. Inject `options.client` to bypass construction entirely.
 
+## Standalone
+
+No app, no session — the free functions in `@agentick/model` drive the adapter directly and return the same normalized result the executor would.
+
+```ts
+import { generate, generateStream, generateObject } from "@agentick/model";
+import { google } from "@agentick/model-google";
+import { z } from "zod";
+
+const model = google("gemini-2.5-flash");
+const messages = [
+  { role: "user", content: [{ type: "text", text: "Write a haiku about CRDTs." }] },
+];
+
+// One call, one result.
+const result = await generate({ model, messages });
+result.output; // ContentBlock[]
+result.usage; // UsageStats
+
+// Streaming — the same deltas the executor emits; `result` resolves once the stream drains.
+const handle = generateStream({ model, messages });
+for await (const delta of handle.stream) {
+  if (delta.type === "content-delta") process.stdout.write(delta.delta);
+}
+await handle.result;
+
+// Structured output — parsed and validated against any Standard Schema.
+const { object } = await generateObject({
+  model,
+  schema: z.object({ total: z.number(), currency: z.string() }),
+  messages: [{ role: "user", content: [{ type: "text", text: "Parse: $42 USD" }] }],
+});
+```
+
+`generateObject` maps to a native `json_schema` response format on this provider. Tools passed to `generate` are advertised, not executed — calls come back on `result.toolCalls` for you to run. `withRetry`, `withFallback` and `tapModel` wrap the adapter itself; see the [@agentick/model README](../model/README.md).
+
 ## API
 
 `google(model?, options?)` → `LanguageModelAdapter<GenerateContentResponse, GenerateContentResponse>`

@@ -2305,6 +2305,23 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 
 ## Decision log
 
+### 2026-09-05 — `@agentick/model-chatjimmy`: a provider with no SDK and no OpenAI shape
+
+chatjimmy.ai (Taalas's hardware-embodied Llama 3.1 8B) looked like a
+base-URL job for `model-openai` and is not: `POST /api/chat` takes
+`{ messages, chatOptions, attachment }` and answers raw text plus one
+`<|stats|>{…}<|/stats|>` trailer, no `/v1` surface anywhere (probed
+2026-09-05). A translating `fetch` faking OpenAI both ways would have been
+more code than the dialect itself, so it is its own adapter on
+`defineLanguageModelAdapter`: one `fetch`, `StatsTrailerSplitter` for a
+marker split across chunks, trailer → `usage` / `stopReason` /
+`metadata.chatjimmy`. `media: {}` (the complete empty declaration) and
+`supportsTools: false`; replayed tool parts flatten to text so a mixed
+timeline still reads. `system` is legal mid-list on this wire and is where
+`grounding` lands. Certified by `runExecutorConformance` over a stubbed
+`fetch`; live smoke passed both paths. Streaming is nominal — the model
+decodes at ~16k tok/s and a reply usually lands in one chunk.
+
 ### 2026-08-24 — knowify rip-out of the draft model landed (adopter side of create early, persist late)
 
 Knowify `3416927a25` (pushed): the draft/catalog-cache machinery is gone —

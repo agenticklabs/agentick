@@ -50,6 +50,43 @@ const result = await generate({
 });
 ```
 
+## Standalone
+
+No app, no session — the free functions in `@agentick/model` drive the adapter directly and return the same normalized result the executor would.
+
+```ts
+import { generate, generateStream, generateObject } from "@agentick/model";
+import { openai } from "@ai-sdk/openai";
+import { aisdk } from "@agentick/model-ai-sdk";
+import { z } from "zod";
+
+const model = aisdk(openai("gpt-4o"));
+const messages = [
+  { role: "user", content: [{ type: "text", text: "Write a haiku about read repair." }] },
+];
+
+// One call, one result.
+const result = await generate({ model, messages });
+result.output; // ContentBlock[]
+result.usage; // UsageStats
+
+// Streaming — the same deltas the executor emits; `result` resolves once the stream drains.
+const handle = generateStream({ model, messages });
+for await (const delta of handle.stream) {
+  if (delta.type === "content-delta") process.stdout.write(delta.delta);
+}
+await handle.result;
+
+// Structured output — parsed and validated against any Standard Schema.
+const { object } = await generateObject({
+  model,
+  schema: z.object({ total: z.number(), currency: z.string() }),
+  messages: [{ role: "user", content: [{ type: "text", text: "Parse: $42 USD" }] }],
+});
+```
+
+This adapter drops the canonical `responseFormat`, so `generateObject` validates only — state the JSON shape in the prompt. Tools passed to `generate` are advertised, not executed — calls come back on `result.toolCalls` for you to run. `withRetry`, `withFallback` and `tapModel` wrap the adapter itself; see the [@agentick/model README](../model/README.md).
+
 ## API
 
 `aisdk(model, options?)` → `LanguageModelAdapter`

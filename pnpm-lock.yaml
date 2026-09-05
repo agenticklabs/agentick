@@ -1176,6 +1176,31 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
 
+  packages/model-chatjimmy:
+    dependencies:
+      '@agentick/model':
+        specifier: workspace:*
+        version: link:../model
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils':
+        specifier: workspace:*
+        version: link:../utils
+    devDependencies:
+      '@agentick/model-executor':
+        specifier: workspace:*
+        version: link:../model-executor
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
+
   packages/model-executor:
     dependencies:
       '@agentick/model':
