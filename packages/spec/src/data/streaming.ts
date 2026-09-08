@@ -151,6 +151,12 @@ export type AdapterDelta =
       readonly callId: string;
       readonly name: string;
       readonly blockIndex: number;
+      /**
+       * Backlog F — the named tool is `internal`, stamped by the loop from the
+       * run's declarations so a client can skip the call from its FIRST event,
+       * before any dispatch event says so.
+       */
+      readonly internal?: boolean;
     }
   | { readonly type: "tool-call-delta"; readonly callId: string; readonly delta: string }
   | { readonly type: "tool-call-end"; readonly callId: string }
@@ -159,6 +165,8 @@ export type AdapterDelta =
       readonly callId: string;
       readonly name: string;
       readonly input: Readonly<Record<string, unknown>>;
+      /** See `tool-call-start`. */
+      readonly internal?: boolean;
     }
 
   // ─── Reasoning ───────────────────────────────────────────────────

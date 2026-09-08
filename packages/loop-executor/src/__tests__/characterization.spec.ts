@@ -861,6 +861,10 @@ describe("LoopExecutorHarness [characterization] — event sequence", () => {
       "tool-dispatch",
     ]);
     for (const e of stamped) expect(e).toMatchObject({ internal: true });
+    const announced = hidden.events.find(
+      (e) => e.kind === "model" && (e as { delta?: { type?: string } }).delta?.type === "tool-call",
+    ) as { delta?: { internal?: boolean } } | undefined;
+    expect(announced?.delta?.internal).toBe(true);
 
     const plain = await runChar({
       ticks: [toolUse("c1"), ended()],

@@ -111,6 +111,7 @@ import type {
   RenderedTree,
   UsageRollup,
   UsageStats,
+  AdapterDelta,
 } from "@agentick/spec";
 import {
   ExecutionError,
@@ -1211,6 +1212,31 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           structuredResponseFormat = responseFormatDirective(outputSpec);
         }
       }
+      // Tool rung (backlog F): `internal` is a property of the DECLARATION. It
+      // is stamped on the model's own tool-call deltas here, before dispatch,
+      // so a client skips the call from its first event rather than rendering
+      // a pending row it then has to take back.
+      const isInternalTool = (name: string): boolean =>
+        modelToolsForRun.find((t) => t.name === name)?.annotations?.internal === true;
+      const stampInternal = (delta: AdapterDelta): AdapterDelta => {
+        if (
+          (delta.type === "tool-call-start" || delta.type === "tool-call") &&
+          isInternalTool(delta.name)
+        ) {
+          return { ...delta, internal: true };
+        }
+        if (
+          delta.type === "content" &&
+          delta.content.type === "tool_use" &&
+          isInternalTool(delta.content.name)
+        ) {
+          return {
+            ...delta,
+            content: { ...delta.content, metadata: { ...delta.content.metadata, internal: true } },
+          };
+        }
+        return delta;
+      };
 
       // Per-tick config overlay. Layers fold OVER the render's `config`,
       // innermost-wins:
@@ -1305,7 +1331,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               scope: modelScope,
               signal: execSignal,
             },
-            (delta) => input.emit({ kind: "model", tick: tickIndex, delta }),
+            (delta) => input.emit({ kind: "model", tick: tickIndex, delta: stampInternal(delta) }),
           ),
         );
         if (Either.isLeft(streamed)) {
@@ -1412,7 +1438,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           yield* input.emit({
             kind: "model",
             tick: tickIndex,
-            delta: { type: "content", blockIndex, content: block },
+            delta: stampInternal({ type: "content", blockIndex, content: block }),
           });
           blockIndex += 1;
         }
@@ -1420,12 +1446,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           yield* input.emit({
             kind: "model",
             tick: tickIndex,
-            delta: {
+            delta: stampInternal({
               type: "tool-call",
               callId: tc.id,
               name: tc.name,
               input: tc.input as Readonly<Record<string, unknown>>,
-            },
+            }),
           });
         }
         yield* input.emit({
@@ -1462,10 +1488,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // tool_result is emitted LAST so the persisted timeline pairs the
       // terminal tool_use. Detection is by name, from the resolved spec.
       const allToolCalls: readonly ToolCall[] = result.toolCalls ?? [];
-      // Tool rung (backlog F): `internal` is a property of the DECLARATION,
-      // resolved once per run and read for every call the tick made.
-      const isInternalTool = (name: string): boolean =>
-        modelToolsForRun.find((t) => t.name === name)?.annotations?.internal === true;
       const internalCallIds = new Set(
         allToolCalls.filter((tc) => isInternalTool(tc.name)).map((tc) => tc.id),
       );
