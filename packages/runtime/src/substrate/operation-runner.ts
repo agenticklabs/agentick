@@ -458,7 +458,12 @@ class OperationRunnerImpl implements OperationRunner {
   ): (eff: Effect.Effect<A, E, never>) => Effect.Effect<A, E, never> {
     const attributes = this.spanAttributesFn(op);
     const remote = remoteSpanOptions(op);
-    return (eff) => eff.pipe(Effect.withSpan(op.name, { attributes, ...remote }));
+    // No stack capture: Effect keeps an unformatted `Error` per span, and V8
+    // keeps the function objects of that Error's frames alive with it — the
+    // op input, the session, everything in scope — for as long as the span is
+    // referenced. The trace was only ever read onto failed spans.
+    return (eff) =>
+      eff.pipe(Effect.withSpan(op.name, { attributes, ...remote, captureStackTrace: false }));
   }
 
   // ──────── event helpers (shared heavy + light path) ────────

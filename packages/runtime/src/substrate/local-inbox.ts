@@ -6,15 +6,21 @@
  * ask awaits the handler's return value.
  *
  * Idempotency: same `messageId` arriving twice runs the handler exactly
- * once. We fork the handler into a Fiber the first time; subsequent
- * tell/ask calls reuse the same Fiber via `Fiber.join`. The cached ack
- * is returned for tell; the cached result for ask. TTL eviction
- * defaults to 10 minutes.
+ * once. We fork the handler into a Fiber the first time; a replay while it
+ * runs joins that Fiber, a replay after it settled gets the recorded Exit.
+ * The cached ack is returned for tell; the cached result for ask. TTL
+ * eviction defaults to 10 minutes.
+ *
+ * A settled entry keeps ONLY the Exit. A completed FiberRuntime is not a
+ * small object: it retains its context, its span, and — through Effect's
+ * captured span stack trace — the frames of whatever built the message, which
+ * for a `compiler:mount` is the session. Ten thousand of those was a
+ * gigabyte-scale leak in production.
  *
  * @see docs/proposals/v2/blueprint/19-foundation.md §The MessageInbox
  */
 
-import { Effect, Fiber } from "effect";
+import { Effect, Exit, Fiber } from "effect";
 import type {
   MessageAck,
   MessageEnvelope,
@@ -62,11 +68,10 @@ function stampEnvelope<T>(address: string, input: MessageEnvelopeInput<T>): Mess
 
 interface IdempotencyEntry {
   readonly expiresAt: number;
-  /**
-   * Fiber running the handler. `Fiber.join` returns the same result on
-   * every call — the handler runs exactly once.
-   */
-  readonly fiber: Fiber.RuntimeFiber<unknown, MessageHandlerError>;
+  /** The handler while it runs; released the moment it settles. */
+  fiber?: Fiber.RuntimeFiber<unknown, MessageHandlerError>;
+  /** The settled outcome — all a replay needs. */
+  exit?: Exit.Exit<unknown, MessageHandlerError>;
   /** Cached ack. */
   readonly ack: MessageAck;
 }
@@ -221,8 +226,8 @@ export class LocalInbox implements MessageInbox {
       const message = stampEnvelope(address, input);
       const cached = this.lookup(message.messageId);
       if (cached) {
-        // Reuse the existing fiber — handler ran (or is running) once.
-        return Fiber.join(cached.fiber) as Effect.Effect<R, MessageHandlerError, never>;
+        // The handler ran (or is running) once: replay its outcome.
+        return replay(cached) as Effect.Effect<R, MessageHandlerError, never>;
       }
 
       const handler = this.handlers.get(address);
@@ -260,7 +265,7 @@ export class LocalInbox implements MessageInbox {
     this.handlers.clear();
     // Interrupt in-flight fibers so handlers don't outlive the inbox.
     for (const entry of this.cache.values()) {
-      Effect.runFork(Fiber.interrupt(entry.fiber));
+      if (entry.fiber) Effect.runFork(Fiber.interrupt(entry.fiber));
     }
     this.cache.clear();
   }
@@ -268,6 +273,13 @@ export class LocalInbox implements MessageInbox {
   /** Diagnostic. */
   registeredAddresses(): readonly string[] {
     return [...this.handlers.keys()];
+  }
+
+  /** Diagnostic — idempotency cache size and how many entries still hold a running handler. */
+  idempotencyStats(): { readonly entries: number; readonly inFlight: number } {
+    let inFlight = 0;
+    for (const entry of this.cache.values()) if (entry.fiber) inFlight += 1;
+    return { entries: this.cache.size, inFlight };
   }
 
   // ────────── helpers ──────────
@@ -287,15 +299,39 @@ export class LocalInbox implements MessageInbox {
     ack: MessageAck,
     fiber: Fiber.RuntimeFiber<unknown, MessageHandlerError>,
   ): void {
+    this.sweepExpired();
     if (this.cache.size >= this.maxEntries) {
       // Drop the oldest entry (Map preserves insertion order).
       const oldest = this.cache.keys().next().value;
       if (oldest !== undefined) this.cache.delete(oldest);
     }
-    this.cache.set(messageId, {
-      ack,
-      fiber,
-      expiresAt: Date.now() + this.ttlMs,
-    });
+    const entry: IdempotencyEntry = { ack, fiber, expiresAt: Date.now() + this.ttlMs };
+    this.cache.set(messageId, entry);
+    Effect.runFork(
+      Fiber.await(fiber).pipe(
+        Effect.tap((exit) =>
+          Effect.sync(() => {
+            if (entry.fiber !== fiber) return;
+            entry.exit = exit;
+            entry.fiber = undefined;
+          }),
+        ),
+      ),
+    );
   }
+
+  /** Entries are inserted in time order, so the expired ones are all at the front. */
+  private sweepExpired(): void {
+    const now = Date.now();
+    for (const [messageId, entry] of this.cache) {
+      if (entry.expiresAt >= now) break;
+      this.cache.delete(messageId);
+    }
+  }
+}
+
+function replay(entry: IdempotencyEntry): Effect.Effect<unknown, MessageHandlerError, never> {
+  if (entry.exit) return Effect.suspend(() => entry.exit!);
+  if (entry.fiber) return Fiber.join(entry.fiber);
+  return Effect.die(new Error("idempotency entry without fiber or exit"));
 }
