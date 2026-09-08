@@ -1,6 +1,6 @@
 {
   "name": "@agentick/model-chatjimmy",
-  "version": "1.0.0-next.202",
+  "version": "1.0.0-next.203",
   "description": "ChatJimmy (Taalas hardware-embodied Llama) LanguageModelAdapter for Agentick v2 (ADR 52). chatjimmy(model?, options?) — the provider-normalization part consumed by @agentick/model-executor's LanguageModelExecutor. Zero Effect, zero substrate, zero SDK.",
   "keywords": [
     "agent",
