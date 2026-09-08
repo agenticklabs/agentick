@@ -75,7 +75,6 @@ import {
   type Middleware,
   type StreamCommand,
   runHarnessProtocol,
-  generateId,
   withContext,
 } from "@agentick/runtime";
 import type {
@@ -469,6 +468,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         toolResults: [],
       };
 
+      // Deterministic tick id per (executionId, tickIndex): a re-driven
+      // tick keys its ops identically so `lookupTerminal` short-circuits
+      // the ones that already completed — memoize-and-re-drive (ADR 109).
+      const tickIdFor = (index: number): string => `tick-${executionId}-${index}`;
+
       // ADR 99 slice 2 — consecutive failed terminals, reset by any success.
       // Bounds the retry loop no matter what the decide fold asks for.
       let consecutiveFailures = 0;
@@ -514,9 +518,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           break;
         }
 
-        const tickId = `tick-${generateId()}`;
         acc.ticks += 1;
         const tickIndex = acc.ticks;
+        const tickId = tickIdFor(tickIndex);
         const tickStartedAt = Date.now();
 
         // Assemble the per-tick command input — the per-tick identity
@@ -811,8 +815,8 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             new StructuredOutputIncomplete({ toolName: terminalToolName, reason: "max_ticks" }),
           );
         }
-        const wrapTickId = `tick-${generateId()}`;
         acc.ticks += 1;
+        const wrapTickId = tickIdFor(acc.ticks);
         const wrapInput: TickInput = {
           tickId: wrapTickId,
           tickIndex: acc.ticks,

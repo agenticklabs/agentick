@@ -296,6 +296,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       ExecuteErrorChannel | SubstrateError
     >({
       name: "model:generate",
+      opId: (input) => modelOpId("model:generate", input.scope),
       description: "the non-streaming provider call",
       scope: (input) => input.scope ?? {},
       handler: (input) => this.generateBody(input, null),
@@ -307,6 +308,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       ExecuteErrorChannel | SubstrateError
     >({
       name: "model:generate_stream",
+      opId: (input) => modelOpId("model:generate_stream", input.scope),
       description: "the streaming provider call (loop-default path)",
       scope: (input) => input.scope ?? {},
       body: (input, sink) => this.generateBody(input, sink),
@@ -1307,4 +1309,19 @@ export function mergeSignals(caller: AbortSignal | undefined, internal: AbortSig
   caller.addEventListener("abort", onCaller, { once: true });
   internal.addEventListener("abort", onInternal, { once: true });
   return ctrl.signal;
+}
+
+/**
+ * Deterministic model-op id per (executionId, tickId) so a re-driven tick's
+ * model turn keys identically and `lookupTerminal` short-circuits it —
+ * memoize-and-re-drive (ADR 109). Random only when there is no tick (off-loop).
+ */
+function modelOpId(
+  name: string,
+  scope: { executionId?: string; tickId?: string } | undefined,
+): string {
+  const executionId = scope?.executionId ?? `exec:${generateId()}`;
+  return scope?.tickId !== undefined
+    ? `${name}:${executionId}:${scope.tickId}`
+    : `${name}:${executionId}:${generateId()}`;
 }

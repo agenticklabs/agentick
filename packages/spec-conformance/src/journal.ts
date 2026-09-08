@@ -104,6 +104,81 @@ export function runJournalConformance(factory: () => OperationJournal): void {
       }
     });
 
+    it("lookupTerminal round-trips every terminal outcome faithfully", async () => {
+      // A durable adapter must reconstruct EACH TerminalEvent shape from its
+      // stored envelope, not just `succeeded`/scalar — otherwise a `failed`
+      // error or a structured result is silently lost on replay (ADR 109).
+      const structured = { ok: true, ids: ["a", "b"], nested: { n: 1 } };
+      const cases: ReadonlyArray<{
+        readonly opId: string;
+        readonly outcome: NonNullable<ProtocolEvent["outcome"]>;
+        readonly payload: Record<string, unknown>;
+        readonly terminal: Record<string, unknown>;
+      }> = [
+        {
+          opId: "t-succ",
+          outcome: "succeeded",
+          payload: { result: 7 },
+          terminal: { outcome: "succeeded", result: 7 },
+        },
+        {
+          opId: "t-struct",
+          outcome: "succeeded",
+          payload: { result: structured },
+          terminal: { outcome: "succeeded", result: structured },
+        },
+        {
+          opId: "t-fail",
+          outcome: "failed",
+          payload: { error: { message: "boom" } },
+          terminal: { outcome: "failed", error: { message: "boom" } },
+        },
+        {
+          opId: "t-cancel",
+          outcome: "canceled",
+          payload: { reason: "user" },
+          terminal: { outcome: "canceled", reason: "user" },
+        },
+        {
+          opId: "t-veto",
+          outcome: "vetoed",
+          payload: { reason: "policy" },
+          terminal: { outcome: "vetoed", reason: "policy" },
+        },
+        {
+          opId: "t-repl",
+          outcome: "replaced",
+          payload: { result: 9, reason: "steer" },
+          terminal: { outcome: "replaced", result: 9, reason: "steer" },
+        },
+        {
+          opId: "t-defer",
+          outcome: "deferred",
+          payload: { retryAfter: 1000 },
+          terminal: { outcome: "deferred", retryAfter: 1000 },
+        },
+      ];
+      const j = factory();
+      for (const c of cases) {
+        await Effect.runPromise(
+          j.append(
+            mkEvent({
+              id: `${c.opId}-t`,
+              opId: c.opId,
+              phase: "terminal",
+              outcome: c.outcome,
+              payload: c.payload,
+            }),
+          ),
+        );
+      }
+      for (const c of cases) {
+        const look = await Effect.runPromise(j.lookupTerminal(c.opId));
+        expect(look.some).toBe(true);
+        if (look.some) expect(look.value).toEqual(c.terminal);
+      }
+    });
+
     it("lookupTerminal returns Some=false for unknown opId", async () => {
       const j = factory();
       const look = await Effect.runPromise(j.lookupTerminal("never"));
