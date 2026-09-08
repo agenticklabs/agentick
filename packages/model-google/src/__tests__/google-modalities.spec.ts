@@ -82,6 +82,37 @@ describe("google.images", () => {
 });
 
 describe("google.embeddings", () => {
+  it("gemini-embedding-2 takes one content per call: a batch fans out in parallel, vectors in input order", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const embedContent = vi.fn(
+      async ({ contents }: { contents: { parts: { text: string }[] }[] }) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 2));
+        inFlight -= 1;
+        return { embeddings: contents.map((c) => ({ values: [Number(c.parts[0]!.text), 1] })) };
+      },
+    );
+    const client = { models: { embedContent } } as unknown as GoogleModalityClient;
+    const adapter = google.embeddings("gemini-embedding-2", { client, concurrency: 3 });
+
+    const texts = Array.from({ length: 10 }, (_unused, i) => String(i));
+    const result = await adapter.embed({ input: texts, dimensions: 2 });
+
+    expect(embedContent).toHaveBeenCalledTimes(10);
+    for (const call of embedContent.mock.calls) expect(call[0].contents).toHaveLength(1);
+    expect(peak).toBe(3);
+    expect(result.embeddings.map((v) => v[0])).toEqual(texts.map(Number));
+  });
+
+  it("other models keep the whole batch in one call", async () => {
+    const { client, embedContent } = fakeClient();
+    const adapter = google.embeddings("gemini-embedding-001", { client });
+    await adapter.embed({ input: ["a", "b", "c"] });
+    expect(embedContent).toHaveBeenCalledTimes(1);
+  });
+
   it("maps dimensions + task onto embedContent and returns one vector per input", async () => {
     const { client, embedContent } = fakeClient();
     const adapter = google.embeddings("gemini-embedding-001", { client });

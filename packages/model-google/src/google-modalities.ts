@@ -69,6 +69,33 @@ export interface GoogleImagesOptions extends Omit<GoogleAdapterOptions, "client"
 
 export interface GoogleEmbeddingsOptions extends Omit<GoogleAdapterOptions, "client"> {
   readonly client?: GoogleModalityClient;
+  /**
+   * Texts per `embedContent` call. `gemini-embedding-2` takes ONE — several
+   * contents in a request aggregate into a single vector — so its default is
+   * 1 and a batch fans out as parallel single-content requests; other models
+   * default to the whole batch in one call.
+   */
+  readonly contentsPerRequest?: number;
+  /** Requests in flight at once when a batch fans out. Default 8. */
+  readonly concurrency?: number;
+}
+
+const SINGLE_CONTENT_MODELS = /gemini-embedding-2/;
+const DEFAULT_EMBED_CONCURRENCY = 8;
+
+/** Run `work` over `items` with at most `concurrency` in flight; results land by index. */
+async function inParallel<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < items.length; i = next++) results[i] = await work(items[i]!);
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
 }
 
 function clientFor(
@@ -202,23 +229,36 @@ export function googleEmbeddings(
     ...(options.target?.pricing !== undefined ? { pricing: options.target.pricing } : {}),
   };
 
+  const contentsPerRequest =
+    options.contentsPerRequest ??
+    (SINGLE_CONTENT_MODELS.test(model) ? 1 : Number.POSITIVE_INFINITY);
+  const concurrency = options.concurrency ?? DEFAULT_EMBED_CONCURRENCY;
+
   return {
     provider: "google",
     target,
     async embed(input, signal): Promise<EmbedResult> {
-      const res = await client().models.embedContent({
-        model,
-        contents: input.input.map((text) => ({ role: "user", parts: [{ text }] })),
-        config: {
-          ...(input.dimensions !== undefined ? { outputDimensionality: input.dimensions } : {}),
-          ...(input.task !== undefined
-            ? { taskType: input.task === "query" ? "RETRIEVAL_QUERY" : "RETRIEVAL_DOCUMENT" }
-            : {}),
-          ...(signal !== undefined ? { abortSignal: signal } : {}),
-          ...(input.providerOptions ?? {}),
-        },
-      });
-      const embeddings = (res.embeddings ?? []).map((e) => e.values ?? []);
+      const config = {
+        ...(input.dimensions !== undefined ? { outputDimensionality: input.dimensions } : {}),
+        ...(input.task !== undefined
+          ? { taskType: input.task === "query" ? "RETRIEVAL_QUERY" : "RETRIEVAL_DOCUMENT" }
+          : {}),
+        ...(signal !== undefined ? { abortSignal: signal } : {}),
+        ...(input.providerOptions ?? {}),
+      };
+      const request = async (texts: readonly string[]): Promise<number[][]> => {
+        const res = await client().models.embedContent({
+          model,
+          contents: texts.map((text) => ({ role: "user", parts: [{ text }] })),
+          config,
+        });
+        return (res.embeddings ?? []).map((e) => e.values ?? []);
+      };
+      const batches: string[][] = [];
+      for (let i = 0; i < input.input.length; i += contentsPerRequest) {
+        batches.push(input.input.slice(i, i + contentsPerRequest));
+      }
+      const embeddings = (await inParallel(batches, concurrency, request)).flat();
       if (embeddings.length !== input.input.length) {
         throw new Error(
           `google embeddings: expected ${input.input.length} vectors, got ${embeddings.length}`,
