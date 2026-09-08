@@ -1462,6 +1462,13 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // tool_result is emitted LAST so the persisted timeline pairs the
       // terminal tool_use. Detection is by name, from the resolved spec.
       const allToolCalls: readonly ToolCall[] = result.toolCalls ?? [];
+      // Tool rung (backlog F): `internal` is a property of the DECLARATION,
+      // resolved once per run and read for every call the tick made.
+      const isInternalTool = (name: string): boolean =>
+        modelToolsForRun.find((t) => t.name === name)?.annotations?.internal === true;
+      const internalCallIds = new Set(
+        allToolCalls.filter((tc) => isInternalTool(tc.name)).map((tc) => tc.id),
+      );
       const terminalCall =
         terminalStrategy === "tool" && outputSpec !== undefined
           ? allToolCalls.find((tc) => tc.name === outputSpec.toolName)
@@ -1477,8 +1484,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // run's registry; the result carries it, and the session's append ORs
           // it with execution/tick-internal. (The `tool_use` block stamp is the
           // block-level follow-on.)
-          const toolInternal =
-            modelToolsForRun.find((t) => t.name === tc.name)?.annotations?.internal === true;
+          const toolInternal = isInternalTool(tc.name);
           // The `useOnToolStart` / `useOnToolEnd` projection (incl. the
           // eager model self-narration read) rides the tool executor's
           // OWN `tool:dispatch` command hooks (ADR 89 §4) — the
@@ -1498,6 +1504,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             callId: tc.id,
             name: tc.name,
             via: "model",
+            ...(toolInternal ? { internal: true } : {}),
           });
           const dispatched = yield* Effect.either(
             input.toolExecutor.fx.dispatch({
@@ -1543,6 +1550,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               name: tc.name,
               outcome: dispatchSucceeded ? "succeeded" : "failed",
               durationMs,
+              ...(toolInternal ? { internal: true } : {}),
               ...omitUndefined({ presentation: ok.presentation }),
             });
             yield* input.emit({
@@ -1553,6 +1561,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               content: ok.content,
               succeeded: dispatchSucceeded,
               durationMs,
+              ...(toolInternal ? { internal: true } : {}),
               ...omitUndefined({ presentation: ok.presentation, metadata: ok.metadata }),
             });
             return {
@@ -1577,6 +1586,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             name: tc.name,
             outcome: "failed",
             durationMs,
+            ...(toolInternal ? { internal: true } : {}),
           });
           yield* input.emit({
             kind: "tool-dispatch",
@@ -1587,6 +1597,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             succeeded: false,
             durationMs,
             isError: true,
+            ...(toolInternal ? { internal: true } : {}),
           });
           return {
             toolCallId: tc.id,
@@ -1642,6 +1653,17 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // write `cost` + `model` onto the generation's timeline entry. That
       // durable record is the point: a restored session that knows its
       // token counts but not what they cost is the defect this closes.
+      // Block rung (backlog F): the `tool_use` block of an internal call is
+      // stamped on the assistant message the session persists, so a client
+      // that renders from blocks alone can hide it without pairing results.
+      const output =
+        internalCallIds.size === 0
+          ? result.output
+          : result.output.map((block) =>
+              block.type === "tool_use" && internalCallIds.has(block.toolUseId)
+                ? { ...block, metadata: { ...block.metadata, internal: true } }
+                : block,
+            );
       yield* input.stateApplicator.fx.applyExecutorResult({
         sessionId: input.sessionId,
         executionId,
@@ -1649,6 +1671,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         tickIndex,
         result: {
           ...result,
+          output,
           ...omitUndefined({ cost: tickCost, model: tickModel }),
         },
       });

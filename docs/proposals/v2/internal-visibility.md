@@ -252,7 +252,7 @@ The stamping phase's suite (§8) is the safety net; the filtering phase adds:
 
 **DEFERRED (own surgical increments — the append site can't see tool annotations, so tool-level belongs in the tool-executor/loop, not here):**
 
-- **Tool-level** — `ToolAnnotations.internal` → stamp `tool_use` + `tool_result`, in the tool-executor/loop where the declarations live. (Not added as a dead knob until it's wired.)
+- **Tool-level** — `ToolAnnotations.internal` → stamp `tool_use` + `tool_result`, in the tool-executor/loop where the declarations live. LANDED in part: the loop resolves `internal` from the run's declarations, the `tool_result` message is stamped `visibility:"internal"`, and all three dispatch stream events (`tool-dispatch-start` / `-end` / `tool-dispatch`) carry `internal: true`, so a client hides the call without a registry lookup, and the loop stamps `metadata.internal` on the call's `tool_use` block in the assistant message it hands the session, so a client rendering from blocks alone hides it too. Still open: the F-edge (§5).
 - **Block-level partial** — `metadata.internal` on a single block within a delivered message (adopters can stamp at persistence today).
 - **F-edge** — the principal-gated delivery edge (§5).
 

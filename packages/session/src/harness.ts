@@ -4120,6 +4120,7 @@ export class SessionHarness<P = unknown>
             callId: loopEvent.callId,
             name: loopEvent.name,
             via: loopEvent.via,
+            ...omitUndefined({ internal: loopEvent.internal }),
           });
           return;
         case "tool-dispatch-end":
@@ -4130,7 +4131,10 @@ export class SessionHarness<P = unknown>
             name: loopEvent.name,
             outcome: loopEvent.outcome,
             durationMs: loopEvent.durationMs,
-            ...omitUndefined({ presentation: loopEvent.presentation }),
+            ...omitUndefined({
+              internal: loopEvent.internal,
+              presentation: loopEvent.presentation,
+            }),
           });
           return;
         case "tool-dispatch":
@@ -4145,6 +4149,7 @@ export class SessionHarness<P = unknown>
             ...omitUndefined({
               executedBy: loopEvent.executedBy,
               isError: loopEvent.isError,
+              internal: loopEvent.internal,
               presentation: loopEvent.presentation,
               metadata: loopEvent.metadata,
             }),

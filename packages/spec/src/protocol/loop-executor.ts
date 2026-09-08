@@ -480,6 +480,8 @@ export type LoopExecutionEvent =
       readonly callId: string;
       readonly name: string;
       readonly via: "model" | "dispatch";
+      /** Backlog F — the called tool is `internal`; see `ToolDispatchStartEvent.internal`. */
+      readonly internal?: boolean;
     }
   | {
       readonly kind: "tool-dispatch-end";
@@ -488,6 +490,7 @@ export type LoopExecutionEvent =
       readonly name: string;
       readonly outcome: "succeeded" | "failed" | "vetoed" | "aborted";
       readonly durationMs: number;
+      readonly internal?: boolean;
       readonly presentation?: import("../data/declarations.js").ToolPresentation;
     }
   | {
@@ -500,6 +503,7 @@ export type LoopExecutionEvent =
       readonly durationMs: number;
       readonly executedBy?: string;
       readonly isError?: boolean;
+      readonly internal?: boolean;
       readonly presentation?: import("../data/declarations.js").ToolPresentation;
       readonly metadata?: Readonly<Record<string, unknown>>;
     };

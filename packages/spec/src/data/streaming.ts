@@ -291,6 +291,14 @@ export type ToolDispatchStartEvent = {
   readonly callId: string;
   readonly name: string;
   readonly via: "model" | "dispatch";
+  /**
+   * Backlog F — the called tool is `internal` (`ToolAnnotations.internal`):
+   * its activity is model-visible and client-hidden. Stamped on all three
+   * dispatch events so a client can hide the call without a registry lookup;
+   * the delivery edge (§5) will drop the frame for connections that may not
+   * see internal work.
+   */
+  readonly internal?: boolean;
 } & StreamEventBase;
 
 export type ToolDispatchEndEvent = {
@@ -299,6 +307,8 @@ export type ToolDispatchEndEvent = {
   readonly name: string;
   readonly outcome: "succeeded" | "failed" | "vetoed" | "aborted";
   readonly durationMs: number;
+  /** See {@link ToolDispatchStartEvent.internal}. */
+  readonly internal?: boolean;
   /**
    * The call's resolved {@link ToolPresentation} — the four un-collapsed
    * label materials (`name` / `title` / `summary` / `narration`) the client
@@ -321,6 +331,8 @@ export type ToolDispatchEvent = {
   readonly durationMs: number;
   readonly executedBy?: string;
   readonly isError?: boolean;
+  /** See {@link ToolDispatchStartEvent.internal}. */
+  readonly internal?: boolean;
   /** See {@link ToolDispatchEndEvent.presentation}. */
   readonly presentation?: ToolPresentation;
   /**

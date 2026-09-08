@@ -1119,3 +1119,89 @@ describe("SessionHarness — cancellation parity", () => {
     await session.close();
   });
 });
+
+describe("internal tools — backlog F, the tool rung end to end", () => {
+  it("stamps the tool_use block, the tool_result entry and the three dispatch events", async () => {
+    const hidden: ToolRegistration = {
+      declaration: {
+        id: "peek",
+        name: "peek",
+        description: "model-visible, client-hidden",
+        inputSchema: jsonSchema({ type: "object" }),
+        exposure: ["model", "dispatch"],
+        annotations: { internal: true },
+      },
+      handlerRef: "h.peek",
+      binding: { scope: "runtime" },
+    };
+    const { session } = await mkSession({
+      tools: [hidden],
+      executor: new FakeLanguageModelExecutor(
+        `exec-peek-${Math.random()}`,
+        new MemoryJournal(),
+        new LocalEventBus(),
+        new LocalInbox(),
+        {
+          scripted: [
+            {
+              result: {
+                specVersion: "2026-05-08",
+                output: [
+                  { type: "text", text: "let me check" },
+                  { type: "tool_use", toolUseId: "call-p", name: "peek", input: {} },
+                ] as ContentBlock[],
+                stopReason: "tool_use",
+                toolCalls: [{ id: "call-p", name: "peek", input: {} }],
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+              },
+            },
+            {
+              result: {
+                specVersion: "2026-05-08",
+                output: [{ type: "text", text: "Ernesto" }] as ContentBlock[],
+                stopReason: "end",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+              },
+            },
+          ],
+        },
+      ),
+      handlers: {
+        "h.peek": async () => ({ content: [{ type: "text", text: "Ernesto" }] as ContentBlock[] }),
+      },
+    });
+
+    const handle = await session.send({ messages: [{ role: "user", content: "name?" }] });
+    const dispatchEvents: Array<Record<string, unknown>> = [];
+    const drain = (async () => {
+      for await (const event of handle.events()) {
+        if (typeof event.type === "string" && event.type.startsWith("tool-dispatch")) {
+          dispatchEvents.push(event as unknown as Record<string, unknown>);
+        }
+      }
+    })();
+    await handle.result;
+    await drain;
+
+    expect(dispatchEvents.map((e) => e["type"])).toEqual([
+      "tool-dispatch-start",
+      "tool-dispatch-end",
+      "tool-dispatch",
+    ]);
+    for (const event of dispatchEvents) expect(event["internal"]).toBe(true);
+
+    const entries = session.timeline.read().entries;
+    const toolUse = entries
+      .filter((e) => e.kind === "message" && e.message.role === "assistant")
+      .flatMap((e) => (e.kind === "message" ? e.message.content : []))
+      .find((b) => b.type === "tool_use");
+    expect(toolUse?.metadata).toMatchObject({ internal: true });
+    const text = entries
+      .filter((e) => e.kind === "message" && e.message.role === "assistant")
+      .flatMap((e) => (e.kind === "message" ? e.message.content : []))
+      .find((b) => b.type === "text" && b.text === "let me check");
+    expect(text?.metadata?.["internal"]).toBeUndefined();
+    const toolResult = entries.find((e) => e.kind === "message" && e.message.role === "tool");
+    expect(toolResult?.visibility).toBe("internal");
+  });
+});

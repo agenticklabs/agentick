@@ -42,9 +42,11 @@ import type {
   StateApplicator,
   TickEndForwardDecision,
   ToolCall,
+  ToolDeclaration,
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { MalformedModelOutput, SPEC_VERSION, ToolValidationError } from "@agentick/spec";
+import { jsonSchema } from "@agentick/spec";
 import { FakeLanguageModelExecutor, type MockScriptedRun } from "@agentick/model-executor";
 import { omitUndefined } from "@agentick/utils";
 
@@ -121,6 +123,7 @@ function dispatchOk(
 /** Tool executor fake — implements only the three methods the loop calls. */
 function mkFakeToolExecutor(
   dispatch: (call: { name: string; toolCallId: string }) => Promise<DispatchResult>,
+  tools: readonly ToolDeclaration[] = [],
 ): ToolExecutorProtocol {
   return {
     // fx twins the Stage-3 loop composes. `dispatch` rides `Effect.tryPromise`
@@ -130,7 +133,7 @@ function mkFakeToolExecutor(
       use: () => () => {},
       guard: () => () => {},
       replaceCompilerTools: () => Effect.void,
-      compileForTick: () => Effect.succeed([]),
+      compileForTick: () => Effect.succeed([...tools]),
       dispatch: (i: { name: string; toolCallId: string }) =>
         Effect.tryPromise({
           try: () => dispatch({ name: i.name, toolCallId: i.toolCallId }),
@@ -138,10 +141,10 @@ function mkFakeToolExecutor(
         }),
     },
     replaceCompilerTools: async () => undefined,
-    compileForTick: async () => [],
+    compileForTick: async () => [...tools],
     dispatch: async (i: { name: string; toolCallId: string }) =>
       dispatch({ name: i.name, toolCallId: i.toolCallId }),
-    tools: { list: () => [] },
+    tools: { list: () => [...tools] },
   } as unknown as ToolExecutorProtocol;
 }
 
@@ -176,6 +179,8 @@ interface CharConfig {
     | undefined;
   /** Optional dispatch outcome (default: success, text "ok"). */
   readonly dispatch?: (call: { name: string; toolCallId: string }) => Promise<DispatchResult>;
+  /** The run's declared tools (default: none). */
+  readonly tools?: readonly ToolDeclaration[];
   /** Pre-aborted signal, to characterize the cancellation path. */
   readonly signal?: AbortSignal;
   /** Differential seam — the loop factory (default: LoopExecutorHarness). */
@@ -246,7 +251,7 @@ async function runChar(cfg: CharConfig): Promise<CharTrace> {
     mountId: "ch-mount",
     compiler: mkStubCompiler(),
     modelExecutor: executor,
-    toolExecutor: mkFakeToolExecutor(dispatch),
+    toolExecutor: mkFakeToolExecutor(dispatch, cfg.tools),
     target: executor.target,
     stateApplicator: mkRecordingApplicator(order),
     executionId: "exec_ch",
@@ -833,6 +838,38 @@ describe("LoopExecutorHarness [characterization] — event sequence", () => {
     expect(trace.events.find((e) => e.kind === "tool-dispatch")?.presentation).toEqual(
       presentation,
     );
+  });
+
+  it("an `internal` tool stamps all three dispatch events; a plain tool stamps none", async () => {
+    const internalTool: ToolDeclaration = {
+      id: "t",
+      name: "t",
+      description: "hidden work",
+      inputSchema: jsonSchema({ type: "object" }),
+      exposure: ["model", "dispatch"],
+      annotations: { internal: true },
+    };
+    const hidden = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      tools: [internalTool],
+    });
+    const stamped = hidden.events.filter((e) => e.kind.startsWith("tool-dispatch"));
+    expect(stamped.map((e) => e.kind)).toEqual([
+      "tool-dispatch-start",
+      "tool-dispatch-end",
+      "tool-dispatch",
+    ]);
+    for (const e of stamped) expect(e).toMatchObject({ internal: true });
+
+    const plain = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      tools: [{ ...internalTool, annotations: {} }],
+    });
+    for (const e of plain.events.filter((e) => e.kind.startsWith("tool-dispatch"))) {
+      expect("internal" in e).toBe(false);
+    }
   });
 
   it("tool-dispatch-start carries NO presentation — it is resolved inside the dispatch", async () => {
