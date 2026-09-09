@@ -331,6 +331,58 @@ describe("google() adapter — tool-use round-trip", () => {
     expect(resultPart?.functionResponse?.id).toBe("call_xyz");
     expect(resultPart?.functionResponse?.name).toBe("calc");
   });
+
+  it("carries media in a tool_result as functionResponse.parts, never stringified into the payload", async () => {
+    const stub = new StubGoogleClient([
+      { kind: "non-streaming", response: mkResponse({ text: "read it" }) },
+    ]);
+    const { exec } = await makeExecutor(stub);
+    const data = Buffer.from("x".repeat(64)).toString("base64");
+    const tree: RenderedTree = {
+      specVersion: "2026-05-08",
+      context: {
+        entries: [
+          { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "fetch" }] },
+          {
+            kind: "message",
+            id: "m2",
+            role: "assistant",
+            content: [{ type: "tool_use", toolUseId: "call_1", name: "query", input: {} }],
+          },
+          {
+            kind: "message",
+            id: "m3",
+            role: "tool",
+            content: [
+              {
+                type: "tool_result",
+                toolUseId: "call_1",
+                name: "query",
+                content: [
+                  { type: "text", text: "saved as /attachments/f1" },
+                  { type: "document", source: { type: "base64", data, mimeType: "text/plain" } },
+                  {
+                    type: "image",
+                    source: { type: "url", url: "gs://b/k.png", mimeType: "image/png" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    const contents = stub.calls[0]!.params.contents as Array<{
+      parts: Array<{ functionResponse?: { response?: { result?: string }; parts?: unknown[] } }>;
+    }>;
+    const fr = contents.flatMap((c) => c.parts).find((p) => p.functionResponse)!.functionResponse!;
+    expect(fr.response?.result).toBe("saved as /attachments/f1");
+    expect(fr.parts).toEqual([
+      { inlineData: { mimeType: "text/plain", data } },
+      { fileData: { mimeType: "image/png", fileUri: "gs://b/k.png" } },
+    ]);
+  });
 });
 
 // ============================================================================

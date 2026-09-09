@@ -24,6 +24,7 @@ import {
   GoogleGenAI,
   FinishReason,
   type Content,
+  type FunctionResponsePart,
   type GenerateContentConfig,
   type GenerateContentParameters,
   type GenerateContentResponse,
@@ -1040,11 +1041,13 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
           break;
         }
         case "tool_result": {
+          const media = toolResultMedia(part.content);
           parts.push({
             functionResponse: {
               id: part.toolUseId,
               name: lookupToolName(out, part.toolUseId) ?? part.toolUseId,
               response: toolResultResponse(part),
+              ...(media.length > 0 ? { parts: media } : {}),
             },
           });
           break;
@@ -1090,10 +1093,41 @@ function toolResultText(parts: ReadonlyArray<LanguageModelMessagePart>): string 
   const out: string[] = [];
   for (const part of parts) {
     if (part.type === "text") out.push(part.text);
-    else out.push(JSON.stringify(part));
+    else if (!isMediaPart(part)) out.push(JSON.stringify(part));
   }
   return out.join("\n");
 }
+
+const isMediaPart = (
+  part: LanguageModelMessagePart,
+): part is Extract<LanguageModelMessagePart, { type: "image" | "document" | "audio" | "video" }> =>
+  part.type === "image" ||
+  part.type === "document" ||
+  part.type === "audio" ||
+  part.type === "video";
+
+/**
+ * Media inside a tool result rides `functionResponse.parts`, Gemini's multimodal
+ * function response — never stringified into the JSON payload, where it is
+ * unreadable and, for base64, a third larger than the bytes it stands for.
+ */
+function toolResultMedia(parts: ReadonlyArray<LanguageModelMessagePart>): FunctionResponsePart[] {
+  const out: FunctionResponsePart[] = [];
+  for (const part of parts) {
+    if (!isMediaPart(part)) continue;
+    const projected = googlePartFromSource(part.source, part.mediaType, DEFAULT_MIME[part.type]);
+    if (projected?.inlineData) out.push({ inlineData: projected.inlineData });
+    else if (projected?.fileData) out.push({ fileData: projected.fileData });
+  }
+  return out;
+}
+
+const DEFAULT_MIME = {
+  image: "image/jpeg",
+  document: "application/pdf",
+  audio: "audio/mpeg",
+  video: "video/mp4",
+} as const;
 
 /**
  * The `functionResponse.response` payload for one tool result.
