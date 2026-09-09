@@ -254,14 +254,17 @@ write a component.
 
 ## Open
 
-- **Bare semantic tags.** Ernesto mints `<message>`, `<file>`, `<conversation>`
-  as `custom` elements; the intrinsics rule reserves bare names for the
-  compiler's own vocabulary, so `Message` the component and `message` the tag
-  share a word. Hyphenating everything an app coins (`chat-message`,
-  `file-ref`) was considered and rejected for now: `message` is the right word
-  for what the model reads. The cleaner rule is the component's — `Message` is
-  the type, lowercase `message` is semantic and open to apps — decided at the
-  intrinsics layer, not by renaming tags. Not changed here.
+- **Bare semantic tags — decided for the app, open for the compiler.** The
+  intrinsics rule reserves bare names for the compiler's vocabulary, and the
+  render of a history slice showed `Message` the component and `message` the
+  app tag nested in one output. Ernesto now hyphenates everything it coins —
+  `chat-message`, `message-metadata`, `file-ref`, `tool-call`,
+  `past-conversation` — written as intrinsics, so `custom` remains only for
+  data-keyed field tags (`<path>`, `<title>` inside the metadata block) and the
+  `history` root is a `Section`. What stays open is the compiler's side: whether
+  `Message` the type and lowercase `message` the semantic tag should be told
+  apart by case at the intrinsics layer, which would let an app use the plain
+  word without collision.
 
 ## Follow-on, not in this ADR
 
