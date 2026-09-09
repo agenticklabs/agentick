@@ -252,6 +252,17 @@ write a component.
    text as a result (§4b). Additive; Ernesto's hand-rolled hoist becomes
    redundant and is removed when it lands.
 
+## Open
+
+- **Bare semantic tags.** Ernesto mints `<message>`, `<file>`, `<conversation>`
+  as `custom` elements; the intrinsics rule reserves bare names for the
+  compiler's own vocabulary, so `Message` the component and `message` the tag
+  share a word. Hyphenating everything an app coins (`chat-message`,
+  `file-ref`) was considered and rejected for now: `message` is the right word
+  for what the model reads. The cleaner rule is the component's — `Message` is
+  the type, lowercase `message` is semantic and open to apps — decided at the
+  intrinsics layer, not by renaming tags. Not changed here.
+
 ## Follow-on, not in this ADR
 
 - **A `search` verb on `LogStore`.** Optional, `search(query, { logKeys?, window? }, ctx)`
