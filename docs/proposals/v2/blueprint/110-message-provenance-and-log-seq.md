@@ -43,6 +43,12 @@ on rendering — rendering stays the app's.
    the formatter tests pin it.
 6. **A store can be asked for a window and gets back tagged entries.** Already
    true (#187). Named here because everything above is addressed by `seq`.
+7. **The live render sees `seq` too.** The `<Timeline>` render prop and the
+   timeline snapshot hand the tree bare `TimelineEntry`s; the seq the store
+   assigned is known at hydration (`history`) and at append (`append`'s return)
+   but is dropped before the tree. A renderer cannot print an address it is not
+   given. The snapshot carries `SeqTagged<TimelineEntry>` (the wire projection
+   already does, `wire-augment.ts`), or an id→seq map beside the entries.
 
 ## Design
 
@@ -201,6 +207,33 @@ lacks. With escaping, an unpredictable boundary buys nothing structurally.
 What escaping cannot do — stop a user _saying_ "ignore your instructions" — no
 delimiter does either; that is the framing's job and stays in the app.
 
+### 4b. `custom` should behave like a container, and never drop silently (`@agentick/compiler-react`)
+
+Found while building the envelope. Inside a `custom` element only string
+children and nested `custom` elements render; a `Text`, a `content`, or a
+`Section` placed there renders nothing and raises no diagnostic. An untitled
+`Section` renders as `<section id="…">` rather than as its id's tag. And
+`renderTemplate` wraps the root in a grounding message with no way to get the
+bare text, so a caller reaches into the compiled tree's entries.
+
+- **A non-rendering child is a `ReconcileDiagnostic`.** Whatever else changes,
+  silence is the defect: the envelope shipped without its text and only a test
+  on the words caught it.
+- **`custom` is a container.** Text-like children — strings, `Text`, nested
+  `custom`, `Section` — render inside. A binary part cannot live in a text
+  element: the compiler either hoists it to follow the element (the app leaving
+  a stand-in inside, as Ernesto's `TimelineView` does by hand) or refuses with
+  a diagnostic that names the rule.
+- **`Section` takes its tag from its id, title or not.** The title labels the
+  markdown lowering; it should not decide whether XML gets `<history>` or
+  `<section id="history">`.
+- **The compiled text is a first-class result.** `compileTemplate` (or a
+  `renderTemplate` option) returns the joined text of the rendered entries
+  without the root message.
+
+None of it changes a prompt today; it changes what an adopter has to know to
+write a component.
+
 ### 5. Sequencing
 
 1. Spec fields (`author`, `onBehalfOf`, `via`, `MessageViaRegistry`) and the
@@ -215,6 +248,9 @@ delimiter does either; that is the framing's job and stays in the app.
    registering their `via` values as they are touched.
 5. Formatter escaping tests and the written contract. Can go first; it changes
    no behaviour.
+6. `custom` as a container with diagnostics, `Section` tag from id, compiled
+   text as a result (§4b). Additive; Ernesto's hand-rolled hoist becomes
+   redundant and is removed when it lands.
 
 ## Follow-on, not in this ADR
 
