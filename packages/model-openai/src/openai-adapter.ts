@@ -729,6 +729,13 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
         });
         break;
       case "tool_result": {
+        // TODO(tool-result-media): Chat Completions tool messages are text-only, so
+        // media a tool returned is dropped here. Planned: a shared rewrite in
+        // @agentick/model driven by a tool-result axis on MediaSupport — strip the
+        // media, leave one placeholder line per file in the tool message, and hoist
+        // the media into one user message after the tick's tool results, attributed
+        // to its tool and call id. Gemini (functionResponse.parts) and Anthropic
+        // (document blocks) carry it natively and need no hoist.
         const textOnly = part.content
           .filter((c): c is { type: "text"; text: string } => c.type === "text")
           .map((c) => c.text)
