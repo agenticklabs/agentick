@@ -54,7 +54,7 @@
     "@agentick/model": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/utils": "workspace:*",
-    "@anthropic-ai/sdk": "^0.39.0"
+    "@anthropic-ai/sdk": "^0.124.0"
   },
   "devDependencies": {
     "@agentick/app": "workspace:*",

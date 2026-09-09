@@ -53,7 +53,7 @@
     "@agentick/model": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/utils": "workspace:*",
-    "openai": "^6.0.0"
+    "openai": "^7.12.1"
   },
   "devDependencies": {
     "@agentick/app": "workspace:*",

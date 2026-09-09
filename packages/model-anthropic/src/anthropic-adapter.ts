@@ -950,14 +950,17 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
 
 function toolResultContent(
   parts: ReadonlyArray<LanguageModelMessagePart>,
-): Array<TextBlockParam | ImageBlockParam> {
-  const result: Array<TextBlockParam | ImageBlockParam> = [];
+): Array<TextBlockParam | ImageBlockParam | DocumentBlockParam> {
+  const result: Array<TextBlockParam | ImageBlockParam | DocumentBlockParam> = [];
   for (const c of parts) {
     if (c.type === "text") {
       result.push({ type: "text", text: c.text } as TextBlockParam);
     } else if (c.type === "image") {
       const source = anthropicImageSource(c.source, c.mediaType);
       if (source !== null) result.push({ type: "image", source } as ImageBlockParam);
+    } else if (c.type === "document") {
+      const source = anthropicDocumentSource(c.source, c.mediaType);
+      if (source !== null) result.push({ type: "document", source } as DocumentBlockParam);
     } else {
       // Flatten anything else to a JSON text representation (matches v1).
       result.push({ type: "text", text: JSON.stringify(c) } as TextBlockParam);
@@ -1491,9 +1494,10 @@ function anthropicCitationsToCitations(
       });
       continue;
     }
+    const dc = c as { document_index: number; document_title?: string | null };
     const source = interner.intern({
-      documentIndex: c.document_index,
-      ...(c.document_title ? { title: c.document_title } : {}),
+      documentIndex: dc.document_index,
+      ...(dc.document_title ? { title: dc.document_title } : {}),
     });
     blockSources.set(source.id, source);
     let range: { start: number; end: number } | undefined;

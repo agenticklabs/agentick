@@ -246,6 +246,52 @@ describe("anthropic() adapter — tool-use round-trip", () => {
     expect(assistant?.content.some((b) => b.type === "tool_use" && b.id === "call_1")).toBe(true);
   });
 
+  it("passes a document in a tool_result as a native document block, not stringified", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "read" }) },
+    ]);
+    const { exec } = await makeExecutor(stub);
+    const data = Buffer.from("x".repeat(64)).toString("base64");
+    const tree: RenderedTree = {
+      specVersion: "2026-05-08",
+      context: {
+        entries: [
+          { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "fetch" }] },
+          {
+            kind: "message",
+            id: "m2",
+            role: "assistant",
+            content: [{ type: "tool_use", toolUseId: "call_1", name: "query", input: {} }],
+          },
+          {
+            kind: "message",
+            id: "m3",
+            role: "tool",
+            content: [
+              {
+                type: "tool_result",
+                toolUseId: "call_1",
+                name: "query",
+                content: [
+                  { type: "text", text: "saved as /attachments/f1" },
+                  { type: "document", source: { type: "base64", data, mimeType: "text/plain" } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    const sent = stub.calls[0]!.params.messages;
+    const last = sent[sent.length - 1]!.content as Array<{ type: string; content?: unknown[] }>;
+    const result = last.find((b) => b.type === "tool_result")!;
+    expect(result.content).toEqual([
+      { type: "text", text: "saved as /attachments/f1" },
+      { type: "document", source: { type: "base64", media_type: "text/plain", data } },
+    ]);
+  });
+
   it("inserts placeholder text for empty tool_result content", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },

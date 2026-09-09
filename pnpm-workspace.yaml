@@ -19,6 +19,7 @@ allowBuilds:
   protobufjs: false
   sharp: false
   simple-git-hooks: false
+  "@google/genai": false
 
 # ── Native versioning (pnpm >=11.13) — https://pnpm.io/versioning ─────────────
 # Config is read from HERE, not .changeset/config.json (that file is inert now
@@ -171,3 +172,6 @@ versioning:
   # 500s through the CodeArtifact uplink).
   changelog:
     storage: repository
+
+minimumReleaseAgeExclude:
+  - openai@7.12.1
