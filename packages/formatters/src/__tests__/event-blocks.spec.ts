@@ -50,8 +50,8 @@ describe("the payload renders", () => {
   it("xml emits identifiers as attributes and the data bag as children", () => {
     expect(xmlText(compaction)).toBe(
       '<system_event event="compaction" source="timeline">\n' +
-        "<summary>Discussed the store substrate.</summary>\n" +
-        "<entriesBefore>42</entriesBefore>\n" +
+        "  <summary>Discussed the store substrate.</summary>\n" +
+        "  <entriesBefore>42</entriesBefore>\n" +
         "</system_event>",
     );
   });
@@ -71,7 +71,7 @@ describe("the payload renders", () => {
 
   it("non-scalar values serialize as JSON", () => {
     const block = { type: "system_event" as const, event: "e", data: { at: { tick: 3 } } };
-    expect(xmlText(block)).toContain("<at>{&quot;tick&quot;:3}</at>");
+    expect(xmlText(block)).toContain('<at>{"tick":3}</at>');
   });
 });
 
@@ -80,15 +80,13 @@ describe("text overrides the derived body", () => {
 
   it("replaces the children but keeps the identifiers", () => {
     expect(xmlText(framed)).toBe(
-      '<system_event event="compaction" source="timeline">\n' +
-        "The conversation was compacted.\n" +
-        "</system_event>",
+      '<system_event event="compaction" source="timeline">The conversation was compacted.</system_event>',
     );
   });
 
   it("an event with neither payload nor text is self-closing", () => {
     expect(xmlText({ type: "system_event" as const, event: "resumed" })).toBe(
-      '<system_event event="resumed" />',
+      '<system_event event="resumed"/>',
     );
   });
 });
@@ -104,7 +102,7 @@ describe("each block keeps its own shape", () => {
     };
     expect(xmlText(block)).toBe(
       '<state_change entity="task" field="status">\n' +
-        "<from>working</from>\n<to>completed</to>\n" +
+        "  <from>working</from>\n  <to>completed</to>\n" +
         "</state_change>",
     );
   });
@@ -118,7 +116,7 @@ describe("each block keeps its own shape", () => {
     };
     expect(xmlText(block)).toBe(
       '<user_action action="navigate" actor="ryan">\n' +
-        "<to>/projects/19287</to>\n" +
+        "  <to>/projects/19287</to>\n" +
         "</user_action>",
     );
   });
@@ -139,8 +137,8 @@ describe("escaping follows the dialect", () => {
 
   it("xml escapes both attributes and content", () => {
     expect(xmlText(angled)).toBe(
-      '<system_event event="quote&quot;and&lt;angle&gt;">\n' +
-        "<note>&lt;b&gt;bold&lt;/b&gt;</note>\n" +
+      '<system_event event="quote&quot;and&lt;angle>">\n' +
+        "  <note>&lt;b&gt;bold&lt;/b&gt;</note>\n" +
         "</system_event>",
     );
   });

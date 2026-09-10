@@ -2,7 +2,7 @@
 
 exports[`XML dialect — parity fixture > block pass 1`] = `
 [
-  "plain &amp; &quot;quoted&quot; &lt;text&gt;",
+  "plain &amp; "quoted" &lt;text&gt;",
   "<p>a <strong>b</strong> c <em>d</em>
 line two</p>",
   "<h3>Hi &amp; bye</h3>",
@@ -20,32 +20,30 @@ line two</p>",
   <unchanged>client, title</unchanged>
 </message-metadata>",
   "<note-inline kind="x">inline custom</note-inline>",
-  "<file-ref id="f1" name="c &quot;q&quot;.pdf" />",
+  "<file-ref id="f1" name="c &quot;q&quot;.pdf"/>",
   "<reasoning>think &lt;hard&gt;</reasoning>",
   "<code language="ts">const a = b &lt; c &amp;&amp; d;</code>",
-  "<json>{&quot;a&quot;:&quot;&lt;b&gt;&quot;,&quot;c&quot;:&quot;d\\&quot;e&quot;}</json>",
+  "<json>{"a":"&lt;b&gt;","c":"d\\"e"}</json>",
   "<csv>a,b
-1,&quot;2,3&quot;</csv>",
+1,"2,3"</csv>",
   "<raw>island</raw>",
   "<user_action action="click" actor="mike">
-<x>1</x>
-<y>&lt;2&gt;</y>
+  <x>1</x>
+  <y>&lt;2&gt;</y>
 </user_action>",
-  "<system_event event="compaction" source="loop">
-summary &amp; more
-</system_event>",
+  "<system_event event="compaction" source="loop">summary &amp; more</system_event>",
   "<state_change entity="job" field="status">
-<from>open</from>
-<to>closed</to>
+  <from>open</from>
+  <to>closed</to>
 </state_change>",
   "<memory-kind kind="episodic">episodic &amp; &lt;recall&gt;</memory-kind>",
-  "<empty-one />",
+  "<empty-one/>",
 ]
 `;
 
 exports[`XML dialect — parity fixture > tree level: blocksToText and frameMessage 1`] = `
 "<message role="user">
-plain &amp; &quot;quoted&quot; &lt;text&gt;
+plain &amp; "quoted" &lt;text&gt;
 
 <p>a <strong>b</strong> c <em>d</em>
 line two</p>
@@ -77,42 +75,40 @@ line two</p>
 
 <note-inline kind="x">inline custom</note-inline>
 
-<file-ref id="f1" name="c &quot;q&quot;.pdf" />
+<file-ref id="f1" name="c &quot;q&quot;.pdf"/>
 
 <reasoning>think &lt;hard&gt;</reasoning>
 
 <code language="ts">const a = b &lt; c &amp;&amp; d;</code>
 
-<json>{&quot;a&quot;:&quot;&lt;b&gt;&quot;,&quot;c&quot;:&quot;d\\&quot;e&quot;}</json>
+<json>{"a":"&lt;b&gt;","c":"d\\"e"}</json>
 
 <csv>a,b
-1,&quot;2,3&quot;</csv>
+1,"2,3"</csv>
 
 <raw>island</raw>
 
 <user_action action="click" actor="mike">
-<x>1</x>
-<y>&lt;2&gt;</y>
+  <x>1</x>
+  <y>&lt;2&gt;</y>
 </user_action>
 
-<system_event event="compaction" source="loop">
-summary &amp; more
-</system_event>
+<system_event event="compaction" source="loop">summary &amp; more</system_event>
 
 <state_change entity="job" field="status">
-<from>open</from>
-<to>closed</to>
+  <from>open</from>
+  <to>closed</to>
 </state_change>
 
 <memory-kind kind="episodic">episodic &amp; &lt;recall&gt;</memory-kind>
 
-<empty-one />
+<empty-one/>
 
 <image src="https://x.test/i.png?a=1&amp;b=2" alt="alt &quot;q&quot;"/>
 
 <document src="[binary]"/>
 
-<tool_use name="query">{&quot;model&quot;:&quot;Jobs&quot;,&quot;where&quot;:{&quot;a&quot;:&quot;&lt;b&gt;&quot;}}</tool_use>
+<tool_use name="query">{"model":"Jobs","where":{"a":"&lt;b&gt;"}}</tool_use>
 
 <tool_result>3 rows & <more></tool_result>
 </message>"

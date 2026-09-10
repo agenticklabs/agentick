@@ -126,7 +126,7 @@ describe("xmlFormatter", () => {
 
   it("escapes XML special chars in TextBlock text", () => {
     const out = xmlFormatter([textBlock('a & b "c"')]);
-    expect((out[0] as { text: string }).text).toBe("a &amp; b &quot;c&quot;");
+    expect((out[0] as { text: string }).text).toBe('a &amp; b "c"');
   });
 
   it("renders headings with h1-h6 tags", () => {
@@ -215,13 +215,13 @@ describe("custom content blocks — the tag is the whole point", () => {
 
   it("xml escapes attribute values", () => {
     expect(xmlText({ ...block, attrs: { note: 'a "quoted" & <raw>' } })).toContain(
-      'note="a &quot;quoted&quot; &amp; &lt;raw&gt;"',
+      'note="a &quot;quoted&quot; &amp; &lt;raw>"',
     );
   });
 
   it("xml honours selfClosing", () => {
     expect(xmlText({ ...block, content: "", selfClosing: true })).toBe(
-      '<memory-kind kind="episodic" weight="0.8" />',
+      '<memory-kind kind="episodic" weight="0.8"/>',
     );
   });
 
