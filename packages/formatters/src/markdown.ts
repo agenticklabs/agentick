@@ -1,20 +1,17 @@
 /**
- * Markdown formatter — default for v2.
+ * Markdown formatter — default for v2 (ADR 111).
  *
- * Walks `SemanticContentBlock[]` and produces wire-ready `ContentBlock[]`.
- * For each block:
- *
- *   - When `semanticNode` is present, recursively walk the semantic
- *     tree and emit a `TextBlock` carrying markdown-formatted text.
- *   - Code/JSON blocks → `TextBlock` with fenced markdown.
- *   - Image/audio/video/document → native blocks pass through.
- *   - Event blocks (`user_action`, `system_event`, `state_change`) →
- *     `TextBlock` with the block's `.text` if present, or a synthesized
- *     human-readable line.
- *
- * Direct port of v1's `MarkdownRenderer.formatStandard` +
- * `MarkdownRenderer.formatNode` (`packages/core/src/renderers/markdown.ts`).
+ * The formatter decides which mdast node a block or semantic node becomes;
+ * `mdast-util-to-markdown` lays it out. Text is never escaped: markdown is the
+ * dialect authors and tools write in, raw HTML is legal CommonMark, and a `*`
+ * an author typed is theirs. Raw tags — custom elements, `<kbd>` and friends —
+ * are `html` nodes: the tag with its attributes escaped, its content verbatim.
  */
+
+import { toMarkdown, type Options } from "mdast-util-to-markdown";
+import { gfmTableToMarkdown } from "mdast-util-gfm-table";
+import { gfmStrikethroughToMarkdown } from "mdast-util-gfm-strikethrough";
+import type { Nodes, PhrasingContent, RootContent, BlockContent } from "mdast";
 
 import type {
   CodeBlock,
@@ -26,274 +23,332 @@ import type {
   TextBlock,
 } from "@agentick/spec";
 
-import { createFormatter } from "./create-formatter.js";
+import { createFormatter, type DefinedFormatter } from "./create-formatter.js";
 import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
 import { renderEventTag, type TagEscapers } from "./event-block.js";
 
-// ============================================================================
-// Semantic node walker
-// ============================================================================
-
-/**
- * Attribute list for a custom tag. Values are escaped exactly as the xml
- * formatter escapes them — attribute position is attribute position in any
- * dialect, and a raw `"`, `<` or `&` there produces a malformed tag. The
- * surrounding markdown is untouched.
- */
+/** Attribute position is attribute position in any dialect: a raw `"`, `<` or `&` there breaks the tag. */
 function escapeAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }
 
-/** Content stays verbatim — markdown's raw-HTML passthrough, same as `<custom>`. */
+/** Content stays verbatim — markdown's raw-HTML passthrough. */
 const markdownEscapers: TagEscapers = { attr: escapeAttr, content: (s) => s };
 
-function formatNode(node: SemanticNode, inItem = false): string {
-  if (node.text !== undefined && node.semantic === undefined) {
-    return node.text;
-  }
-
-  const childText = (node.children ?? [])
-    .map((child) => formatNode(child, node.semantic === "list-item"))
-    .join("");
-
-  switch (node.semantic) {
-    case "strong":
-      return `**${childText}**`;
-    case "em":
-      return `*${childText}*`;
-    case "mark":
-      return `==${childText}==`;
-    case "underline":
-      return `<u>${childText}</u>`;
-    case "strikethrough":
-      return `~~${childText}~~`;
-    case "subscript":
-      return `<sub>${childText}</sub>`;
-    case "superscript":
-      return `<sup>${childText}</sup>`;
-    case "small":
-      return `<small>${childText}</small>`;
-    case "code":
-      return `\`${childText}\``;
-    case "heading": {
-      const level = Math.min(Math.max(Number(node.props?.level ?? 1), 1), 6);
-      return `${"#".repeat(level)} ${childText}\n\n`;
-    }
-    case "paragraph":
-      return `${childText}\n\n`;
-    case "list": {
-      const ordered = node.props?.ordered === true;
-      // A list opening MID-ITEM must break the line first, or its first
-      // marker glues onto the item's own text ("…summary.- `name`").
-      const lead = inItem ? "\n" : "";
-      return (
-        lead +
-        (node.children ?? [])
-          .map((item, i) => {
-            // Continuation lines — a nested list inside the item included —
-            // indent under their marker, which is what makes `<ul>` in `<li>`
-            // an actual nested list instead of a flat run at column 0.
-            const inner = formatNode(item).trimEnd();
-            const [first = "", ...rest] = inner.split("\n");
-            const indented = [
-              first,
-              ...rest.map((line) => (line === "" ? line : `  ${line}`)),
-            ].join("\n");
-            return ordered ? `${i + 1}. ${indented}` : `- ${indented}`;
-          })
-          .join("\n")
-          .concat("\n\n")
-      );
-    }
-    case "list-item":
-      return childText;
-    case "table": {
-      const rows = node.children ?? [];
-      if (rows.length === 0) return "";
-      const header = rows[0]!;
-      const headerCells = (header.children ?? []).map((child) => formatNode(child));
-      const separator = headerCells.map(() => "---");
-      const body = rows
-        .slice(1)
-        .map((r) => (r.children ?? []).map((child) => formatNode(child)).join(" | "));
-      const lines = [
-        `| ${headerCells.join(" | ")} |`,
-        `| ${separator.join(" | ")} |`,
-        ...body.map((b) => `| ${b} |`),
-      ];
-      return `${lines.join("\n")}\n\n`;
-    }
-    case "blockquote":
-      return childText
-        .split("\n")
-        .map((l) => `> ${l}`)
-        .join("\n")
-        .concat("\n\n");
-    case "line-break":
-      return "\n";
-    case "horizontal-rule":
-      return "\n---\n\n";
-    case "link":
-      return `[${childText}](${String(node.props?.href ?? "")})`;
-    case "image": {
-      const src = String(node.props?.src ?? "");
-      const alt = String(node.props?.alt ?? "");
-      return `![${alt}](${src})`;
-    }
-    case "audio":
-    case "video": {
-      const src = String(node.props?.src ?? "");
-      return `[${node.semantic}](${src})`;
-    }
-    case "quote":
-      return `"${childText}"`;
-    case "citation":
-      return `[${childText}]`;
-    case "keyboard":
-      return `<kbd>${childText}</kbd>`;
-    case "variable":
-      return `<var>${childText}</var>`;
-    case "preformatted":
-      return `\`\`\`\n${childText}\n\`\`\``;
-    case "block":
-      // Generic structural container (`<div>`, `<article>`, `<main>`, …).
-      // Markdown has no specific block syntax — convey the block-ness
-      // via a paragraph break. Trailing newline lets adjacent blocks
-      // separate naturally.
-      return `${childText}\n\n`;
-    case "inline":
-    case "inline-block":
-      // Generic inline container (`<span>`). No wrapping; children
-      // concatenate inline.
-      return childText;
-    case "custom": {
-      // The tag SURVIVES. A custom node's declared purpose is "render this
-      // under my own tag", and markdown is a superset of HTML — CommonMark
-      // specifies raw HTML blocks, and this formatter already emits `<kbd>`
-      // and `<var>` a few cases up. Dropping it left the escape hatch
-      // unreachable in the only dialect anyone renders.
-      //
-      // Content is NOT escaped: it is markdown, and escaping `<` would break
-      // every other construct. Attribute values are, since a quote there ends
-      // the tag.
-      return renderCustomTag(
-        String(node.props?.tag ?? "custom"),
-        node.props?.attrs,
-        childText,
-        node.props?.selfClosing === true,
-        markdownEscapers,
-      );
-    }
-    default:
-      return childText;
-  }
+export interface MarkdownFormatterOptions {
+  /** Registry id; default `formatter.markdown`. Two configurations are two ids. */
+  readonly id?: string;
+  readonly version?: string;
+  /** `mdast-util-to-markdown` options, merged over the dialect's (`bullet`, `rule`, `fences`, `handlers`, `unsafe`, `extensions`, …). */
+  readonly layout?: Partial<Options>;
+  /** Per block type, the rendering; return `undefined` to fall back to the dialect's. */
+  readonly blocks?: Partial<
+    Record<SemanticContentBlock["type"], (block: SemanticContentBlock) => ContentBlock | undefined>
+  >;
 }
 
-// ============================================================================
-// Block-level pass
-// ============================================================================
+/**
+ * Today's look, pinned. Text is never escaped: the library's `text`, `link` and
+ * `image` handlers are where it escapes, so they write their values as-is
+ * (`unsafe` is merged into the defaults, not replaced — it cannot say "none").
+ * A hard break is a newline, as it was, not a backslash.
+ */
+const DEFAULT_LAYOUT: Options = {
+  bullet: "-",
+  rule: "-",
+  emphasis: "*",
+  strong: "*",
+  fences: true,
+  listItemIndent: "one",
+  extensions: [gfmTableToMarkdown(), gfmStrikethroughToMarkdown()],
+  handlers: {
+    text: (node) => node.value,
+    break: () => "\n",
+    link: (node, _parent, state, info) => `[${state.containerPhrasing(node, info)}](${node.url})`,
+    image: (node) => `![${node.alt ?? ""}](${node.url})`,
+  },
+};
 
-function formatBlock(block: SemanticContentBlock): ContentBlock {
-  if (block.semanticNode) {
-    const text = formatNode(block.semanticNode);
-    return { type: "text", text };
+const text = (value: string): PhrasingContent => ({ type: "text", value });
+const html = (value: string): RootContent => ({ type: "html", value });
+
+export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}): DefinedFormatter {
+  const layout: Options = {
+    ...DEFAULT_LAYOUT,
+    ...options.layout,
+    handlers: { ...DEFAULT_LAYOUT.handlers, ...options.layout?.handlers },
+    extensions: [...(DEFAULT_LAYOUT.extensions ?? []), ...(options.layout?.extensions ?? [])],
+  };
+
+  /** Inline nodes only; a block-level child inside an inline position is laid out as its own text. */
+  function inlineOf(nodes: readonly RootContent[]): PhrasingContent[] {
+    return nodes.map((n) =>
+      isPhrasing(n)
+        ? n
+        : text(toMarkdown({ type: "root", children: [n] }, layout).replace(/\n$/, "")),
+    );
   }
-  switch (block.type) {
-    case "text":
-    case "reasoning":
-      return block;
-    case "code": {
-      const c = block as CodeBlock;
-      return {
-        type: "text",
-        text: `\`\`\`${c.language ?? ""}\n${c.text}\n\`\`\``,
-      } satisfies TextBlock;
+
+  const PHRASING = new Set([
+    "text",
+    "emphasis",
+    "strong",
+    "delete",
+    "inlineCode",
+    "link",
+    "image",
+    "break",
+    "html",
+  ]);
+  const isPhrasing = (n: RootContent): n is PhrasingContent => PHRASING.has(n.type);
+
+  /** Block nodes only; a run of inline nodes in block position becomes a paragraph. */
+  function blocksOf(nodes: readonly RootContent[]): BlockContent[] {
+    const out: BlockContent[] = [];
+    let run: PhrasingContent[] = [];
+    const flush = (): void => {
+      if (run.length > 0) out.push({ type: "paragraph", children: run });
+      run = [];
+    };
+    for (const n of nodes) {
+      if (isPhrasing(n)) run.push(n);
+      else {
+        flush();
+        out.push(n as BlockContent);
+      }
     }
-    case "json": {
-      const j = block as JsonBlock;
-      const text = j.text ?? (j.data !== undefined ? JSON.stringify(j.data) : "");
-      return {
-        type: "text",
-        text: `\`\`\`json\n${text}\n\`\`\``,
-      } satisfies TextBlock;
-    }
-    case "xml":
-    case "csv":
-    case "html":
-      return { type: "text", text: block.text ?? "" } satisfies TextBlock;
-    case "user_action":
-    case "system_event":
-    case "state_change":
-      return { type: "text", text: renderEventTag(block, markdownEscapers) } satisfies TextBlock;
-    case "custom":
-      return { type: "text", text: renderCustomBlock(block, markdownEscapers) } satisfies TextBlock;
-    default:
-      // image / audio / video / document / tool_use / tool_result / generated_* /
-      // executable_code / code_execution_result — pass through unchanged.
-      return block;
+    flush();
+    return out;
   }
-}
 
-// ============================================================================
-// Tree-level framing + flatten (owned by this formatter)
-// ============================================================================
+  const rawTag = (
+    tag: string,
+    attrs: unknown,
+    inner: readonly RootContent[],
+    selfClosing: boolean,
+  ): RootContent =>
+    html(
+      renderCustomTag(tag, attrs, selfClosing ? "" : render(inner), selfClosing, markdownEscapers),
+    );
 
-function frameMessage(entry: MessageEntry, body: string): string {
-  return `**${entry.role}:** ${body}`;
-}
+  function formatNode(node: SemanticNode): RootContent[] {
+    if (node.text !== undefined && node.semantic === undefined) return [text(node.text)];
+    const children = node.children ?? [];
+    const kids = children.flatMap(formatNode);
 
-function blocksToText(blocks: readonly ContentBlock[]): string {
-  return blocks
-    .map((b) => blockToText(b))
-    .filter((s) => s.length > 0)
-    .join("\n\n");
-}
-
-function blockToText(block: ContentBlock): string {
-  switch (block.type) {
-    case "text":
-    case "reasoning":
-    case "xml":
-    case "csv":
-    case "html":
-      return block.text ?? "";
-    case "code":
-      return block.text;
-    case "json":
-      return block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
-    case "image": {
-      const src = block.source.type === "url" ? block.source.url : "[binary]";
-      return `![${block.altText ?? ""}](${src})`;
+    switch (node.semantic) {
+      case "strong":
+        return [{ type: "strong", children: inlineOf(kids) }];
+      case "em":
+        return [{ type: "emphasis", children: inlineOf(kids) }];
+      case "strikethrough":
+        return [{ type: "delete", children: inlineOf(kids) }];
+      case "code":
+        return [{ type: "inlineCode", value: render(kids) }];
+      case "mark":
+        return [text(`==${render(kids)}==`)];
+      case "underline":
+        return [rawTag("u", undefined, kids, false)];
+      case "subscript":
+        return [rawTag("sub", undefined, kids, false)];
+      case "superscript":
+        return [rawTag("sup", undefined, kids, false)];
+      case "small":
+        return [rawTag("small", undefined, kids, false)];
+      case "keyboard":
+        return [rawTag("kbd", undefined, kids, false)];
+      case "variable":
+        return [rawTag("var", undefined, kids, false)];
+      case "heading": {
+        const depth = Math.min(Math.max(Number(node.props?.level ?? 1), 1), 6) as
+          | 1
+          | 2
+          | 3
+          | 4
+          | 5
+          | 6;
+        return [{ type: "heading", depth, children: inlineOf(kids) }];
+      }
+      case "paragraph":
+      case "block":
+        return [{ type: "paragraph", children: inlineOf(kids) }];
+      case "list":
+        return [
+          {
+            type: "list",
+            ordered: node.props?.ordered === true,
+            spread: false,
+            children: children.map((item) => ({
+              type: "listItem",
+              spread: false,
+              children: blocksOf(formatNode(item)),
+            })),
+          },
+        ];
+      case "list-item":
+        return kids;
+      case "table":
+        return [
+          {
+            type: "table",
+            children: children.map((row) => ({
+              type: "tableRow",
+              children: (row.children ?? []).map((cell) => ({
+                type: "tableCell",
+                children: inlineOf(formatNode(cell)),
+              })),
+            })),
+          },
+        ];
+      case "blockquote":
+        return [{ type: "blockquote", children: blocksOf(kids) }];
+      case "line-break":
+        return [{ type: "break" }];
+      case "horizontal-rule":
+        return [{ type: "thematicBreak" }];
+      case "link":
+        return [{ type: "link", url: String(node.props?.href ?? ""), children: inlineOf(kids) }];
+      case "image":
+        return [
+          { type: "image", url: String(node.props?.src ?? ""), alt: String(node.props?.alt ?? "") },
+        ];
+      case "audio":
+      case "video":
+        return [
+          { type: "link", url: String(node.props?.src ?? ""), children: [text(node.semantic)] },
+        ];
+      case "quote":
+        return [text(`"${render(kids)}"`)];
+      case "citation":
+        return [text(`[${render(kids)}]`)];
+      case "preformatted":
+        return [{ type: "code", value: render(kids) }];
+      case "inline":
+      case "inline-block":
+        return kids;
+      case "custom":
+        return [
+          rawTag(
+            String(node.props?.tag ?? "custom"),
+            node.props?.attrs,
+            kids,
+            node.props?.selfClosing === true,
+          ),
+        ];
+      default:
+        return kids;
     }
-    case "document":
-    case "audio":
-    case "video": {
-      const src = block.source.type === "url" ? block.source.url : "[binary]";
-      return `[${block.type}](${src})`;
-    }
-    case "tool_use":
-      return `[tool_use ${block.name}] ${JSON.stringify(block.input)}`;
-    case "tool_result":
-      return blocksToText(block.content);
-    case "user_action":
-    case "system_event":
-    case "state_change":
-      return renderEventTag(block, markdownEscapers);
-    case "custom":
-      return renderCustomBlock(block, markdownEscapers);
-    default:
-      return "";
   }
+
+  /** Nodes to markdown. Inline runs stay inline; blocks get their layout; no trailing newline. */
+  function render(nodes: readonly RootContent[]): string {
+    if (nodes.length === 0) return "";
+    const root: Nodes = nodes.every(isPhrasing)
+      ? { type: "paragraph", children: nodes as PhrasingContent[] }
+      : { type: "root", children: blocksOf(nodes) };
+    return toMarkdown(root, layout).replace(/\n$/, "");
+  }
+
+  const formatBlock = (block: SemanticContentBlock): ContentBlock =>
+    options.blocks?.[block.type]?.(block) ?? dialectBlock(block);
+
+  function dialectBlock(block: SemanticContentBlock): ContentBlock {
+    if (block.semanticNode) {
+      return { type: "text", text: render(formatNode(block.semanticNode)) } satisfies TextBlock;
+    }
+    switch (block.type) {
+      case "text":
+      case "reasoning":
+        return block;
+      case "code": {
+        const c = block as CodeBlock;
+        return {
+          type: "text",
+          text: render([{ type: "code", lang: c.language ?? null, value: c.text }]),
+        } satisfies TextBlock;
+      }
+      case "json": {
+        const j = block as JsonBlock;
+        const value = j.text ?? (j.data !== undefined ? JSON.stringify(j.data) : "");
+        return {
+          type: "text",
+          text: render([{ type: "code", lang: "json", value }]),
+        } satisfies TextBlock;
+      }
+      case "xml":
+      case "csv":
+      case "html":
+        return { type: "text", text: block.text ?? "" } satisfies TextBlock;
+      case "user_action":
+      case "system_event":
+      case "state_change":
+        return { type: "text", text: renderEventTag(block, markdownEscapers) } satisfies TextBlock;
+      case "custom":
+        return {
+          type: "text",
+          text: renderCustomBlock(block, markdownEscapers),
+        } satisfies TextBlock;
+      default:
+        return block;
+    }
+  }
+
+  // ── Tree level: frames around already-rendered bytes ──────────────────────
+
+  const frameMessage = (entry: MessageEntry, body: string): string => `**${entry.role}:** ${body}`;
+
+  function blocksToText(blocks: readonly ContentBlock[]): string {
+    return blocks
+      .map((b) => blockToText(b))
+      .filter((s) => s.length > 0)
+      .join("\n\n");
+  }
+
+  function blockToText(block: ContentBlock): string {
+    switch (block.type) {
+      case "text":
+      case "reasoning":
+      case "xml":
+      case "csv":
+      case "html":
+        return block.text ?? "";
+      case "code":
+        return block.text;
+      case "json":
+        return block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
+      case "image": {
+        const src = block.source.type === "url" ? block.source.url : "[binary]";
+        return render([{ type: "image", url: src, alt: block.altText ?? "" }]);
+      }
+      case "document":
+      case "audio":
+      case "video": {
+        const src = block.source.type === "url" ? block.source.url : "[binary]";
+        return render([{ type: "link", url: src, children: [text(block.type)] }]);
+      }
+      case "tool_use":
+        return `[tool_use ${block.name}] ${JSON.stringify(block.input)}`;
+      case "tool_result":
+        return blocksToText(block.content);
+      case "user_action":
+      case "system_event":
+      case "state_change":
+        return renderEventTag(block, markdownEscapers);
+      case "custom":
+        return renderCustomBlock(block, markdownEscapers);
+      default:
+        return "";
+    }
+  }
+
+  return createFormatter({
+    id: options.id ?? "formatter.markdown",
+    format: "markdown",
+    ...(options.version !== undefined ? { version: options.version } : {}),
+    render: (blocks) => blocks.map(formatBlock),
+    frameMessage,
+    blocksToText,
+  });
 }
 
-export const markdownFormatter = createFormatter({
-  id: "formatter.markdown",
-  format: "markdown",
-  render: (blocks) => blocks.map(formatBlock),
-  frameMessage,
-  blocksToText,
-});
+export const markdownFormatter = createMarkdownFormatter();

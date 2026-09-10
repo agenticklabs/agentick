@@ -15,7 +15,7 @@ import type { EventBlock } from "@agentick/spec";
 
 type Pair = readonly [string, string];
 
-interface EventParts {
+export interface EventParts {
   /** Short identifiers — attributes in a tagged dialect. */
   readonly attrs: readonly Pair[];
   /** The payload — child elements in a tagged dialect. */
@@ -38,7 +38,7 @@ function present(pairs: readonly (readonly [string, string | undefined])[]): Pai
   return pairs.filter((pair): pair is Pair => pair[1] !== undefined);
 }
 
-function eventParts(block: EventBlock): EventParts {
+export function eventParts(block: EventBlock): EventParts {
   switch (block.type) {
     case "user_action":
       return {

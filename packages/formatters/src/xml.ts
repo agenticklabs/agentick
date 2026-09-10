@@ -1,14 +1,19 @@
 /**
- * XML formatter — wraps semantic content in XML tags.
+ * XML formatter — semantic content as XML elements (ADR 111).
  *
- * Same shape as {@link markdownFormatter}; emits XML markup instead.
- * Useful for prompts where the model is instructed to read structured
- * tags (`<context>`, `<example>`, `<reasoning>`).
+ * The formatter decides which element a block or node becomes; `fast-xml-parser`
+ * writes the bytes. Escaping is the serializer's, never a call site's, so no
+ * content can form or close an element. Composition across already-rendered
+ * strings — a message around its body, a tool result around its content — is a
+ * frame: a tag we declared around bytes the serializer already produced.
  */
+
+import { XMLBuilder } from "fast-xml-parser";
 
 import type {
   CodeBlock,
   ContentBlock,
+  EventBlock,
   JsonBlock,
   MessageEntry,
   SemanticContentBlock,
@@ -16,243 +21,322 @@ import type {
   TextBlock,
 } from "@agentick/spec";
 
-import { createFormatter } from "./create-formatter.js";
-import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
-import { renderEventTag, type TagEscapers } from "./event-block.js";
+import { createFormatter, type DefinedFormatter } from "./create-formatter.js";
+import { eventParts } from "./event-block.js";
 
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+/** `fast-xml-parser`'s ordered shape: an element is `{ [tag]: children, ":@"?: attrs }`, text is `{ "#text": s }`. */
+type XmlNode = Record<string, unknown>;
+
+const text = (s: string): XmlNode => ({ "#text": s });
+
+function element(tag: string, children: readonly XmlNode[] = [], attrs?: unknown): XmlNode {
+  const pairs =
+    attrs !== null && typeof attrs === "object"
+      ? Object.entries(attrs as Record<string, unknown>)
+      : [];
+  return {
+    [tag]: children,
+    ...(pairs.length > 0
+      ? { ":@": Object.fromEntries(pairs.map(([k, v]) => [`@_${k}`, String(v)])) }
+      : {}),
+  };
 }
 
-const xmlEscapers: TagEscapers = { attr: escapeXml, content: escapeXml };
+/** The XML minimum: what must be escaped for the output to parse, and nothing more. */
+const escapeText = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escapeAttr = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
-function formatNode(node: SemanticNode): string {
-  if (node.text !== undefined && node.semantic === undefined) {
-    return escapeXml(node.text);
-  }
+type BuilderOptions = NonNullable<ConstructorParameters<typeof XMLBuilder>[0]>;
 
-  const childText = (node.children ?? []).map(formatNode).join("");
+export interface XmlFormatterOptions {
+  /** Registry id; default `formatter.xml`. Two configurations are two ids. */
+  readonly id?: string;
+  readonly version?: string;
+  /**
+   * `fast-xml-parser` builder options, passed through (`format`, `indentBy`,
+   * `suppressEmptyNode`, …). Order, attributes and the two escaping
+   * processors are the dialect's and stay.
+   */
+  readonly builder?: Partial<BuilderOptions>;
+  /** Per block type, the rendering; return `undefined` to fall back to the dialect's. */
+  readonly blocks?: Partial<
+    Record<SemanticContentBlock["type"], (block: SemanticContentBlock) => ContentBlock | undefined>
+  >;
+}
+
+interface Writers {
+  /** Inline: pretty-printing lays elements out one per line, which would put whitespace inside mixed content. */
+  readonly serialize: (nodes: readonly XmlNode[]) => string;
+  /** One element per line, indented — for a tree with no text between its elements. */
+  readonly serializePretty: (nodes: readonly XmlNode[]) => string;
+}
+
+function writers(builder: Partial<BuilderOptions> = {}): Writers {
+  const make = (format: boolean): XMLBuilder =>
+    new XMLBuilder({
+      indentBy: "  ",
+      suppressEmptyNode: true,
+      ...builder,
+      ignoreAttributes: false,
+      preserveOrder: true,
+      format: builder.format === undefined ? format : builder.format && format,
+      processEntities: false,
+      tagValueProcessor: (_name, value) => escapeText(String(value)),
+      attributeValueProcessor: (_name, value) => escapeAttr(String(value)),
+    });
+  const inline = make(false);
+  const pretty = make(true);
+  return {
+    serialize: (nodes) => inline.build(nodes) as string,
+    serializePretty: (nodes) => (pretty.build(nodes) as string).replace(/^\n/, ""),
+  };
+}
+
+const isText = (node: SemanticNode): boolean => node.semantic === undefined;
+const isBlank = (node: SemanticNode): boolean => isText(node) && (node.text ?? "").trim() === "";
+
+function formatNode(node: SemanticNode): XmlNode[] {
+  if (node.text !== undefined && node.semantic === undefined) return [text(node.text)];
+  const children = node.children ?? [];
+  const kids = children.flatMap(formatNode);
+  const wrap = (tag: string, attrs?: unknown): XmlNode[] => [element(tag, kids, attrs)];
 
   switch (node.semantic) {
     case "strong":
-      return `<strong>${childText}</strong>`;
     case "em":
-      return `<em>${childText}</em>`;
     case "mark":
-      return `<mark>${childText}</mark>`;
-    case "underline":
-      return `<u>${childText}</u>`;
-    case "strikethrough":
-      return `<s>${childText}</s>`;
-    case "subscript":
-      return `<sub>${childText}</sub>`;
-    case "superscript":
-      return `<sup>${childText}</sup>`;
     case "small":
-      return `<small>${childText}</small>`;
     case "code":
-      return `<code>${childText}</code>`;
-    case "heading": {
-      const level = Math.min(Math.max(Number(node.props?.level ?? 1), 1), 6);
-      return `<h${level}>${childText}</h${level}>`;
-    }
-    case "paragraph":
-      return `<p>${childText}</p>`;
-    case "list": {
-      const tag = node.props?.ordered === true ? "ol" : "ul";
-      const items = (node.children ?? []).map((item) => `<li>${formatNode(item)}</li>`).join("");
-      return `<${tag}>${items}</${tag}>`;
-    }
-    case "list-item":
-      return childText;
-    case "table": {
-      const rows = (node.children ?? [])
-        .map((r) => {
-          const cells = (r.children ?? []).map((c) => `<td>${formatNode(c)}</td>`).join("");
-          return `<tr>${cells}</tr>`;
-        })
-        .join("");
-      return `<table>${rows}</table>`;
-    }
     case "blockquote":
-      return `<blockquote>${childText}</blockquote>`;
-    case "line-break":
-      return "<br/>";
-    case "horizontal-rule":
-      return "<hr/>";
-    case "link":
-      return `<a href="${escapeXml(String(node.props?.href ?? ""))}">${childText}</a>`;
-    case "image": {
-      const src = escapeXml(String(node.props?.src ?? ""));
-      const alt = escapeXml(String(node.props?.alt ?? ""));
-      return `<img src="${src}" alt="${alt}"/>`;
-    }
-    case "audio":
-    case "video": {
-      const src = escapeXml(String(node.props?.src ?? ""));
-      return `<${node.semantic} src="${src}"/>`;
-    }
+      return wrap(node.semantic);
+    case "table":
+      return [
+        element(
+          "table",
+          children.map((row) =>
+            element(
+              "tr",
+              (row.children ?? []).map((cell) => element("td", formatNode(cell))),
+            ),
+          ),
+        ),
+      ];
+    case "underline":
+      return wrap("u");
+    case "strikethrough":
+      return wrap("s");
+    case "subscript":
+      return wrap("sub");
+    case "superscript":
+      return wrap("sup");
+    case "paragraph":
+      return wrap("p");
     case "quote":
-      return `<q>${childText}</q>`;
+      return wrap("q");
     case "citation":
-      return `<cite>${childText}</cite>`;
+      return wrap("cite");
     case "keyboard":
-      return `<kbd>${childText}</kbd>`;
+      return wrap("kbd");
     case "variable":
-      return `<var>${childText}</var>`;
+      return wrap("var");
     case "preformatted":
-      return `<pre>${childText}</pre>`;
+      return wrap("pre");
     case "block":
-      // Generic structural container (`<div>`, `<article>`, …).
-      // XML wraps in `<div>` to preserve the block-ness in the markup.
-      return `<div>${childText}</div>`;
+      return wrap("div");
     case "inline":
     case "inline-block":
-      // Generic inline container (`<span>`). Wrap in `<span>` so
-      // the inline structure round-trips in xml output.
-      return `<span>${childText}</span>`;
+      return wrap("span");
+    case "heading": {
+      const level = Math.min(Math.max(Number(node.props?.level ?? 1), 1), 6);
+      return wrap(`h${level}`);
+    }
+    case "list": {
+      const tag = node.props?.ordered === true ? "ol" : "ul";
+      return [
+        element(
+          tag,
+          children.map((item) => element("li", formatNode(item))),
+        ),
+      ];
+    }
+    case "list-item":
+      return kids;
+    case "line-break":
+      return [element("br")];
+    case "horizontal-rule":
+      return [element("hr")];
+    case "link":
+      return wrap("a", { href: String(node.props?.href ?? "") });
+    case "image":
+      return [
+        element("img", [], {
+          src: String(node.props?.src ?? ""),
+          alt: String(node.props?.alt ?? ""),
+        }),
+      ];
+    case "audio":
+    case "video":
+      return [element(node.semantic, [], { src: String(node.props?.src ?? "") })];
     case "custom": {
       const tag = String(node.props?.tag ?? "custom");
-      const selfClosing = node.props?.selfClosing === true;
-      // Pretty-print structure: an element whose children are THEMSELVES
-      // elements lays them out one per line, indented — inline join rendered
-      // `<message_metadata>` (and every other element tree) as one run-on
-      // wall. Text content stays inline in its own tags; whitespace-only text
-      // nodes between elements (JSX gaps) are layout, not content, and drop.
-      const kids = node.children ?? [];
-      const elementKids = kids.filter((k) => k.semantic !== undefined);
-      if (!selfClosing && elementKids.length > 0) {
-        const parts = kids
-          .filter((k) => !(k.semantic === undefined && (k.text ?? "").trim() === ""))
-          .map((k) => formatNode(k).replace(/^/gm, "  "));
-        const head = renderCustomTag(tag, node.props?.attrs, "", false, {
-          attr: escapeXml,
-          content: (c) => c,
-        });
-        const open = head.slice(0, head.length - `</${tag}>`.length);
-        return `${open}\n${parts.join("\n")}\n</${tag}>`;
+      if (node.props?.selfClosing === true) return [element(tag, [], node.props?.attrs)];
+      // Whitespace-only text between element children is JSX layout, not content.
+      const content = children.some((c) => !isText(c))
+        ? children.filter((c) => !isBlank(c))
+        : children;
+      return [element(tag, content.flatMap(formatNode), node.props?.attrs)];
+    }
+    default:
+      return kids;
+  }
+}
+
+/** A custom element whose children are all elements: laid out one per line, as `<message-metadata>` reads. */
+function isElementTree(node: SemanticNode): boolean {
+  if (node.semantic !== "custom" || node.props?.selfClosing === true) return false;
+  const children = (node.children ?? []).filter((c) => !isBlank(c));
+  return children.length > 0 && children.every((c) => !isText(c));
+}
+
+function eventNodes(block: EventBlock): XmlNode[] {
+  const { attrs, fields } = eventParts(block);
+  const body =
+    block.text !== undefined
+      ? [text(block.text)]
+      : fields.map(([key, value]) => element(key, [text(value)]));
+  return [element(block.type, body, Object.fromEntries(attrs))];
+}
+
+export function createXmlFormatter(options: XmlFormatterOptions = {}): DefinedFormatter {
+  const { serialize, serializePretty } = writers(options.builder);
+
+  const eventText = (block: EventBlock): string =>
+    block.text !== undefined ? serialize(eventNodes(block)) : serializePretty(eventNodes(block));
+
+  const customText = (tag: string, attrs: unknown, content: string, selfClosing: boolean): string =>
+    serialize([element(tag, selfClosing ? [] : [text(content)], attrs)]);
+
+  const formatBlock = (block: SemanticContentBlock): ContentBlock =>
+    options.blocks?.[block.type]?.(block) ?? dialectBlock(block);
+
+  function dialectBlock(block: SemanticContentBlock): ContentBlock {
+    if (block.semanticNode) {
+      const nodes = formatNode(block.semanticNode);
+      const rendered = isElementTree(block.semanticNode)
+        ? serializePretty(nodes)
+        : serialize(nodes);
+      return { type: "text", text: rendered } satisfies TextBlock;
+    }
+    switch (block.type) {
+      case "text":
+        return { type: "text", text: escapeText(block.text) } satisfies TextBlock;
+      case "reasoning":
+        return {
+          type: "text",
+          text: serialize([element("reasoning", [text(block.text)])]),
+        } satisfies TextBlock;
+      case "code": {
+        const c = block as CodeBlock;
+        return {
+          type: "text",
+          text: serialize([
+            element("code", [text(c.text)], c.language ? { language: c.language } : undefined),
+          ]),
+        } satisfies TextBlock;
       }
-      // The children are already escaped — they came through this walk.
-      return renderCustomTag(tag, node.props?.attrs, childText, selfClosing, {
-        attr: escapeXml,
-        content: (c) => c,
-      });
+      case "json": {
+        const j = block as JsonBlock;
+        const body = j.text ?? (j.data !== undefined ? JSON.stringify(j.data) : "");
+        return {
+          type: "text",
+          text: serialize([element("json", [text(body)])]),
+        } satisfies TextBlock;
+      }
+      case "xml":
+      case "html":
+        return { type: "text", text: block.text ?? "" } satisfies TextBlock;
+      case "csv":
+        return {
+          type: "text",
+          text: serialize([element("csv", [text(block.text ?? "")])]),
+        } satisfies TextBlock;
+      case "user_action":
+      case "system_event":
+      case "state_change":
+        return { type: "text", text: eventText(block) } satisfies TextBlock;
+      case "custom":
+        return {
+          type: "text",
+          text: customText(block.tag, block.attrs, block.content, block.selfClosing === true),
+        } satisfies TextBlock;
+      default:
+        return block;
     }
-    default:
-      return childText;
   }
-}
 
-function formatBlock(block: SemanticContentBlock): ContentBlock {
-  if (block.semanticNode) {
-    return { type: "text", text: formatNode(block.semanticNode) } satisfies TextBlock;
+  // ── Tree level: frames around already-rendered bytes ──────────────────────
+
+  const frameMessage = (entry: MessageEntry, body: string): string =>
+    `<message role="${escapeAttr(entry.role)}">\n${body}\n</message>`;
+
+  function blocksToText(blocks: readonly ContentBlock[]): string {
+    return blocks
+      .map((b) => blockToText(b))
+      .filter((s) => s.length > 0)
+      .join("\n\n");
   }
-  switch (block.type) {
-    case "text":
-      return { type: "text", text: escapeXml(block.text) } satisfies TextBlock;
-    case "reasoning":
-      return {
-        type: "text",
-        text: `<reasoning>${escapeXml(block.text)}</reasoning>`,
-      } satisfies TextBlock;
-    case "code": {
-      const c = block as CodeBlock;
-      const lang = c.language ? ` language="${escapeXml(c.language)}"` : "";
-      return {
-        type: "text",
-        text: `<code${lang}>${escapeXml(c.text)}</code>`,
-      } satisfies TextBlock;
+
+  function blockToText(block: ContentBlock): string {
+    switch (block.type) {
+      case "text":
+      case "reasoning":
+      case "xml":
+      case "csv":
+      case "html":
+        return block.text ?? "";
+      case "code":
+        return block.text;
+      case "json":
+        return block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
+      case "image": {
+        const src = block.source.type === "url" ? block.source.url : "[binary]";
+        return serialize([
+          element("image", [], { src, ...(block.altText ? { alt: block.altText } : {}) }),
+        ]);
+      }
+      case "document":
+      case "audio":
+      case "video": {
+        const src = block.source.type === "url" ? block.source.url : "[binary]";
+        return serialize([element(block.type, [], { src })]);
+      }
+      case "tool_use":
+        return serialize([
+          element("tool_use", [text(JSON.stringify(block.input))], { name: block.name }),
+        ]);
+      case "tool_result":
+        return `<tool_result>${blocksToText(block.content)}</tool_result>`;
+      case "user_action":
+      case "system_event":
+      case "state_change":
+        return eventText(block);
+      case "custom":
+        return customText(block.tag, block.attrs, block.content, block.selfClosing === true);
+      default:
+        return "";
     }
-    case "json": {
-      const j = block as JsonBlock;
-      const text = j.text ?? (j.data !== undefined ? JSON.stringify(j.data) : "");
-      return {
-        type: "text",
-        text: `<json>${escapeXml(text)}</json>`,
-      } satisfies TextBlock;
-    }
-    case "xml":
-    case "html":
-      return { type: "text", text: block.text ?? "" } satisfies TextBlock;
-    case "csv":
-      return {
-        type: "text",
-        text: `<csv>${escapeXml(block.text ?? "")}</csv>`,
-      } satisfies TextBlock;
-    case "user_action":
-    case "system_event":
-    case "state_change":
-      return { type: "text", text: renderEventTag(block, xmlEscapers) } satisfies TextBlock;
-    case "custom":
-      return { type: "text", text: renderCustomBlock(block, xmlEscapers) } satisfies TextBlock;
-    default:
-      return block;
   }
+
+  return createFormatter({
+    id: options.id ?? "formatter.xml",
+    format: "xml",
+    ...(options.version !== undefined ? { version: options.version } : {}),
+    render: (blocks) => blocks.map(formatBlock),
+    frameMessage,
+    blocksToText,
+  });
 }
 
-// ============================================================================
-// Tree-level framing + flatten (owned by this formatter)
-// ============================================================================
-
-function frameMessage(entry: MessageEntry, body: string): string {
-  return `<message role="${escapeXml(entry.role)}">\n${body}\n</message>`;
-}
-
-function blocksToText(blocks: readonly ContentBlock[]): string {
-  return blocks
-    .map((b) => blockToText(b))
-    .filter((s) => s.length > 0)
-    .join("\n\n");
-}
-
-function blockToText(block: ContentBlock): string {
-  switch (block.type) {
-    case "text":
-    case "reasoning":
-    case "xml":
-    case "csv":
-    case "html":
-      return block.text ?? "";
-    case "code":
-      return block.text;
-    case "json":
-      return block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
-    case "image": {
-      const src = block.source.type === "url" ? block.source.url : "[binary]";
-      const alt = block.altText ? ` alt="${escapeXml(block.altText)}"` : "";
-      return `<image src="${escapeXml(src)}"${alt}/>`;
-    }
-    case "document":
-    case "audio":
-    case "video": {
-      const src = block.source.type === "url" ? block.source.url : "[binary]";
-      return `<${block.type} src="${escapeXml(src)}"/>`;
-    }
-    case "tool_use":
-      return `<tool_use name="${escapeXml(block.name)}">${escapeXml(JSON.stringify(block.input))}</tool_use>`;
-    case "tool_result":
-      return `<tool_result>${blocksToText(block.content)}</tool_result>`;
-    case "user_action":
-    case "system_event":
-    case "state_change":
-      return renderEventTag(block, xmlEscapers);
-    case "custom":
-      // Content is escaped here, unlike markdown — the `html` block is the
-      // way through in this dialect.
-      return renderCustomBlock(block, xmlEscapers);
-    default:
-      return "";
-  }
-}
-
-export const xmlFormatter = createFormatter({
-  id: "formatter.xml",
-  format: "xml",
-  render: (blocks) => blocks.map(formatBlock),
-  frameMessage,
-  blocksToText,
-});
+export const xmlFormatter = createXmlFormatter();

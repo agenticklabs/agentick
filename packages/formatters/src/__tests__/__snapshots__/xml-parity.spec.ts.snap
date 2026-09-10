@@ -1,0 +1,115 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`XML dialect — parity fixture > block pass 1`] = `
+[
+  "plain &amp; "quoted" &lt;text&gt;",
+  "<p>a <strong>b</strong> c <em>d</em>
+line two</p>",
+  "<h3>Hi &amp; bye</h3>",
+  "<ol><li>one</li><li>two<code>x&lt;y</code></li></ol>",
+  "<table><tr><td>h1</td><td>h2</td></tr><tr><td>1</td><td>2</td></tr></table>",
+  "<blockquote>quoted</blockquote>",
+  "<a href="https://x.test/?a=1&amp;b=2">site</a>",
+  "<img src="https://x.test/i.png" alt="an &quot;alt&quot;"/>",
+  "<br/>",
+  "<hr/>",
+  "<div>div</div>",
+  "<span>span</span>",
+  "<message-metadata seq="3">
+  <path>/#/jobs/1042?a=1&amp;b=2</path>
+  <unchanged>client, title</unchanged>
+</message-metadata>",
+  "<note-inline kind="x">inline custom</note-inline>",
+  "<file-ref id="f1" name="c &quot;q&quot;.pdf"/>",
+  "<reasoning>think &lt;hard&gt;</reasoning>",
+  "<code language="ts">const a = b &lt; c &amp;&amp; d;</code>",
+  "<json>{"a":"&lt;b&gt;","c":"d\\"e"}</json>",
+  "<csv>a,b
+1,"2,3"</csv>",
+  "<raw>island</raw>",
+  "<user_action action="click" actor="mike">
+  <x>1</x>
+  <y>&lt;2&gt;</y>
+</user_action>",
+  "<system_event event="compaction" source="loop">summary &amp; more</system_event>",
+  "<state_change entity="job" field="status">
+  <from>open</from>
+  <to>closed</to>
+</state_change>",
+  "<memory-kind kind="episodic">episodic &amp; &lt;recall&gt;</memory-kind>",
+  "<empty-one/>",
+]
+`;
+
+exports[`XML dialect — parity fixture > tree level: blocksToText and frameMessage 1`] = `
+"<message role="user">
+plain &amp; "quoted" &lt;text&gt;
+
+<p>a <strong>b</strong> c <em>d</em>
+line two</p>
+
+<h3>Hi &amp; bye</h3>
+
+<ol><li>one</li><li>two<code>x&lt;y</code></li></ol>
+
+<table><tr><td>h1</td><td>h2</td></tr><tr><td>1</td><td>2</td></tr></table>
+
+<blockquote>quoted</blockquote>
+
+<a href="https://x.test/?a=1&amp;b=2">site</a>
+
+<img src="https://x.test/i.png" alt="an &quot;alt&quot;"/>
+
+<br/>
+
+<hr/>
+
+<div>div</div>
+
+<span>span</span>
+
+<message-metadata seq="3">
+  <path>/#/jobs/1042?a=1&amp;b=2</path>
+  <unchanged>client, title</unchanged>
+</message-metadata>
+
+<note-inline kind="x">inline custom</note-inline>
+
+<file-ref id="f1" name="c &quot;q&quot;.pdf"/>
+
+<reasoning>think &lt;hard&gt;</reasoning>
+
+<code language="ts">const a = b &lt; c &amp;&amp; d;</code>
+
+<json>{"a":"&lt;b&gt;","c":"d\\"e"}</json>
+
+<csv>a,b
+1,"2,3"</csv>
+
+<raw>island</raw>
+
+<user_action action="click" actor="mike">
+  <x>1</x>
+  <y>&lt;2&gt;</y>
+</user_action>
+
+<system_event event="compaction" source="loop">summary &amp; more</system_event>
+
+<state_change entity="job" field="status">
+  <from>open</from>
+  <to>closed</to>
+</state_change>
+
+<memory-kind kind="episodic">episodic &amp; &lt;recall&gt;</memory-kind>
+
+<empty-one/>
+
+<image src="https://x.test/i.png?a=1&amp;b=2" alt="alt &quot;q&quot;"/>
+
+<document src="[binary]"/>
+
+<tool_use name="query">{"model":"Jobs","where":{"a":"&lt;b&gt;"}}</tool_use>
+
+<tool_result>3 rows & <more></tool_result>
+</message>"
+`;

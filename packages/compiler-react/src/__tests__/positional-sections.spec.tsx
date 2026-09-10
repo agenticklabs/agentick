@@ -87,7 +87,7 @@ describe("conservation", () => {
     const [system] = entries(tree);
     expect(system?.role).toBe("system");
     expect(system?.content).toHaveLength(1);
-    expect(textOf(system!)).toBe("# Identity\n\nYou are Ernesto.\n\n## Rules\n\nBe terse.\n\n");
+    expect(textOf(system!)).toBe("# Identity\n\nYou are Ernesto.\n\n## Rules\n\nBe terse.");
   });
 
   it("lowers a title+text section to the exact bytes the old sectionText produced", async () => {
@@ -391,7 +391,7 @@ describe("the dialect in scope decides how a section reads", () => {
     );
     const [entry] = entries(tree);
     expect(entry?.content).toHaveLength(1);
-    expect(textOf(entry!)).toBe("# Identity\nYou are Ernesto.\n\n");
+    expect(textOf(entry!)).toBe("# Identity\nYou are Ernesto.");
   });
 
   it("lowers a NESTED section in the same dialect as its parent", async () => {

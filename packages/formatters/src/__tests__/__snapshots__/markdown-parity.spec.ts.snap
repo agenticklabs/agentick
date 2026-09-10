@@ -1,0 +1,155 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`markdown dialect — parity fixture > block pass 1`] = `
+[
+  "plain & "quoted" <text> with *stars* and user_id",
+  "a **b** c *d*
+line two with a * star and user_id",
+  "### Hi & bye",
+  "1. one
+2. two \`x<y\`
+   - nested",
+  "- bullet",
+  "| h1 | h2 |
+| -- | -- |
+| 1  | 2  |",
+  "> quoted
+> second line",
+  "[site](https://x.test/?a=1&b=2)",
+  "![an "alt"](https://x.test/i.png)",
+  "",
+  "---",
+  "div",
+  "span",
+  "==marked==",
+  "<u>under</u>",
+  "~~struck~~",
+  "<kbd>Ctrl</kbd>",
+  ""q"",
+  "[cite]",
+  "\`\`\`
+pre <x>
+\`\`\`",
+  "<message-metadata seq="3"><path>/#/jobs/1042?a=1&b=2</path><unchanged>client, title</unchanged></message-metadata>",
+  "<note-inline kind="x &quot;q&quot;">inline *custom*</note-inline>",
+  "<file-ref id="f1" />",
+  "think <hard>",
+  "\`\`\`ts
+const a = b < c && d;
+\`\`\`",
+  "\`\`\`json
+{"a":"<b>","c":"d\\"e"}
+\`\`\`",
+  "a,b
+1,"2,3"",
+  "<raw>island</raw>",
+  "<user_action action="click" actor="mike">
+<x>1</x>
+<y><2></y>
+</user_action>",
+  "<system_event event="compaction" source="loop">
+summary & more
+</system_event>",
+  "<state_change entity="job" field="status">
+<from>open</from>
+<to>closed</to>
+</state_change>",
+  "<memory-kind kind="episodic">episodic & <recall> *md*</memory-kind>",
+  "<empty-one />",
+]
+`;
+
+exports[`markdown dialect — parity fixture > tree level: blocksToText and frameMessage 1`] = `
+"**user:** plain & "quoted" <text> with *stars* and user_id
+
+a **b** c *d*
+line two with a * star and user_id
+
+### Hi & bye
+
+1. one
+2. two \`x<y\`
+   - nested
+
+- bullet
+
+| h1 | h2 |
+| -- | -- |
+| 1  | 2  |
+
+> quoted
+> second line
+
+[site](https://x.test/?a=1&b=2)
+
+![an "alt"](https://x.test/i.png)
+
+---
+
+div
+
+span
+
+==marked==
+
+<u>under</u>
+
+~~struck~~
+
+<kbd>Ctrl</kbd>
+
+"q"
+
+[cite]
+
+\`\`\`
+pre <x>
+\`\`\`
+
+<message-metadata seq="3"><path>/#/jobs/1042?a=1&b=2</path><unchanged>client, title</unchanged></message-metadata>
+
+<note-inline kind="x &quot;q&quot;">inline *custom*</note-inline>
+
+<file-ref id="f1" />
+
+think <hard>
+
+\`\`\`ts
+const a = b < c && d;
+\`\`\`
+
+\`\`\`json
+{"a":"<b>","c":"d\\"e"}
+\`\`\`
+
+a,b
+1,"2,3"
+
+<raw>island</raw>
+
+<user_action action="click" actor="mike">
+<x>1</x>
+<y><2></y>
+</user_action>
+
+<system_event event="compaction" source="loop">
+summary & more
+</system_event>
+
+<state_change entity="job" field="status">
+<from>open</from>
+<to>closed</to>
+</state_change>
+
+<memory-kind kind="episodic">episodic & <recall> *md*</memory-kind>
+
+<empty-one />
+
+![alt "q"](https://x.test/i.png?a=1&b=2)
+
+[document]([binary])
+
+[tool_use query] {"model":"Jobs","where":{"a":"<b>"}}
+
+3 rows & <more>"
+`;

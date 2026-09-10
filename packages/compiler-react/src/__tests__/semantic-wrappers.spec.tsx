@@ -58,7 +58,7 @@ describe("semantic block wrappers — heading semantics survive to compiled outp
         <H1>Title</H1>
       </Message>,
     );
-    expect(textOf(entry)).toBe("# Title\n\n");
+    expect(textOf(entry)).toBe("# Title");
   });
 
   it("<H2> renders as a level-2 heading", async () => {
@@ -67,7 +67,7 @@ describe("semantic block wrappers — heading semantics survive to compiled outp
         <H2>Subtitle</H2>
       </Message>,
     );
-    expect(textOf(entry)).toBe("## Subtitle\n\n");
+    expect(textOf(entry)).toBe("## Subtitle");
   });
 
   it("<H3> renders as a level-3 heading", async () => {
@@ -76,7 +76,7 @@ describe("semantic block wrappers — heading semantics survive to compiled outp
         <H3>Sub-subtitle</H3>
       </Message>,
     );
-    expect(textOf(entry)).toBe("### Sub-subtitle\n\n");
+    expect(textOf(entry)).toBe("### Sub-subtitle");
   });
 
   it("<Paragraph> renders as a paragraph block", async () => {
@@ -85,7 +85,7 @@ describe("semantic block wrappers — heading semantics survive to compiled outp
         <Paragraph>Body copy.</Paragraph>
       </Message>,
     );
-    expect(textOf(entry)).toBe("Body copy.\n\n");
+    expect(textOf(entry)).toBe("Body copy.");
   });
 
   it("the sugar is byte-identical to the lowercase intrinsic it wraps", async () => {
@@ -113,7 +113,7 @@ describe("semantic block wrappers — heading semantics survive to compiled outp
     // untitled one here contributes no frame, so the semantic run reaches
     // the same bytes it would in any other container.
     expect(entry.role).toBe("grounding");
-    expect(textOf(entry)).toBe("## Heading\n\nFirst.\n\n### Nested\n\nSecond.\n\n");
+    expect(textOf(entry)).toBe("## Heading\n\nFirst.\n\n### Nested\n\nSecond.");
   });
 
   it("inline semantics nest inside a heading and a paragraph", async () => {
@@ -127,6 +127,6 @@ describe("semantic block wrappers — heading semantics survive to compiled outp
         </Paragraph>
       </Message>,
     );
-    expect(textOf(entry)).toBe("## Hello **world**\n\nSee *this*.\n\n");
+    expect(textOf(entry)).toBe("## Hello **world**\n\nSee *this*.");
   });
 });
