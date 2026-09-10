@@ -145,7 +145,7 @@ describe("escaping follows the dialect", () => {
 
   it("markdown escapes attributes but passes content through", () => {
     expect(mdText(angled)).toBe(
-      '<system_event event="quote&quot;and&lt;angle&gt;">\n' +
+      '<system_event event="quote&quot;and&lt;angle>">\n' +
         "<note><b>bold</b></note>\n" +
         "</system_event>",
     );

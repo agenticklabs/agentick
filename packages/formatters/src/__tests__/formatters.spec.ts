@@ -92,7 +92,7 @@ describe("markdownFormatter", () => {
         children: [{ text: "Hi" }],
       }),
     ]);
-    expect((out[0] as { text: string }).text).toBe("## Hi\n\n");
+    expect((out[0] as { text: string }).text).toBe("## Hi");
   });
 
   it("renders unordered list", () => {
@@ -105,7 +105,7 @@ describe("markdownFormatter", () => {
         ],
       }),
     ]);
-    expect((out[0] as { text: string }).text).toBe("- a\n- b\n\n");
+    expect((out[0] as { text: string }).text).toBe("- a\n- b");
   });
 
   it("passes native blocks through (image)", () => {
@@ -236,7 +236,7 @@ describe("custom content blocks — the tag is the whole point", () => {
     // `<` or `&` there is a malformed tag. Content is markdown and stays as
     // written; escaping `<` there would break every other construct.
     expect(mdText({ ...block, attrs: { note: 'a "quoted" & <raw>' } })).toBe(
-      '<memory-kind note="a &quot;quoted&quot; &amp; &lt;raw&gt;">episodic recall</memory-kind>',
+      '<memory-kind note="a &quot;quoted&quot; &amp; &lt;raw>">episodic recall</memory-kind>',
     );
     expect(mdText({ ...block, content: "keep <this> & that" })).toContain("keep <this> & that");
   });

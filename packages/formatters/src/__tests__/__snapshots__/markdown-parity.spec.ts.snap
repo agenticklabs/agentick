@@ -4,40 +4,22 @@ exports[`markdown dialect — parity fixture > block pass 1`] = `
 [
   "plain & "quoted" <text> with *stars* and user_id",
   "a **b** c *d*
-line two with a * star and user_id
-
-",
-  "### Hi & bye
-
-",
+line two with a * star and user_id",
+  "### Hi & bye",
   "1. one
 2. two \`x<y\`
-  - nested
-
-",
-  "- bullet
-
-",
+   - nested",
+  "- bullet",
   "| h1 | h2 |
-| --- | --- |
-| 1 | 2 |
-
-",
+| -- | -- |
+| 1  | 2  |",
   "> quoted
-> second line
-
-",
+> second line",
   "[site](https://x.test/?a=1&b=2)",
   "![an "alt"](https://x.test/i.png)",
-  "
-",
-  "
----
-
-",
-  "div
-
-",
+  "",
+  "---",
+  "div",
   "span",
   "==marked==",
   "<u>under</u>",
@@ -83,48 +65,28 @@ exports[`markdown dialect — parity fixture > tree level: blocksToText and fram
 a **b** c *d*
 line two with a * star and user_id
 
-
-
 ### Hi & bye
-
-
 
 1. one
 2. two \`x<y\`
-  - nested
-
-
+   - nested
 
 - bullet
 
-
-
 | h1 | h2 |
-| --- | --- |
-| 1 | 2 |
-
-
+| -- | -- |
+| 1  | 2  |
 
 > quoted
 > second line
-
-
 
 [site](https://x.test/?a=1&b=2)
 
 ![an "alt"](https://x.test/i.png)
 
-
-
-
-
 ---
 
-
-
 div
-
-
 
 span
 
