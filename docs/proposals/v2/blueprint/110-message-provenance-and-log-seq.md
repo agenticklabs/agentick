@@ -128,6 +128,23 @@ absolute `seq`; the branch's own appends floor at `from_seq` so they continue
 the numbering. The spec's `branch` doc permits both shapes. This ADR makes the
 lineage shape the **default** and the copy the documented fallback.
 
+The edge is already modelled: `SessionRecord.from` is a `SessionFrom`
+(`sessionId`, `seq` inclusive, `entryId?`, `inherited`, `anchored`), and genesis
+hands it to every `BranchCapable` bridge as `BranchCtx.from` — one shape,
+passed through, since 8f8cc83ac. nx-knowify's store keeps that edge at the log
+layer (the sessions row: `from_session_id`, `from_seq`, `is_inherited`) and
+stitches through it; the bundled stores receive the same `BranchCtx` and spend
+it on a copy. A `LogStore` is keyed by log below the session layer and cannot
+read the record at `read` time, so a lineage store keeps its own projection of
+`SessionFrom` — `from: { logKey, seq }` on the log record, the `lineage` table
+in postgres, a `.parent` sidecar on disk — never a new concept.
+
+One smell stays named rather than fixed here: nx-knowify writes the edge from
+two places, the timeline store's `branch` at genesis and the session store's
+`put` later, because the session record is persisted late (ADR 100) while the
+log must be readable at genesis. Guarded so they cannot disagree; still two
+writers of one fact.
+
 Contract additions to `LogStore`:
 
 > `branch(source, target, { toSeq })` records that `target` inherits `source`
@@ -145,10 +162,10 @@ Contract additions to `LogStore`:
 
 Implementation, per store:
 
-- **`MemoryLogStore`**: a `parent?: { key, throughSeq }` on the log record;
-  `read`/`history` recurse into the parent bounded by `throughSeq` and
-  concatenate; `append` floors at `throughSeq`. A dozen lines; the `baseSeq`
-  math already exists.
+- **`MemoryLogStore`**: `from?: { logKey, seq }` on the log record — the log
+  layer's `SessionFrom`; `read`/`history` recurse into `from.logKey` bounded by
+  `from.seq` and concatenate; `append` seeds at `from.seq + 1`. A dozen lines;
+  the `baseSeq` math already exists.
 - **`timeline-postgres`**: a `lineage` table `(log_key, parent_key, through_seq)`
   and a recursive CTE on read — the shape nx-knowify's store already runs in
   production. `append` floors at the edge's `through_seq`.
