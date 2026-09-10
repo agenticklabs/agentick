@@ -1913,11 +1913,7 @@ export class SessionHarness<P = unknown>
    * genesis hydrates over the copy.
    */
   private async branchCheckpointBridges(from: SessionFrom): Promise<void> {
-    const ctx: BranchCtx = {
-      ...this.checkpointCtxFrom(this.storeCtx()),
-      fromSessionId: from.sessionId,
-      toSeq: from.seq,
-    };
+    const ctx: BranchCtx = { ...this.checkpointCtxFrom(this.storeCtx()), from };
     for (const bridge of Object.values(this.bridges)) {
       if (isBranchCapable(bridge)) await bridge.branch(ctx);
     }

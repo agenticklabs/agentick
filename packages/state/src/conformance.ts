@@ -300,7 +300,7 @@ export function runStateHarnessConformance(deps: StateHarnessFactoryDeps): void 
   describe("StateHarness — branch (the fork transport)", () => {
     const ctx = (sessionId: string, fromSessionId: string) => ({
       sessionId,
-      fromSessionId,
+      from: { sessionId: fromSessionId, seq: 0, inherited: true, anchored: false },
       tick: 0,
       storeCtx: stubStoreCtx(),
     });

@@ -18,6 +18,7 @@
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md §Hook bridges
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md §Hooks model
  */
+import type { SessionFrom } from "./session-store.js";
 
 import type { Unsubscribe } from "./inbox.js";
 import type { ExecutorProtocol } from "./executor.js";
@@ -157,18 +158,15 @@ export function isCheckpointCapable(x: unknown): x is CheckpointCapable {
 }
 
 /**
- * What a branch hook receives: the SOURCE session's id alongside the usual
- * checkpoint scope. The harness derives both scopes by its own composition
- * rule and copies at the store layer — no data crosses the seam.
+ * What a branch hook receives: the edge the session record carries, alongside
+ * the usual checkpoint scope. `from.sessionId` is the source; `from.seq` is
+ * ADR 100 law 1's INCLUSIVE upper bound on the source's sequence. Snapshot-
+ * shaped scopes (knobs, state) ignore the bound: they are state-as-of, not
+ * sequences. The harness derives both scopes by its own composition rule and
+ * branches at the store layer — no data crosses the seam.
  */
 export interface BranchCtx extends HydrateCtx {
-  readonly fromSessionId: string;
-  /**
-   * ADR 100 law 1's upper bound — copy the source SEQUENCE only up to this
-   * position (`entry.seq <= toSeq`). Absent ⇒ the whole scope. Snapshot-shaped
-   * scopes (knobs, state) ignore it: they are state-as-of, not sequences.
-   */
-  readonly toSeq?: number;
+  readonly from: SessionFrom;
 }
 
 /**

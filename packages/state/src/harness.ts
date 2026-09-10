@@ -297,7 +297,7 @@ export class StateHarness
   async branch(ctx: BranchCtx): Promise<void> {
     const mine = await this.store.query({ scope: this.scopeId }, ctx.storeCtx);
     if (mine.length > 0) return;
-    const source = await this.store.query({ scope: stateScope(ctx.fromSessionId) }, ctx.storeCtx);
+    const source = await this.store.query({ scope: stateScope(ctx.from.sessionId) }, ctx.storeCtx);
     for (const entry of source) {
       await this.store.mutate({ put: { ...entry, scope: this.scopeId } }, ctx.storeCtx);
     }

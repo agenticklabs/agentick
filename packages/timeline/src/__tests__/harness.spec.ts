@@ -237,12 +237,11 @@ describe("TimelineHarness — inbox addressability", () => {
 });
 
 describe("TimelineHarness — branch: the fork transport (checkpointing §5)", () => {
-  const branchCtx = (fromSessionId: string, toSeq?: number) => ({
+  const branchCtx = (fromSessionId: string, toSeq = Number.MAX_SAFE_INTEGER) => ({
     sessionId: fromSessionId,
-    fromSessionId,
+    from: { sessionId: fromSessionId, seq: toSeq, inherited: true, anchored: false },
     tick: 0,
     storeCtx: stubStoreCtx(),
-    ...(toSeq !== undefined ? { toSeq } : {}),
   });
   const idsOf = (entries: readonly TimelineEntry[]): string[] =>
     entries.map((e) => (e.kind === "message" ? e.message.id : e.kind));
