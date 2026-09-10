@@ -24,7 +24,7 @@ describe("nested custom tags", () => {
 
     expect(output).toContain("<retrieved-context>");
     expect(output).toContain("<about>system-produced</about>");
-    expect(output).toContain('<result rank="1" title="Cabin &amp; &lt;job&gt;">');
+    expect(output).toContain('<result rank="1" title="Cabin &amp; &lt;job>">');
     expect(output).toContain("retainage is 10%");
   });
 

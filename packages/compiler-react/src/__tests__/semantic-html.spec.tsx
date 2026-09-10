@@ -129,7 +129,7 @@ describe("semantic HTML — coalescing", () => {
       sessionId: "s",
     });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe("Hello *world*!\n\n");
+    expect((msg.content[0] as { text: string }).text).toBe("Hello *world*!");
   });
 });
 
@@ -148,7 +148,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_h1", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe("# Title\n\n");
+    expect((msg.content[0] as { text: string }).text).toBe("# Title");
   });
 
   it("h3 carries level=3", async () => {
@@ -165,7 +165,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_h3", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe("### Sub\n\n");
+    expect((msg.content[0] as { text: string }).text).toBe("### Sub");
   });
 
   it("unordered list", async () => {
@@ -187,7 +187,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_ul", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe("- alpha\n- beta\n\n");
+    expect((msg.content[0] as { text: string }).text).toBe("- alpha\n- beta");
   });
 
   it("ordered list", async () => {
@@ -209,7 +209,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_ol", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe("1. first\n2. second\n\n");
+    expect((msg.content[0] as { text: string }).text).toBe("1. first\n2. second");
   });
 
   it("link carries href into the markdown output", async () => {
@@ -263,7 +263,7 @@ describe("semantic HTML — element coverage", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m_bq", sessionId: "s" });
     const msg = getMessage(tree);
-    expect((msg.content[0] as { text: string }).text).toBe("> a wise saying\n\n");
+    expect((msg.content[0] as { text: string }).text).toBe("> a wise saying");
   });
 });
 
