@@ -40,7 +40,12 @@ import { projectLog } from "./project.js";
 export function hydrateFromStore<
   TStore extends TimelineStore = TimelineStore,
 >(): TimelineHydrator<TStore> {
-  return (ctx) => ctx.store.read(ctx.sessionId ?? "", ctx);
+  // Tagged when the store can: the seq is the entry's address, and hydration is
+  // the one time it is free.
+  return (ctx) =>
+    ctx.store.history !== undefined
+      ? ctx.store.history(ctx.sessionId ?? "", undefined, ctx)
+      : ctx.store.read(ctx.sessionId ?? "", ctx);
 }
 
 /**
@@ -89,8 +94,7 @@ export function hydrateTail<TStore extends TimelineStore = TimelineStore>(
     }
     // The tail read: a `limit` with NO lower bound anchors the window at the
     // log's end, so the store hands back exactly the last `n`, ascending.
-    const window = await store.history(logKey, { limit: n }, ctx);
-    return window.map((t) => t.entry);
+    return store.history(logKey, { limit: n }, ctx);
   };
 }
 

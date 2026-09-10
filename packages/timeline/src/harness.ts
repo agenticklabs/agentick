@@ -680,9 +680,9 @@ export class TimelineHarness
    * Public so a test rig or an adopter driving genesis itself can open a
    * harness on a known conversation.
    */
-  seed(entries: readonly TimelineEntry[]): void {
+  seed(entries: readonly TimelineEntry[] | readonly SeqTagged<TimelineEntry>[]): void {
     this.log.seed(entries);
-    this.rebuildLogIndexes(entries);
+    this.rebuildLogIndexes(this.log.read());
   }
 
   // ─────────── Async surface — full Operations ───────────
@@ -837,7 +837,7 @@ export class TimelineHarness
   async hydrate(): Promise<void> {
     const hydrate = this.hydrator;
     if (hydrate === undefined) return;
-    let entries: readonly TimelineEntry[];
+    let entries: readonly TimelineEntry[] | readonly SeqTagged<TimelineEntry>[];
     try {
       entries = await hydrate(this.hydrateCtx());
     } catch (cause) {

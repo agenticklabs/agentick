@@ -90,7 +90,7 @@ export interface TimelineHydrateCtx<
  */
 export type TimelineHydrator<TStore extends TimelineStore = TimelineStore> = (
   ctx: TimelineHydrateCtx<TStore>,
-) => Promise<readonly TimelineEntry[]>;
+) => Promise<readonly TimelineEntry[] | readonly SeqTagged<TimelineEntry>[]>;
 
 // ============================================================================
 // The shaping seam
@@ -162,7 +162,9 @@ export interface TimelineDefinition<
    * here: the store a definition names and the store its hydrator receives are
    * the same object by construction.
    */
-  hydrate?(ctx: TimelineHydrateCtx<TStore>): Promise<readonly TimelineEntry[]>;
+  hydrate?(
+    ctx: TimelineHydrateCtx<TStore>,
+  ): Promise<readonly TimelineEntry[] | readonly SeqTagged<TimelineEntry>[]>;
   /**
    * Construction-bound default compaction (ADR 51 signal form). With this set,
    * `timeline.compact()` — the no-arg form, the one that can cross the

@@ -184,3 +184,23 @@ describe("LogView — seed installs the projection (ADR 93 genesis)", () => {
     expect(ids(v.read())).toEqual(["g1", "g2"]);
   });
 });
+
+describe("LogView — the store's seq rides the snapshot", () => {
+  it("seeds seqs from tagged entries and learns an append's seq once the write lands", async () => {
+    const store = new MemoryLog<{ id: string }>();
+    const ctx = stubStoreCtx();
+    const [sa, sb] = await store.append("k", [{ id: "a" }, { id: "b" }], ctx);
+    const tagged = await store.history!("k", undefined, ctx);
+    const v = new LogView<{ id: string }>({ store, logKey: "k", writePolicy: "behind" });
+    v.seed(tagged);
+    const [a, b] = v.snapshot().entries;
+    expect(v.snapshot().seqs.get(a!)).toBe(sa);
+    expect(v.snapshot().seqs.get(b!)).toBe(sb);
+
+    const c = { id: "c" };
+    await v.append([c], ctx);
+    await v.flush();
+    expect(v.snapshot().seqs.get(c)).toBe(sb! + 1);
+    expect(v.snapshot().entries).toEqual([a, b, c]);
+  });
+});

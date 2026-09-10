@@ -41,6 +41,8 @@ const h = React.createElement;
  */
 type MessageTimelineEntry = Extract<TimelineEntry, { kind: "message" }>;
 
+const EMPTY_SEQS: ReadonlyMap<TimelineEntry, number> = new Map();
+
 export interface ConversationHistoryOptions {
   /** Custom predicate applied after role filtering. */
   readonly filter?: (entry: MessageTimelineEntry) => boolean;
@@ -68,6 +70,8 @@ export interface TimelineBudgetOptions {
 export type TimelineRenderFn = (
   entries: readonly MessageTimelineEntry[],
   budget: TokenBudgetInfo | null,
+  /** The store's seq per entry, by identity, where assigned. See `TimelineSnapshot.seqs`. */
+  seqs: ReadonlyMap<TimelineEntry, number>,
 ) => ReactNode;
 
 export interface TimelineProps extends ConversationHistoryOptions, TimelineBudgetOptions {
@@ -204,7 +208,7 @@ export function Timeline(props: TimelineProps): JSX.Element {
     return h(
       Project,
       { projectionKey: "timeline" },
-      (props.children as TimelineRenderFn)(kept, budget),
+      (props.children as TimelineRenderFn)(kept, budget, snapshot.seqs ?? EMPTY_SEQS),
     );
   }
 

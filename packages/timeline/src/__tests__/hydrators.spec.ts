@@ -28,6 +28,10 @@ interface StoreSpy {
 }
 
 /** A spied {@link MemoryTimelineStore} — real behavior, observable calls. */
+/** A hydrator returns entries or tagged entries; the assertions here are about the entries. */
+const bare = (got: readonly (TimelineEntry | SeqTagged<TimelineEntry>)[]): TimelineEntry[] =>
+  got.map((t) => ("entry" in t ? t.entry : t));
+
 function spyStore(withHistory = true): StoreSpy {
   const inner = new MemoryTimelineStore();
   const calls: string[] = [];
@@ -107,7 +111,7 @@ describe("hydrateFromStore — the ADR 49 default", () => {
     spy.calls.length = 0;
     const got = await hydrateFromStore()(ctxFor(spy.store, "s1"));
     expect(got).toHaveLength(3);
-    expect(spy.calls).toEqual(["read"]);
+    expect(spy.calls).toEqual(["history"]);
   });
 
   it("is the harness's implicit default whenever a store is configured", async () => {
@@ -125,7 +129,7 @@ describe("hydrateFromStore — the ADR 49 default", () => {
     await h.ready;
     spy.calls.length = 0;
     await h.hydrate();
-    expect(spy.calls).toEqual(["read"]);
+    expect(spy.calls).toEqual(["history"]);
     expect(h.read().entries).toHaveLength(2);
     await h.close();
   });
@@ -143,7 +147,7 @@ describe("hydrateTail — the BOUNDED-MEMORY proof (ADR 93 D1 gate)", () => {
 
     // 1. The result is the TAIL, exactly k entries.
     expect(got).toHaveLength(k);
-    expect(got.map((e) => (e.kind === "message" ? e.message.id : ""))).toEqual([
+    expect(bare(got).map((e) => (e.kind === "message" ? e.message.id : ""))).toEqual([
       "e995",
       "e996",
       "e997",
@@ -212,7 +216,7 @@ describe("hydrateTail — the BOUNDED-MEMORY proof (ADR 93 D1 gate)", () => {
     const got = await hydrateTail(4)(ctxFor(spy.store, "s-nohist"));
     // The RESULT is identical…
     expect(got).toHaveLength(4);
-    expect(got.map((e) => (e.kind === "message" ? e.message.id : ""))).toEqual([
+    expect(bare(got).map((e) => (e.kind === "message" ? e.message.id : ""))).toEqual([
       "e16",
       "e17",
       "e18",

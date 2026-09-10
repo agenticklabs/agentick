@@ -56,7 +56,7 @@
  * @verifiedBy packages/store/src/__tests__/log-view.spec.ts
  */
 
-import type { LogStore, StoreCtx } from "@agentick/spec";
+import type { LogStore, StoreCtx, SeqTagged } from "@agentick/spec";
 import { createNotifier, type Notifier, type Unsubscribe } from "@agentick/pubsub";
 
 /**
@@ -78,6 +78,8 @@ export interface LogViewReadSnapshot<T> {
   readonly entries: readonly T[];
   /** Monotonic counter; bumps on every projection mutation. */
   readonly version: number;
+  /** The store's `seq` per entry, by identity, once the store has assigned it. */
+  readonly seqs: ReadonlyMap<T, number>;
 }
 
 export interface LogViewConfig<T> {
@@ -114,7 +116,9 @@ export class LogView<T> {
    * Cached render snapshot — `useSyncExternalStore` identity stability.
    * Re-allocated only when the projection mutates.
    */
-  private _snapshot: LogViewReadSnapshot<T> = { entries: [], version: 0 };
+  private _snapshot: LogViewReadSnapshot<T> = { entries: [], version: 0, seqs: new Map() };
+  /** Seq by entry identity. Seeded from tagged hydration; filled in as appends land. */
+  private readonly _seqs = new Map<T, number>();
 
   /** Keyless render pings ("something changed, re-read"). */
   private readonly listeners: Notifier = createNotifier();
@@ -190,13 +194,22 @@ export class LogView<T> {
     this.applyAppend(entries);
     if (this.writePolicy === "through") {
       try {
-        await this.store.append(this.logKey, entries, ctx);
+        this.recordSeqs(entries, await this.store.append(this.logKey, entries, ctx));
       } catch (cause) {
         throw this.wrapWriteError(cause);
       }
     } else {
       this.enqueueWriteBehind(entries, ctx);
     }
+  }
+
+  /** Seqs the store assigned; a silent refresh, since nothing the model reads changed. */
+  private recordSeqs(entries: readonly T[], seqs: readonly number[]): void {
+    entries.forEach((entry, i) => {
+      const seq = seqs[i];
+      if (seq !== undefined) this._seqs.set(entry, seq);
+    });
+    this.refreshSnapshot();
   }
 
   /**
@@ -232,8 +245,15 @@ export class LogView<T> {
    * snapshot, and pings once. The durable log itself lives in the STORE — the
    * view holds no second copy of it (data-layer §2.7).
    */
-  seed(entries: readonly T[]): void {
-    this._projection = [...entries];
+  seed(entries: readonly T[] | readonly SeqTagged<T>[]): void {
+    this._seqs.clear();
+    this._projection = entries.map((e) => {
+      if (isTagged(e)) {
+        this._seqs.set(e.entry, e.seq);
+        return e.entry;
+      }
+      return e;
+    });
     this._projectionVersion += 1;
     this.refreshSnapshot();
     this.notify();
@@ -341,7 +361,7 @@ export class LogView<T> {
       while (this.writeBuffer.length > 0) {
         const batch = this.writeBuffer;
         this.writeBuffer = [];
-        await this.store.append(this.logKey, batch, ctx);
+        this.recordSeqs(batch, await this.store.append(this.logKey, batch, ctx));
       }
     } catch (err) {
       this.pumpError = err;
@@ -354,10 +374,21 @@ export class LogView<T> {
     // Clone entries so the snapshot's array reference changes on every
     // mutation — consumers that memoize on `entries` rely on the array identity
     // changing too. Cheap O(n) copy on infrequent writes.
-    this._snapshot = { entries: [...this._projection], version: this._projectionVersion };
+    this._snapshot = {
+      entries: [...this._projection],
+      version: this._projectionVersion,
+      seqs: new Map(this._seqs),
+    };
   }
 
   private notify(): void {
     this.listeners.notify();
   }
 }
+
+const isTagged = <T>(e: T | SeqTagged<T>): e is SeqTagged<T> =>
+  typeof e === "object" &&
+  e !== null &&
+  "seq" in e &&
+  "entry" in e &&
+  typeof (e as SeqTagged<T>).seq === "number";

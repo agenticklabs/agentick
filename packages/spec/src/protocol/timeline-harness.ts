@@ -67,6 +67,13 @@ export interface TimelineSnapshot {
   readonly entries: readonly TimelineEntry[];
   /** Monotonic counter; bumps on every projection mutation. */
   readonly version: number;
+  /**
+   * The store's `seq` per entry, by entry identity, for every entry the store
+   * has assigned one: seeded entries at hydration, appended entries once the
+   * write lands. A write-behind append's seq arrives after the render that
+   * showed the entry; the next read sees it. Absent for a store-less timeline.
+   */
+  readonly seqs?: ReadonlyMap<TimelineEntry, number>;
 }
 
 // ============================================================================
