@@ -34,10 +34,11 @@ wrong in a way only a prompt reveals.
 4. **Islands embed verbatim** (`create-formatter.ts`, "Islands embed
    VERBATIM"). A markdown island inside XML keeps its raw `&`; an XML island
    inside markdown keeps its tags. Prompt "XML" is a convention providers never
-   parse; validity across a dialect boundary is the author's call. The
-   serializer must therefore accept a verbatim node, or the island is spliced
-   after serialization by placeholder. Either way the author's bytes are
-   untouched.
+   parse; validity across a dialect boundary is the author's call. Serialization
+   is therefore **depth-first**: a serializer only ever receives a subtree
+   entirely in its own dialect, and composition across dialects is a frame —
+   a string around an already-rendered string. No serializer sees a foreign
+   node, so none needs a verbatim node.
 5. **Text round-trips byte-for-byte.** Pretty-printing lays out elements; it
    never indents, wraps or normalises inside a text node. A user's newlines
    survive.
@@ -48,17 +49,27 @@ wrong in a way only a prompt reveals.
 
 ## Design
 
-### The node model
+### The node model, and depth-first composition
 
 ```ts
 type Node =
   | { kind: "element"; name: string; attrs: Record<string, string>; children: Node[] }
-  | { kind: "text"; text: string } // escaped by the serializer
-  | { kind: "verbatim"; text: string }; // an island; never escaped
+  | { kind: "text"; text: string }; // escaped by the serializer
 ```
 
 A formatter's own code is one function per block type and one per semantic
 element, each returning nodes. That is the whole formatter.
+
+An island never appears as a node. Sections are block-level, so an island is
+always a whole section: it is rendered first, by its own dialect, to a string
+(`expandSections` already runs body-first-then-frame), and the containing
+dialect receives that string at a **frame**. A frame is the one place our
+code writes markup — `<message role="user">` + body + `</message>`, or a
+section's tag around its rendered body — and it composes strings, not nodes.
+Its tag name is one we declared and its attribute comes from a fixed set; no
+user content passes through it. Everything inside a frame that is our
+dialect's own went through the serializer; everything that is another
+dialect's arrived as bytes.
 
 ### XML
 
@@ -70,11 +81,10 @@ renders without replacing the formatter. `frameMessage` becomes the `message`
 element with a `role` attribute — a node like any other. The bare
 `xmlFormatter` export stays as `xmlFormatter()`.
 
-Open until the spike settles it: whether `xmlbuilder2` can carry a verbatim
-node. If not, islands serialize by placeholder and splice after; if a second
-library does it natively (`fast-xml-parser`'s builder, `@xmldom/xmldom`), the
-spike says which. The choice is made by requirements 4 and 5, not by
-preference.
+The spike's one question is requirement 5: that `xmlbuilder2`'s pretty
+printer lays out elements without touching text nodes. If it does not, a
+second library (`fast-xml-parser`'s builder, `@xmldom/xmldom`) is tried on the
+same test. The choice is made by that test, not by preference.
 
 ### Markdown
 
@@ -82,9 +92,8 @@ Same move: build `mdast` nodes and serialize with `mdast-util-to-markdown`,
 passing its options through (`bullet`, `emphasis`, `strong`, `fences`,
 `listItemIndent`, and its `handlers` / `unsafe` extension points, which are
 the library's own per-node override). The `**role:**` frame is a paragraph
-with a strong node. Markdown has no verbatim-node problem: `unsafe` is where
-escaping is decided, and an island is a `html` node, which the serializer
-writes as-is.
+with a strong node. Islands compose the same way: rendered first by their own dialect, spliced at
+a frame; `unsafe` is where markdown's own escaping is decided.
 
 ### Registration
 
@@ -106,15 +115,16 @@ existing custom formatter is untouched.
   newlines, leading whitespace, angle brackets, ampersands, quotes.
 - No content can open or close an element: `</message>` inside a text block
   is text after serialization; `"` inside an attribute value is text.
-- An island's bytes are identical before and after serialization.
+- An island's bytes are identical before and after composition — the
+  containing dialect's serializer never saw them.
 - Output with no islands parses as XML.
 - The parity report: every existing formatter fixture rendered on `feat/v2`
   and on this branch, diffed, committed as the review artifact.
 
 ## Sequencing
 
-1. Spike: one fixture through `xmlbuilder2`, verbatim node or placeholder
-   splice, text round-trip. Decides the library. Half a day, throwaway.
+1. Spike: one fixture through `xmlbuilder2`, text round-trip under pretty
+   printing. Decides the library. Half a day, throwaway.
 2. XML on the node model; the tests above; parity report.
 3. Markdown on `mdast`; parity report.
 4. Factories with pass-through options; `formatters([...])`.
