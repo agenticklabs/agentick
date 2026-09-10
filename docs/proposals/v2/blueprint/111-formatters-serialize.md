@@ -74,17 +74,36 @@ dialect's arrived as bytes.
 ### XML
 
 `xmlFormatter(options?)` builds the node tree and serializes with
-`xmlbuilder2`, passing `options.writer` through (`prettyPrint`, `indent`,
-`width`, `allowEmptyTags`, …). Our layer: `options.blocks`, a partial map from
-block type to node builder, so an adopter changes how `tool_use` or `json`
-renders without replacing the formatter. `frameMessage` becomes the `message`
-element with a `role` attribute — a node like any other. The bare
-`xmlFormatter` export stays as `xmlFormatter()`.
+`fast-xml-parser`'s `XMLBuilder` in `preserveOrder` mode, passing
+`options.builder` through (`format`, `indentBy`, `suppressEmptyNode`, …). Our
+layer: `options.blocks`, a partial map from block type to node builder, so an
+adopter changes how `tool_use` or `json` renders without replacing the
+formatter. `frameMessage` becomes the `message` element with a `role`
+attribute — a node like any other. The bare `xmlFormatter` export stays as
+`xmlFormatter()`.
 
-The spike's one question is requirement 5: that `xmlbuilder2`'s pretty
-printer lays out elements without touching text nodes. If it does not, a
-second library (`fast-xml-parser`'s builder, `@xmldom/xmldom`) is tried on the
-same test. The choice is made by that test, not by preference.
+**Spike, 2026-09-10** (`scratchpad/spike-xmlbuilder2`, throwaway), on eight
+hostile texts — angle brackets, `&&`, quotes, a forged `</message>`, leading
+and trailing spaces, tabs, blank-line runs, literal entities — plus a
+quoted-and-angled attribute value:
+
+- `xmlbuilder2`: **disqualified.** Its writer deliberately leaves an `&` alone
+  when it already looks like an entity (`nonEntityAmpersandRegex`), so a
+  user's literal `&lt;x&gt;` reads back as `<x>`. Text is not byte-faithful
+  and there is no option.
+- `fast-xml-parser` `XMLBuilder`, `preserveOrder: true, format: true`:
+  document order kept across interleaved element names, indentation never
+  enters a text node, every text and attribute round-trips byte-for-byte
+  through its own parser. **Chosen.**
+- `@xmldom/xmldom`: spec-faithful serializer, same round-trip, but no
+  pretty-printer. The fallback if the builder ever misbehaves.
+
+Escaping is the XML minimum and nothing more, supplied as the builder's two
+value processors: text escapes `& < >`, attributes escape `& < "`. Its default
+processing is also correct but writes `&apos;` for every apostrophe in user
+text. Two one-line functions, and correctness is proven by parse-back, not by
+reasoning about text — this is not a rule over arbitrary content, which ADR
+110 §4 withdrew.
 
 ### Markdown
 
@@ -123,8 +142,7 @@ existing custom formatter is untouched.
 
 ## Sequencing
 
-1. Spike: one fixture through `xmlbuilder2`, text round-trip under pretty
-   printing. Decides the library. Half a day, throwaway.
+1. ~~Spike~~ — done, see §XML. Library chosen.
 2. XML on the node model; the tests above; parity report.
 3. Markdown on `mdast`; parity report.
 4. Factories with pass-through options; `formatters([...])`.
