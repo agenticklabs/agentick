@@ -24,8 +24,12 @@ export {
 
 export { renderEventPlain, renderEventTag, type TagEscapers } from "./event-block.js";
 
-export { markdownFormatter } from "./markdown.js";
-export { xmlFormatter } from "./xml.js";
+export {
+  markdownFormatter,
+  createMarkdownFormatter,
+  type MarkdownFormatterOptions,
+} from "./markdown.js";
+export { xmlFormatter, createXmlFormatter, type XmlFormatterOptions } from "./xml.js";
 export { textFormatter } from "./text.js";
 
 // The ONE section → content-blocks lowering (ADR 94). A `<Section>` is
@@ -81,9 +85,12 @@ import type { DefinedFormatter } from "./create-formatter.js";
  * to enable the reference set; markdown is the default lookup key.
  */
 export function builtInFormatters(): ReadonlyMap<string, DefinedFormatter> {
-  return new Map<string, DefinedFormatter>([
-    [md.__identity.id, md],
-    [xml.__identity.id, xml],
-    [txt.__identity.id, txt],
-  ]);
+  return formatters([md, xml, txt]);
+}
+
+/** A registry from a list, keyed by each formatter's id — what `CompilerHarnessOptions.formatters` takes. */
+export function formatters(
+  list: readonly DefinedFormatter[],
+): ReadonlyMap<string, DefinedFormatter> {
+  return new Map(list.map((f) => [f.__identity.id, f]));
 }

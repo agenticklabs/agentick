@@ -114,12 +114,25 @@ the library's own per-node override). The `**role:**` frame is a paragraph
 with a strong node. Islands compose the same way: rendered first by their own dialect, spliced at
 a frame; `unsafe` is where markdown's own escaping is decided.
 
-### Registration
+### Registration and the factories
+
+A `DefinedFormatter` is itself callable (`xmlFormatter(blocks)` renders), so the
+factory follows `createFormatter`: `createXmlFormatter(options)` and
+`createMarkdownFormatter(options)`, with `xmlFormatter` and `markdownFormatter`
+as the zero-option calls. Options: `id` and `version` (two configurations are
+two ids), the serializer's own bag passed through (`builder` for
+`fast-xml-parser`, `layout` for `mdast-util-to-markdown`, merged over the
+dialect's defaults), and `blocks`, a per-block-type override returning a
+rendered block or `undefined` to fall back. What the dialect owns — order,
+attributes, the escaping processors in XML; the no-escaping handlers in
+markdown — is applied after the pass-through and cannot be undone by it, except
+deliberately: a `layout.handlers.text` that calls `state.safe` turns markdown
+escaping on, which is how escaping becomes a later option rather than a policy
+change.
 
 `CompilerHarnessOptions.formatters` already takes a map. `formatters([...])`
-builds it from a list so an adopter writes
-`formatters([xmlFormatter({ writer: { indent: "\t" } }), myYamlFormatter])`
-rather than assembling a `Map` by id. Sugar; the map stays the contract.
+builds it from a list, keyed by id; `builtInFormatters()` is
+`formatters([markdown, xml, text])`.
 
 ### What stays exactly as it is
 
@@ -143,9 +156,9 @@ existing custom formatter is untouched.
 ## Sequencing
 
 1. ~~Spike~~ — done, see §XML. Library chosen.
-2. XML on the node model; the tests above; parity report.
-3. Markdown on `mdast`; parity report.
-4. Factories with pass-through options; `formatters([...])`.
+2. ~~XML on the node model; the tests above; parity report.~~ — 29ffa7162, 6dfec2113.
+3. ~~Markdown on `mdast`; parity report.~~ — 75c01d40b, 8b7030b03 (compiler-react goldens: 5ffc59659).
+4. ~~Factories with pass-through options; `formatters([...])`.~~ — this commit.
 5. Merge to `feat/v2` on the parity review, one lane.
 
 ## Follow-on, not here
