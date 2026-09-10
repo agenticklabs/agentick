@@ -16,7 +16,7 @@
  */
 
 import ReactReconciler from "react-reconciler";
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 import type { HostConfigDeps } from "../host/host-config.js";
 import { createHostConfig } from "../host/host-config.js";
 
@@ -38,13 +38,48 @@ export interface Compiler {
 }
 
 /**
+ * React's shared internals — one object per `react` module instance, shared by
+ * every renderer in the process, its fields named with single letters in
+ * every build (`H` hooks dispatcher, `T` current transition, `S`
+ * onStartTransitionFinish, …). The reconciler factory CHAINS onto `S` on every
+ * instantiation — `prev = S; S = (t, v) => { …; prev?.(t, v) }` — and nothing
+ * ever unchains, so every reconciler ever created stays reachable from a
+ * process global, with its last rendered tree. One reconciler per mount made
+ * that one leaked session per mount (553 of 587 retained sessions in a
+ * production snapshot).
+ *
+ * The slot only serves `React.startTransition`, which this compiler never
+ * uses. Rather than name the letter, every field the factory changed at
+ * instantiation is put back — a renamed slot in a future React fails the spec
+ * instead of leaking quietly.
+ */
+const reactSharedInternals = (
+  React as unknown as {
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: Record<string, unknown>;
+  }
+).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+
+function instantiateReconciler(
+  config: Parameters<typeof ReactReconciler>[0],
+): ReturnType<typeof ReactReconciler> {
+  const before = reactSharedInternals ? { ...reactSharedInternals } : undefined;
+  const instance = ReactReconciler(config);
+  if (reactSharedInternals && before) {
+    for (const key of Object.keys(reactSharedInternals)) {
+      if (reactSharedInternals[key] !== before[key]) reactSharedInternals[key] = before[key];
+    }
+  }
+  return instance;
+}
+
+/**
  * Construct a per-mount compiler. Each call produces an independent
  * `ReactReconciler` instance bound to the supplied `HostConfigDeps` —
  * mounts do not share state.
  */
 export function createCompiler(deps: HostConfigDeps): Compiler {
   const config = createHostConfig(deps);
-  const instance = ReactReconciler(config as Parameters<typeof ReactReconciler>[0]);
+  const instance = instantiateReconciler(config as Parameters<typeof ReactReconciler>[0]);
 
   // Auto-register with the global React DevTools hook. If DevTools
   // isn't connected (no `enableReactDevTools()` call) this is a no-op
