@@ -149,7 +149,7 @@ summary & more
 
 [document]([binary])
 
-[tool_use query] {"model":"Jobs","where":{"a":"<b>"}}
+[tool_use query c1] {"model":"Jobs","where":{"a":"<b>"}}
 
-3 rows & <more>"
+[tool_result query c1] 3 rows & <more>"
 `;

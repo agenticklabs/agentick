@@ -108,8 +108,8 @@ line two</p>
 
 <document src="[binary]"/>
 
-<tool_use name="query">{"model":"Jobs","where":{"a":"&lt;b&gt;"}}</tool_use>
+<tool_use id="c1" name="query">{"model":"Jobs","where":{"a":"&lt;b&gt;"}}</tool_use>
 
-<tool_result>3 rows & <more></tool_result>
+<tool_result id="c1" name="query">3 rows & <more></tool_result>
 </message>"
 `;
