@@ -59,6 +59,7 @@ import { copyLogPrefix } from "@agentick/store";
 import { join } from "node:path";
 
 import type {
+  LogFrom,
   LogHistoryOptions,
   LogMutation,
   LogQuery,
@@ -207,13 +208,8 @@ class FsTimelineStore implements TimelineStore {
     return next;
   }
 
-  branch(
-    source: string,
-    target: string,
-    opts: { readonly toSeq?: number },
-    ctx: StoreCtx,
-  ): Promise<void> {
-    return copyLogPrefix(this, source, target, opts, ctx);
+  branch(target: string, from: LogFrom, ctx: StoreCtx): Promise<void> {
+    return copyLogPrefix(this, target, from, ctx);
   }
 
   read(sessionId: string, _ctx: StoreCtx): Promise<readonly TimelineEntry[]> {

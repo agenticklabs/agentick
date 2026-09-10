@@ -52,6 +52,7 @@ import type { Pool as PgPool } from "pg";
 import { copyLogPrefix } from "@agentick/store";
 
 import type {
+  LogFrom,
   LogHistoryOptions,
   LogMutation,
   LogQuery,
@@ -214,13 +215,8 @@ class PostgresTimelineStore implements TimelineStore {
     return this.codec.decode(row[this.cols.payload], schemaVer);
   }
 
-  branch(
-    source: string,
-    target: string,
-    opts: { readonly toSeq?: number },
-    ctx: StoreCtx,
-  ): Promise<void> {
-    return copyLogPrefix(this, source, target, opts, ctx);
+  branch(target: string, from: LogFrom, ctx: StoreCtx): Promise<void> {
+    return copyLogPrefix(this, target, from, ctx);
   }
 
   async read(sessionId: string, _ctx: StoreCtx): Promise<readonly TimelineEntry[]> {

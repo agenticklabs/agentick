@@ -788,9 +788,8 @@ export class TimelineHarness
   async branch(ctx: BranchCtx): Promise<void> {
     if (this.store === undefined) return;
     await this.store.branch(
-      timelineScopeKey(ctx.from.sessionId),
       this.scopeId,
-      { toSeq: ctx.from.seq },
+      { logKey: timelineScopeKey(ctx.from.sessionId), seq: ctx.from.seq },
       ctx.storeCtx,
     );
   }

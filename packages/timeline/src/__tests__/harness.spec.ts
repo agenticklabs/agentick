@@ -2,7 +2,7 @@
  * TimelineHarness — concrete tests + conformance run.
  */
 
-import type { StoreCtx } from "@agentick/spec";
+import type { StoreCtx, LogFrom } from "@agentick/spec";
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
@@ -309,24 +309,19 @@ describe("TimelineHarness — branch: the fork transport (checkpointing §5)", (
     await child.close();
   });
 
-  it("delegates to store.branch with the source key, its own scope and the bound — nothing else", async () => {
+  it("delegates to store.branch with its own scope and the edge — nothing else", async () => {
     const calls: unknown[] = [];
     class SpyStore extends MemoryTimelineStore {
-      override branch(
-        source: string,
-        target: string,
-        opts: { readonly toSeq?: number },
-        ctx: StoreCtx,
-      ) {
-        calls.push([source, target, opts]);
-        return super.branch(source, target, opts, ctx);
+      override branch(target: string, from: LogFrom, ctx: StoreCtx) {
+        calls.push([target, from]);
+        return super.branch(target, from, ctx);
       }
     }
     const store = new SpyStore();
     const { harness: child } = await makeHarness(timelineScopeKey("br7-child"), { store });
     await child.branch(branchCtx("br7-parent", 0));
     expect(calls).toEqual([
-      [timelineScopeKey("br7-parent"), timelineScopeKey("br7-child"), { toSeq: 0 }],
+      [timelineScopeKey("br7-child"), { logKey: timelineScopeKey("br7-parent"), seq: 0 }],
     ]);
     await child.close();
   });

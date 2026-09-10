@@ -61,6 +61,7 @@ export type {
   LogMutation,
   LogQuery,
   SeqTagged,
+  LogFrom,
   StoreCtx,
   TimelineEntry,
   TimelineStore,

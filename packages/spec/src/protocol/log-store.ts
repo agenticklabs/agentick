@@ -58,6 +58,12 @@ import type { StoreCtx } from "./store-ctx.js";
  * a cursored {@link LogStore.history} read returns. Generic over the payload
  * `T` so each log archetype (timeline entries today) tags its own type.
  */
+/** The edge a log inherits through — `SessionFrom` at the log layer. `seq` is inclusive; `-1` inherits nothing. */
+export interface LogFrom {
+  readonly logKey: string;
+  readonly seq: number;
+}
+
 export interface SeqTagged<T> {
   /** The store-assigned ordering identity (see the port docs' `seq` contract). */
   readonly seq: number;
@@ -167,25 +173,20 @@ export interface LogStore<T> extends Store<T, LogQuery, LogMutation<T>> {
   read(logKey: string, ctx: StoreCtx): Promise<readonly T[]>;
 
   /**
-   * Make `target` inherit `source`'s prefix — the fork transport (ADR 100 law
-   * 1, checkpointing §5), owned by the STORE: how a log inherits is a fact
-   * about how it is persisted. `toSeq` is the INCLUSIVE seq bound of the
-   * inherited prefix; absent ⇒ the whole source; `-1` ⇒ nothing. Idempotent by
+   * Make `target` inherit `from.logKey`'s prefix through `from.seq` (INCLUSIVE;
+   * `-1` ⇒ nothing) — the fork transport (ADR 100 law 1, checkpointing §5),
+   * owned by the STORE: how a log inherits is a fact about how it is persisted.
+   * `from` is the session record's `SessionFrom` at the log layer. Idempotent by
    * destination — a `target` that already holds entries is left alone, so a
-   * retried fork cannot double a log. A `source` the store does not hold
-   * inherits nothing and resolves.
+   * retried fork cannot double a log. A source the store does not hold inherits
+   * nothing and resolves.
    *
    * A plain log copies the bounded prefix (`copyLogPrefix` in
    * `@agentick/store` is that implementation); a store with lineage of its own
    * records the edge and stitches on read. The framework never sees the rows
    * either way — it stamps the params and calls this before genesis.
    */
-  branch(
-    source: string,
-    target: string,
-    opts: { readonly toSeq?: number },
-    ctx: StoreCtx,
-  ): Promise<void>;
+  branch(target: string, from: LogFrom, ctx: StoreCtx): Promise<void>;
 
   /**
    * OPTIONAL cursored read (#187) — the additive extension the frozen `seq`

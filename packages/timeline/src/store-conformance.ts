@@ -199,14 +199,14 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         expect(await store.delete("s1", stubStoreCtx())).toBe(false);
       });
 
-      it("branch() makes the target inherit the source's prefix, INCLUSIVE at toSeq", async () => {
+      it("branch() makes the target inherit the source's prefix, INCLUSIVE at from.seq", async () => {
         const store = await setup();
         const [, sb] = await store.append(
           "src",
           [entry("a"), entry("b"), entry("c")],
           stubStoreCtx(),
         );
-        await store.branch("src", "child", { toSeq: sb! }, stubStoreCtx());
+        await store.branch("child", { logKey: "src", seq: sb! }, stubStoreCtx());
         expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["a", "b"]);
         // The source is untouched, and the child's own appends land after the prefix.
         expect((await store.read("src", stubStoreCtx())).map(idOf)).toEqual(["a", "b", "c"]);
@@ -214,23 +214,23 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["a", "b", "d"]);
       });
 
-      it("branch() without a bound inherits the whole source; toSeq -1 inherits nothing", async () => {
+      it("branch() at the source's tip inherits the whole source; seq -1 inherits nothing", async () => {
         const store = await setup();
-        await store.append("src", [entry("a"), entry("b")], stubStoreCtx());
-        await store.branch("src", "whole", {}, stubStoreCtx());
+        const [, tip] = await store.append("src", [entry("a"), entry("b")], stubStoreCtx());
+        await store.branch("whole", { logKey: "src", seq: tip! }, stubStoreCtx());
         expect((await store.read("whole", stubStoreCtx())).map(idOf)).toEqual(["a", "b"]);
-        await store.branch("src", "none", { toSeq: -1 }, stubStoreCtx());
+        await store.branch("none", { logKey: "src", seq: -1 }, stubStoreCtx());
         expect(await store.read("none", stubStoreCtx())).toEqual([]);
       });
 
       it("branch() is idempotent by destination — a retried fork cannot double the log", async () => {
         const store = await setup();
-        await store.append("src", [entry("a")], stubStoreCtx());
-        await store.branch("src", "child", {}, stubStoreCtx());
-        await store.branch("src", "child", {}, stubStoreCtx());
+        const [sa] = await store.append("src", [entry("a")], stubStoreCtx());
+        await store.branch("child", { logKey: "src", seq: sa! }, stubStoreCtx());
+        await store.branch("child", { logKey: "src", seq: sa! }, stubStoreCtx());
         expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["a"]);
         // An unknown source inherits nothing and resolves.
-        await store.branch("never", "orphan", {}, stubStoreCtx());
+        await store.branch("orphan", { logKey: "never", seq: 0 }, stubStoreCtx());
         expect(await store.read("orphan", stubStoreCtx())).toEqual([]);
       });
 
@@ -245,7 +245,7 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
             stubStoreCtx(),
           );
           await store.prune("src", { seq: sc! }, stubStoreCtx()); // window now starts at c
-          await store.branch("src", "child", { toSeq: sd! }, stubStoreCtx());
+          await store.branch("child", { logKey: "src", seq: sd! }, stubStoreCtx());
           expect((await store.read("child", stubStoreCtx())).map(idOf)).toEqual(["c", "d"]);
         },
       );

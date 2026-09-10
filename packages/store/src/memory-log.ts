@@ -42,6 +42,7 @@ import type {
   LogStore,
   SeqTagged,
   StoreCtx,
+  LogFrom,
 } from "@agentick/spec";
 import { copyLogPrefix } from "./log-branch.js";
 
@@ -105,13 +106,8 @@ export class MemoryLog<T> implements LogStore<T> {
     return Promise.resolve(out);
   }
 
-  branch(
-    source: string,
-    target: string,
-    opts: { readonly toSeq?: number },
-    ctx: StoreCtx,
-  ): Promise<void> {
-    return copyLogPrefix(this, source, target, opts, ctx);
+  branch(target: string, from: LogFrom, ctx: StoreCtx): Promise<void> {
+    return copyLogPrefix(this, target, from, ctx);
   }
 
   append(logKey: string, entries: readonly T[], _ctx: StoreCtx): Promise<readonly number[]> {

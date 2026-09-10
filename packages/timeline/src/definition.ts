@@ -46,6 +46,7 @@ import type {
   StoreCtx,
   TimelineEntry,
   TimelineStore,
+  LogFrom,
 } from "@agentick/spec";
 import { copyLogPrefix } from "@agentick/store";
 import type { HarnessInterceptors } from "@agentick/runtime";
@@ -283,12 +284,7 @@ export interface TimelineStoreVerbs {
   /** OPTIONAL destructive retention — drop entries with absolute `seq < before.seq`. */
   prune?(logKey: string, before: { seq: number }, ctx: StoreCtx): Promise<number>;
   /** The fork transport. Defaults to the plain-log copy (`copyLogPrefix`) over these verbs. */
-  branch?(
-    source: string,
-    target: string,
-    opts: { readonly toSeq?: number },
-    ctx: StoreCtx,
-  ): Promise<void>;
+  branch?(target: string, from: LogFrom, ctx: StoreCtx): Promise<void>;
 }
 
 /**
@@ -320,10 +316,10 @@ export function defineTimelineStore(verbs: TimelineStoreVerbs): TimelineStore {
     backend,
     append: (logKey, entries, ctx) => verbs.append(logKey, entries, ctx),
     read: (logKey, ctx) => verbs.read(logKey, ctx),
-    branch: (source, target, opts, ctx) =>
+    branch: (target, from, ctx) =>
       verbs.branch !== undefined
-        ? verbs.branch(source, target, opts, ctx)
-        : copyLogPrefix(store, source, target, opts, ctx),
+        ? verbs.branch(target, from, ctx)
+        : copyLogPrefix(store, target, from, ctx),
     keys: (ctx) => verbs.keys(ctx),
     delete: (logKey, ctx) => verbs.delete(logKey, ctx),
     // The seam READ — a projection of a log window shaped by a `LogQuery`. An
