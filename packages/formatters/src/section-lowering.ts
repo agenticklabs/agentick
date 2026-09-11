@@ -201,17 +201,20 @@ export function lowerSection(
  */
 export function expandSections(
   blocks: readonly SemanticContentBlock[],
-  render: (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[],
+  render: (
+    blocks: readonly SemanticContentBlock[],
+    resolve?: FormatterResolver,
+  ) => readonly ContentBlock[],
   ref: FormatterRef,
   resolve?: FormatterResolver,
 ): readonly ContentBlock[] {
-  if (!blocks.some(isSectionContent)) return render(blocks);
+  if (!blocks.some(isSectionContent)) return render(blocks, resolve);
 
   const out: ContentBlock[] = [];
   let run: SemanticContentBlock[] = [];
   const flushRun = (): void => {
     if (run.length === 0) return;
-    for (const b of render(run)) out.push(b);
+    for (const b of render(run, resolve)) out.push(b);
     run = [];
   };
 

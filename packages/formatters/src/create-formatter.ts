@@ -76,7 +76,10 @@ import type {
 } from "@agentick/spec";
 
 export interface CreateFormatterInput extends FormatterIdentity {
-  readonly render: (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
+  readonly render: (
+    blocks: readonly SemanticContentBlock[],
+    resolve?: FormatterResolver,
+  ) => readonly ContentBlock[];
   /**
    * Optional: frame a MessageEntry's formatted body.
    *

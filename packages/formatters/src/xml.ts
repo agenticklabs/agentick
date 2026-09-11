@@ -15,8 +15,10 @@ import type {
   CodeBlock,
   ContentBlock,
   EventBlock,
+  FormatterResolver,
   JsonBlock,
   MessageEntry,
+  RenderedTree,
   SemanticContentBlock,
   SemanticNode,
   TextBlock,
@@ -24,11 +26,27 @@ import type {
 
 import { createFormatter, type DefinedFormatter } from "./create-formatter.js";
 import { eventParts } from "./event-block.js";
+import { renderTree } from "./format-tree.js";
 
 /** `fast-xml-parser`'s ordered shape: an element is `{ [tag]: children, ":@"?: attrs }`, text is `{ "#text": s }`. */
 type XmlNode = Record<string, unknown>;
 
 const text = (s: string): XmlNode => ({ "#text": s });
+/** Bytes another dialect pass already wrote: composed around, never re-serialized. */
+const island = (s: string): XmlNode => ({ "#island": s });
+const isIsland = (node: XmlNode): boolean => "#island" in node;
+const hasIsland = (nodes: readonly XmlNode[]): boolean =>
+  nodes.some(
+    (node) =>
+      isIsland(node) ||
+      Object.entries(node).some(
+        ([key, value]) =>
+          key !== ":@" && key !== "#text" && Array.isArray(value) && hasIsland(value),
+      ),
+  );
+
+/** A subtree to render in this dialect — how a `rendered` node reaches the formatter that holds it. */
+type RenderIsland = (tree: RenderedTree) => string;
 
 function element(tag: string, children: readonly XmlNode[] = [], attrs?: unknown): XmlNode {
   const pairs =
@@ -89,19 +107,43 @@ function writers(builder: Partial<BuilderOptions> = {}): Writers {
     });
   const inline = make(false);
   const pretty = make(true);
+  const build = (nodes: readonly XmlNode[], format: boolean): string =>
+    format ? (pretty.build(nodes) as string).replace(/^\n/, "") : (inline.build(nodes) as string);
+  // Depth-first around islands: an element holding one is a frame composed
+  // from strings; everything below without one is the builder's (ADR 111).
+  const compose = (nodes: readonly XmlNode[], format: boolean): string =>
+    hasIsland(nodes)
+      ? nodes
+          .map((node) =>
+            isIsland(node)
+              ? String(node["#island"])
+              : hasIsland([node])
+                ? composeElement(node, format)
+                : build([node], format),
+          )
+          .join(format ? "\n" : "")
+      : build(nodes, format);
+  const composeElement = (node: XmlNode, format: boolean): string => {
+    const [tag, children] = Object.entries(node).find(([key]) => key !== ":@")!;
+    const attrs = Object.entries((node[":@"] as Record<string, unknown> | undefined) ?? {})
+      .map(([key, value]) => ` ${key.slice(2)}="${escapeAttr(String(value))}"`)
+      .join("");
+    const body = compose(children as XmlNode[], format);
+    return format ? `<${tag}${attrs}>\n${body}\n</${tag}>` : `<${tag}${attrs}>${body}</${tag}>`;
+  };
   return {
-    serialize: (nodes) => inline.build(nodes) as string,
-    serializePretty: (nodes) => (pretty.build(nodes) as string).replace(/^\n/, ""),
+    serialize: (nodes) => compose(nodes, false),
+    serializePretty: (nodes) => compose(nodes, true),
   };
 }
 
 const isText = (node: SemanticNode): boolean => node.semantic === undefined;
 const isBlank = (node: SemanticNode): boolean => isText(node) && (node.text ?? "").trim() === "";
 
-function formatNode(node: SemanticNode): XmlNode[] {
+function formatNode(node: SemanticNode, render: RenderIsland): XmlNode[] {
   if (node.text !== undefined && node.semantic === undefined) return [text(node.text)];
   const children = node.children ?? [];
-  const kids = children.flatMap(formatNode);
+  const kids = children.flatMap((child) => formatNode(child, render));
   const wrap = (tag: string, attrs?: unknown): XmlNode[] => [element(tag, kids, attrs)];
 
   switch (node.semantic) {
@@ -119,7 +161,7 @@ function formatNode(node: SemanticNode): XmlNode[] {
           children.map((row) =>
             element(
               "tr",
-              (row.children ?? []).map((cell) => element("td", formatNode(cell))),
+              (row.children ?? []).map((cell) => element("td", formatNode(cell, render))),
             ),
           ),
         ),
@@ -158,7 +200,7 @@ function formatNode(node: SemanticNode): XmlNode[] {
       return [
         element(
           tag,
-          children.map((item) => element("li", formatNode(item))),
+          children.map((item) => element("li", formatNode(item, render))),
         ),
       ];
     }
@@ -187,8 +229,16 @@ function formatNode(node: SemanticNode): XmlNode[] {
       const content = children.some((c) => !isText(c))
         ? children.filter((c) => !isBlank(c))
         : children;
-      return [element(tag, content.flatMap(formatNode), node.props?.attrs)];
+      return [
+        element(
+          tag,
+          content.flatMap((child) => formatNode(child, render)),
+          node.props?.attrs,
+        ),
+      ];
     }
+    case "rendered":
+      return node.tree !== undefined ? [island(render(node.tree))] : [];
     default:
       return kids;
   }
@@ -219,16 +269,26 @@ export function createXmlFormatter(options: XmlFormatterOptions = {}): DefinedFo
   const customText = (tag: string, attrs: unknown, content: string, selfClosing: boolean): string =>
     serialize([element(tag, selfClosing ? [] : [text(content)], attrs)]);
 
-  const formatBlock = (block: SemanticContentBlock): ContentBlock =>
-    options.blocks?.[block.type]?.(block) ?? dialectBlock(block);
+  let self: DefinedFormatter;
 
-  function dialectBlock(block: SemanticContentBlock): ContentBlock {
+  const formatBlock = (block: SemanticContentBlock, resolve?: FormatterResolver): ContentBlock =>
+    options.blocks?.[block.type]?.(block) ?? dialectBlock(block, resolve);
+
+  function dialectBlock(block: SemanticContentBlock, resolve?: FormatterResolver): ContentBlock {
     if (block.semanticNode) {
-      const nodes = formatNode(block.semanticNode);
+      const nodes = formatNode(block.semanticNode, (tree) => renderTree(tree, self, resolve));
       const rendered = isElementTree(block.semanticNode)
         ? serializePretty(nodes)
         : serialize(nodes);
       return { type: "text", text: rendered } satisfies TextBlock;
+    }
+    if (block.type === "tool_result") {
+      const content = block.content.map((b) =>
+        (b as SemanticContentBlock).semanticNode
+          ? formatBlock(b as SemanticContentBlock, resolve)
+          : b,
+      );
+      return { ...block, content };
     }
     switch (block.type) {
       case "text":
@@ -345,14 +405,15 @@ export function createXmlFormatter(options: XmlFormatterOptions = {}): DefinedFo
     }
   }
 
-  return createFormatter({
+  self = createFormatter({
     id: options.id ?? "formatter.xml",
     format: "xml",
     ...(options.version !== undefined ? { version: options.version } : {}),
-    render: (blocks) => blocks.map(formatBlock),
+    render: (blocks, resolve) => blocks.map((block) => formatBlock(block, resolve)),
     frameMessage,
     blocksToText,
   });
+  return self;
 }
 
 export const xmlFormatter = createXmlFormatter();

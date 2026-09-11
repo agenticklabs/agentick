@@ -16,8 +16,10 @@ import type { Nodes, PhrasingContent, RootContent, BlockContent } from "mdast";
 import type {
   CodeBlock,
   ContentBlock,
+  FormatterResolver,
   JsonBlock,
   MessageEntry,
+  RenderedTree,
   SemanticContentBlock,
   SemanticNode,
   TextBlock,
@@ -26,6 +28,10 @@ import type {
 import { createFormatter, type DefinedFormatter } from "./create-formatter.js";
 import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
 import { renderEventTag, type TagEscapers } from "./event-block.js";
+import { renderTree } from "./format-tree.js";
+
+/** A subtree to render in this dialect — how a `rendered` node reaches the formatter that holds it. */
+type RenderIsland = (tree: RenderedTree) => string;
 
 /** Attribute position is attribute position in any dialect: a raw `"`, `<` or `&` there breaks the tag. */
 function escapeAttr(s: string): string {
@@ -131,10 +137,10 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
       renderCustomTag(tag, attrs, selfClosing ? "" : render(inner), selfClosing, markdownEscapers),
     );
 
-  function formatNode(node: SemanticNode): RootContent[] {
+  function formatNode(node: SemanticNode, island: RenderIsland): RootContent[] {
     if (node.text !== undefined && node.semantic === undefined) return [text(node.text)];
     const children = node.children ?? [];
-    const kids = children.flatMap(formatNode);
+    const kids = children.flatMap((child) => formatNode(child, island));
 
     switch (node.semantic) {
       case "strong":
@@ -181,7 +187,7 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
             children: children.map((item) => ({
               type: "listItem",
               spread: false,
-              children: blocksOf(formatNode(item)),
+              children: blocksOf(formatNode(item, island)),
             })),
           },
         ];
@@ -195,7 +201,7 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
               type: "tableRow",
               children: (row.children ?? []).map((cell) => ({
                 type: "tableCell",
-                children: inlineOf(formatNode(cell)),
+                children: inlineOf(formatNode(cell, island)),
               })),
             })),
           },
@@ -235,6 +241,8 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
             node.props?.selfClosing === true,
           ),
         ];
+      case "rendered":
+        return node.tree !== undefined ? [html(island(node.tree))] : [];
       default:
         return kids;
     }
@@ -249,12 +257,23 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
     return toMarkdown(root, layout).replace(/\n$/, "");
   }
 
-  const formatBlock = (block: SemanticContentBlock): ContentBlock =>
-    options.blocks?.[block.type]?.(block) ?? dialectBlock(block);
+  let self: DefinedFormatter;
 
-  function dialectBlock(block: SemanticContentBlock): ContentBlock {
+  const formatBlock = (block: SemanticContentBlock, resolve?: FormatterResolver): ContentBlock =>
+    options.blocks?.[block.type]?.(block) ?? dialectBlock(block, resolve);
+
+  function dialectBlock(block: SemanticContentBlock, resolve?: FormatterResolver): ContentBlock {
     if (block.semanticNode) {
-      return { type: "text", text: render(formatNode(block.semanticNode)) } satisfies TextBlock;
+      const nodes = formatNode(block.semanticNode, (tree) => renderTree(tree, self, resolve));
+      return { type: "text", text: render(nodes) } satisfies TextBlock;
+    }
+    if (block.type === "tool_result") {
+      const content = block.content.map((b) =>
+        (b as SemanticContentBlock).semanticNode
+          ? formatBlock(b as SemanticContentBlock, resolve)
+          : b,
+      );
+      return { ...block, content };
     }
     switch (block.type) {
       case "text":
@@ -341,14 +360,15 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
     }
   }
 
-  return createFormatter({
+  self = createFormatter({
     id: options.id ?? "formatter.markdown",
     format: "markdown",
     ...(options.version !== undefined ? { version: options.version } : {}),
-    render: (blocks) => blocks.map(formatBlock),
+    render: (blocks, resolve) => blocks.map((block) => formatBlock(block, resolve)),
     frameMessage,
     blocksToText,
   });
+  return self;
 }
 
 export const markdownFormatter = createMarkdownFormatter();

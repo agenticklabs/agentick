@@ -32,7 +32,14 @@
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
  */
 
-import type { FormatterRef, MessageEntry, RenderedTree } from "@agentick/spec";
+import type {
+  ContentBlock,
+  FormatterRef,
+  FormatterResolver,
+  MessageEntry,
+  RenderedTree,
+  SemanticContentBlock,
+} from "@agentick/spec";
 
 import type { DefinedFormatter } from "./create-formatter.js";
 import { resolveFormatterRef } from "./resolve-formatter.js";
@@ -45,6 +52,8 @@ export interface FormatTreeOptions {
    * always use `defaultFormatter`.
    */
   readonly formatters?: ReadonlyMap<string, DefinedFormatter>;
+  /** Alternative to `formatters`: the block-level resolver a formatter pass already holds. */
+  readonly resolve?: FormatterResolver;
 }
 
 export function formatTree(
@@ -68,6 +77,38 @@ export function formatTree(
   return parts.filter((p) => p.length > 0).join("\n\n");
 }
 
+/**
+ * A tree straight from collect, lowered and serialized: each entry's blocks go
+ * through the dialect that entry declared (or `formatter`), then `formatTree`
+ * frames the result. This is what a `rendered` semantic node becomes.
+ */
+export function renderTree(
+  tree: RenderedTree,
+  formatter: DefinedFormatter,
+  resolve?: FormatterResolver,
+): string {
+  const dialectOf = (ref: FormatterRef | undefined): DefinedFormatter => {
+    const declared = ref !== undefined ? resolve?.(ref) : undefined;
+    return declared !== undefined && declared.__identity.id !== formatter.__identity.id
+      ? (declared as DefinedFormatter)
+      : formatter;
+  };
+  const lower = (blocks: readonly ContentBlock[], ref: FormatterRef | undefined) =>
+    dialectOf(ref)(blocks as readonly SemanticContentBlock[], resolve);
+  const lowered: RenderedTree = {
+    ...tree,
+    context: {
+      ...tree.context,
+      entries: tree.context.entries.map((entry) => ({
+        ...entry,
+        content: lower(entry.content, entry.renderedWith),
+      })),
+    },
+    ...(tree.content !== undefined ? { content: lower(tree.content, tree.renderedWith) } : {}),
+  };
+  return formatTree(lowered, formatter, { resolve });
+}
+
 // ────────── Formatter resolution ──────────
 //
 // Per-entry resolution defers to the shared `resolveFormatterRef`. `formatTree`
@@ -81,6 +122,10 @@ function resolveFormatter(
   fallback: DefinedFormatter,
   opts: FormatTreeOptions,
 ): DefinedFormatter {
+  if (opts.resolve !== undefined) {
+    const found = entryRef !== undefined ? opts.resolve(entryRef) : undefined;
+    return (found as DefinedFormatter | undefined) ?? fallback;
+  }
   if (!opts.formatters) return fallback;
   return resolveFormatterRef(opts.formatters, entryRef, fallback).formatter;
 }
