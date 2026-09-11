@@ -392,7 +392,10 @@ export function createXmlFormatter(options: XmlFormatterOptions = {}): DefinedFo
         )
           .map(([k, v]) => ` ${k}="${escapeAttr(String(v))}"`)
           .join("");
-        return `<tool_result${attrs}>${blocksToText(block.content)}</tool_result>`;
+        const body = blocksToText(block.content);
+        return body.includes("\n")
+          ? `<tool_result${attrs}>\n${body}\n</tool_result>`
+          : `<tool_result${attrs}>${body}</tool_result>`;
       }
       case "user_action":
       case "system_event":

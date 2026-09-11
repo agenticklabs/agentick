@@ -141,3 +141,23 @@ describe("XML dialect — a stored tool block without an id", () => {
     );
   });
 });
+
+describe("XML dialect — a tool result's frame", () => {
+  it("hugs a one-line body and stands off a multi-line one", () => {
+    const one = [
+      { type: "tool_result", toolUseId: "c1", name: "q", content: [{ type: "text", text: "ok" }] },
+    ] as unknown as ContentBlock[];
+    const many = [
+      {
+        type: "tool_result",
+        toolUseId: "c1",
+        name: "q",
+        content: [{ type: "text", text: "<a>\n<b/>\n</a>" }],
+      },
+    ] as unknown as ContentBlock[];
+    expect(xmlFormatter.blocksToText!(one)).toBe('<tool_result id="c1" name="q">ok</tool_result>');
+    expect(xmlFormatter.blocksToText!(many)).toBe(
+      '<tool_result id="c1" name="q">\n<a>\n<b/>\n</a>\n</tool_result>',
+    );
+  });
+});
