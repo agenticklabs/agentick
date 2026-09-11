@@ -129,6 +129,8 @@ export type {
   HtmlProps,
   ReasoningProps,
 } from "./collect/contributors/textual-blocks.js";
+export { toolResultContributor } from "./collect/contributors/tool-result.js";
+export type { ToolResultProps } from "./collect/contributors/tool-result.js";
 export {
   userActionContributor,
   systemEventContributor,

@@ -285,6 +285,18 @@ declare module "react" {
         readonly key?: ReactKey;
       };
 
+      /** A tool result authored in JSX — children fold into `content`. */
+      tool_result: {
+        readonly id?: string;
+        readonly toolUseId: string;
+        readonly name: string;
+        readonly isError?: boolean;
+        readonly content?: readonly ContentBlock[];
+        readonly metadata?: Record<string, unknown>;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
       /** Rendered subtree — children reach the model as one formatted string. */
       formatted: {
         readonly children?: ReactChildren;

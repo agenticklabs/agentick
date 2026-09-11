@@ -29,7 +29,7 @@ export { System, User, Assistant, Event, Grounding, Paragraph, H1, H2, H3 } from
 export type { GroundingProps } from "./semantic.js";
 export { SystemEvent, UserAction, StateChange } from "./event.js";
 export type { SystemEventProps, UserActionProps, StateChangeProps } from "./event.js";
-export { Text, Code, Image, Audio, Video } from "./content-blocks.js";
+export { Text, Code, Image, Audio, Video, ToolResult } from "./content-blocks.js";
 
 // Tree-side guard example — a component that gates the model's tool calls
 // behind a confirmation flow (ADR 89 §4).

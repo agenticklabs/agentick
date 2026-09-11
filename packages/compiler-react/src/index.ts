@@ -141,7 +141,7 @@ export {
 } from "./react/components/index.js";
 export type { GroundingProps } from "./react/components/index.js";
 // HTML/SVG-colliding content blocks — the wrappers jsx-intrinsics.ts points at.
-export { Text, Code, Image, Audio, Video } from "./react/components/index.js";
+export { Text, Code, Image, Audio, Video, ToolResult } from "./react/components/index.js";
 export { ToolGate } from "./react/components/index.js";
 export type { ToolGateProps } from "./react/components/index.js";
 

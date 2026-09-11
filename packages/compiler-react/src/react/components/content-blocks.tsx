@@ -19,6 +19,7 @@ import type {
   CodeProps,
   ImageProps,
   TextBlockProps,
+  ToolResultProps,
   VideoProps,
 } from "@agentick/compiler";
 
@@ -45,4 +46,9 @@ export function Audio(props: AudioProps) {
 /** `<Video source={…}/>` — a video block. */
 export function Video(props: VideoProps) {
   return React.createElement("video", props);
+}
+
+/** `<ToolResult toolUseId name>…</ToolResult>` — a tool result whose content is authored as children. */
+export function ToolResult(props: ToolResultProps & { readonly children?: React.ReactNode }) {
+  return React.createElement("tool_result", props);
 }
