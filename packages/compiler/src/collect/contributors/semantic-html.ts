@@ -36,7 +36,7 @@ import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 // (`semantic` from options, `children` collected, `props` from the mapper,
 // `text` on leaves, `rendererRef` reserved). A new `SemanticNode` field
 // fails `tsc` here until `makeSemanticContributor` handles it.
-type SemanticNodeSupplied = "text" | "semantic" | "props" | "children" | "rendererRef";
+type SemanticNodeSupplied = "text" | "semantic" | "props" | "children" | "rendererRef" | "tree";
 type _semanticNodeConformance = Exhausted<
   UnhandledSpecKeys<SemanticNode, never, SemanticNodeSupplied>
 >;

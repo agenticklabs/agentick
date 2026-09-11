@@ -285,6 +285,12 @@ declare module "react" {
         readonly key?: ReactKey;
       };
 
+      /** Rendered subtree — children reach the model as one formatted string. */
+      formatted: {
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
       /**
        * Content passthrough — folds pre-built blocks into the parent's
        * content with no wrapping entry. Takes `blocks`, not children:

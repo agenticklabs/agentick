@@ -26,7 +26,6 @@ import type {
   RenderedTree,
   ResourceDeclaration,
   SemanticContentBlock,
-  SemanticNode,
   SpecConfig,
   SpecFeatureName,
   SurfacingProvenance,
@@ -49,6 +48,7 @@ import {
   type DefaultProjection,
   type ProjectionSources,
 } from "./projection.js";
+import { coalesceItems, type CollectItem } from "./coalesce.js";
 import {
   asCustomTagInstance,
   customBlockContributor,
@@ -56,11 +56,6 @@ import {
 } from "./contributors/custom-block.js";
 
 /** One contribution inside a content container, before coalescing. */
-type Item =
-  | { readonly kind: "text"; readonly value: string }
-  | { readonly kind: "semantic"; readonly value: SemanticNode }
-  | { readonly kind: "block"; readonly value: SemanticContentBlock };
-
 export interface CollectInput {
   /** Root host children to walk. Usually the container's children. */
   readonly roots: readonly HostInstance[];
@@ -253,16 +248,16 @@ function makeContextFactory(
   ): readonly SemanticContentBlock[] {
     if (!isElementInstance(parent)) return [];
 
-    const items: Item[] = [];
+    const items: CollectItem[] = [];
     gatherItems(parent, scope, outbound, items);
-    return coalesce(items);
+    return coalesceItems(items);
   }
 
   function gatherItems(
     parent: HostInstance,
     scope: HostScope,
     outbound: IRFragment[] | undefined,
-    items: Item[],
+    items: CollectItem[],
   ): void {
     if (!isElementInstance(parent)) return;
     for (const child of parent.children) {
@@ -319,54 +314,6 @@ function makeContextFactory(
         }
       }
     }
-  }
-
-  function coalesce(items: readonly Item[]): readonly SemanticContentBlock[] {
-    const result: SemanticContentBlock[] = [];
-    let runText: string[] = [];
-    let runSem: SemanticNode[] = [];
-    let hasSemantic = false;
-
-    const flush = (): void => {
-      if (hasSemantic) {
-        // Convert any tailing plain text into semantic leaves
-        for (const t of runText) runSem.push({ text: t });
-        result.push({
-          type: "text",
-          text: "",
-          semanticNode: { children: runSem },
-        } as SemanticContentBlock);
-      } else if (runText.length > 0) {
-        result.push({ type: "text", text: runText.join("") });
-      }
-      runText = [];
-      runSem = [];
-      hasSemantic = false;
-    };
-
-    for (const item of items) {
-      if (item.kind === "text") {
-        if (hasSemantic) {
-          runSem.push({ text: item.value });
-        } else {
-          runText.push(item.value);
-        }
-      } else if (item.kind === "semantic") {
-        if (!hasSemantic) {
-          // Promote any accumulated plain text to semantic leaves.
-          for (const t of runText) runSem.push({ text: t });
-          runText = [];
-          hasSemantic = true;
-        }
-        runSem.push(item.value);
-      } else {
-        // Native ContentBlock breaks the run.
-        flush();
-        result.push(item.value);
-      }
-    }
-    flush();
-    return result;
   }
 
   function foldText(parent: HostInstance): string {

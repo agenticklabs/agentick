@@ -109,6 +109,8 @@ export type { ReactToolSpec, CreatedReactTool } from "./react/create-tool.js";
 // `@agentick/timeline/react`, `@agentick/gates`. Hooks `useKnob`,
 // `useTimeline`, `useSessionState` moved similarly.
 export { FormatScope, Markdown, XML, PlainText } from "./react/components/index.js";
+export { Formatted } from "./react/components/index.js";
+export type { FormattedProps } from "./react/components/index.js";
 export type { FormatScopeProps, NamedFormatScopeProps } from "./react/components/index.js";
 export { Resources, McpServers, McpServerLine } from "./react/components/index.js";
 export type {

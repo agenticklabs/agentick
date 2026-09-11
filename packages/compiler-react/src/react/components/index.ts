@@ -1,4 +1,6 @@
 export { FormatScope, Markdown, XML, PlainText } from "./format-scope.js";
+export { Formatted } from "./formatted.js";
+export type { FormattedProps } from "./formatted.js";
 export type { FormatScopeProps, NamedFormatScopeProps } from "./format-scope.js";
 
 export { Message } from "./message.js";
