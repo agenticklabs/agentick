@@ -327,9 +327,9 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
         return render([{ type: "link", url: src, children: [text(block.type)] }]);
       }
       case "tool_use":
-        return `[tool_use ${block.name} ${block.toolUseId}] ${JSON.stringify(block.input)}`;
+        return `[tool_use ${[block.name, block.toolUseId].filter((s) => s !== undefined).join(" ")}] ${JSON.stringify(block.input)}`;
       case "tool_result":
-        return `[tool_result ${block.name ?? ""} ${block.toolUseId}${block.isError === true ? " error" : ""}] ${blocksToText(block.content)}`;
+        return `[tool_result ${[block.name, block.toolUseId, block.isError === true ? "error" : undefined].filter((s) => s !== undefined).join(" ")}] ${blocksToText(block.content)}`;
       case "user_action":
       case "system_event":
       case "state_change":

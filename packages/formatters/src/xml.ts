@@ -9,6 +9,7 @@
  */
 
 import { XMLBuilder } from "fast-xml-parser";
+import { omitUndefined } from "@agentick/utils";
 
 import type {
   CodeBlock,
@@ -314,18 +315,24 @@ export function createXmlFormatter(options: XmlFormatterOptions = {}): DefinedFo
       }
       case "tool_use":
         return serialize([
-          element("tool_use", [text(JSON.stringify(block.input))], {
-            id: block.toolUseId,
-            name: block.name,
-          }),
+          element(
+            "tool_use",
+            [text(JSON.stringify(block.input))],
+            omitUndefined({ id: block.toolUseId, name: block.name }),
+          ),
         ]);
       case "tool_result": {
         // A frame around bytes already written; the call it answers rides as attributes.
-        const attrs = [`id="${escapeAttr(block.toolUseId)}"`]
-          .concat(block.name !== undefined ? [`name="${escapeAttr(block.name)}"`] : [])
-          .concat(block.isError === true ? ['error="true"'] : [])
-          .join(" ");
-        return `<tool_result ${attrs}>${blocksToText(block.content)}</tool_result>`;
+        const attrs = Object.entries(
+          omitUndefined({
+            id: block.toolUseId,
+            name: block.name,
+            error: block.isError === true ? "true" : undefined,
+          }),
+        )
+          .map(([k, v]) => ` ${k}="${escapeAttr(String(v))}"`)
+          .join("");
+        return `<tool_result${attrs}>${blocksToText(block.content)}</tool_result>`;
       }
       case "user_action":
       case "system_event":

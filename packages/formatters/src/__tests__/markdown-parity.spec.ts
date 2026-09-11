@@ -151,3 +151,15 @@ describe("markdown dialect — parity fixture", () => {
     ).toMatchSnapshot();
   });
 });
+
+describe("markdown dialect — a stored tool block without an id", () => {
+  it("renders the frame without the id", () => {
+    const blocks = [
+      { type: "tool_use", name: "query", input: {} },
+      { type: "tool_result", name: "query", content: [{ type: "text", text: "ok" }] },
+    ] as unknown as ContentBlock[];
+    expect(markdownFormatter.blocksToText!(blocks)).toBe(
+      "[tool_use query] {}\n\n[tool_result query] ok",
+    );
+  });
+});

@@ -129,3 +129,15 @@ describe("XML dialect — parity fixture", () => {
     ).toMatchSnapshot();
   });
 });
+
+describe("XML dialect — a stored tool block without an id", () => {
+  it("renders the frame without the attribute", () => {
+    const blocks = [
+      { type: "tool_use", name: "query", input: {} },
+      { type: "tool_result", name: "query", content: [{ type: "text", text: "ok" }] },
+    ] as unknown as ContentBlock[];
+    expect(xmlFormatter.blocksToText!(blocks)).toBe(
+      '<tool_use name="query">{}</tool_use>\n\n<tool_result name="query">ok</tool_result>',
+    );
+  });
+});
