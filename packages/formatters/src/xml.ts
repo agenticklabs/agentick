@@ -109,8 +109,9 @@ function writers(builder: Partial<BuilderOptions> = {}): Writers {
   const pretty = make(true);
   const build = (nodes: readonly XmlNode[], format: boolean): string =>
     format ? (pretty.build(nodes) as string).replace(/^\n/, "") : (inline.build(nodes) as string);
-  // Depth-first around islands: an element holding one is a frame composed
-  // from strings; everything below without one is the builder's (ADR 111).
+  // Depth-first around islands (ADR 111): an island is a document of its own,
+  // so the element holding one is a frame composed from strings on their own
+  // lines whatever the writer's mode; everything below without one is the builder's.
   const compose = (nodes: readonly XmlNode[], format: boolean): string =>
     hasIsland(nodes)
       ? nodes
@@ -121,15 +122,14 @@ function writers(builder: Partial<BuilderOptions> = {}): Writers {
                 ? composeElement(node, format)
                 : build([node], format),
           )
-          .join(format ? "\n" : "")
+          .join("\n")
       : build(nodes, format);
   const composeElement = (node: XmlNode, format: boolean): string => {
     const [tag, children] = Object.entries(node).find(([key]) => key !== ":@")!;
     const attrs = Object.entries((node[":@"] as Record<string, unknown> | undefined) ?? {})
       .map(([key, value]) => ` ${key.slice(2)}="${escapeAttr(String(value))}"`)
       .join("");
-    const body = compose(children as XmlNode[], format);
-    return format ? `<${tag}${attrs}>\n${body}\n</${tag}>` : `<${tag}${attrs}>${body}</${tag}>`;
+    return `<${tag}${attrs}>\n${compose(children as XmlNode[], format)}\n</${tag}>`;
   };
   return {
     serialize: (nodes) => compose(nodes, false),
