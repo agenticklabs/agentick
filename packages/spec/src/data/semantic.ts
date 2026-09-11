@@ -14,6 +14,7 @@
 
 import type { CacheHint, ContentBlock } from "./content-blocks.js";
 import type { FormatterRef } from "./formatter.js";
+import type { RenderedTree } from "./rendered-tree.js";
 
 /**
  * Semantic types for inline and block formatting.
@@ -63,7 +64,9 @@ export type SemanticType =
   | "list-item"
   // Custom / pre-formatted
   | "custom"
-  | "preformatted";
+  | "preformatted"
+  // A subtree already collected, lowered by the dialect in scope and embedded verbatim
+  | "rendered";
 
 /**
  * Tree node carrying structured content with formatting hints. Lives inside
@@ -78,6 +81,12 @@ export interface SemanticNode {
   readonly props?: Record<string, unknown>;
   /** Child nodes (for nested formatting). */
   readonly children?: readonly SemanticNode[];
+  /**
+   * The collected subtree of a `rendered` node: entries and free content the
+   * formatter pass lowers in its own dialect (islands in theirs) and frames as
+   * a document, exactly as `formatTree` would at the root.
+   */
+  readonly tree?: RenderedTree;
   /**
    * Reference to a formatter for this subtree. Enables nested formatter
    * switching across the spec firewall. `[V1-REPLACED]` of v1's
