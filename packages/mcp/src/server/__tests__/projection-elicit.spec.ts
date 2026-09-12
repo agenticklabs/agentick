@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   ElicitationCancelled,
@@ -133,7 +134,7 @@ describe("elicitation projection — ctx.elicit presence", () => {
       {
         "handler:probe": async (_input, ctx) => {
           elicitPresent = ctx.elicit !== undefined;
-          return [{ type: "text", text: "ok" }];
+          return [blocks.text("ok")];
         },
       },
       { elicitWired: true },
@@ -154,7 +155,7 @@ describe("elicitation projection — ctx.elicit presence", () => {
       {
         "handler:probe": async (_input, ctx) => {
           elicitPresent = ctx.elicit !== undefined;
-          return [{ type: "text", text: "ok" }];
+          return [blocks.text("ok")];
         },
       },
       { elicitWired: true },
@@ -176,7 +177,7 @@ describe("elicitation projection — ctx.elicit presence", () => {
     const { harness, transport } = await makeElicitServer({
       "handler:probe": async (_input, ctx) => {
         elicitPresent = ctx.elicit !== undefined;
-        return [{ type: "text", text: "ok" }];
+        return [blocks.text("ok")];
       },
     });
     const clientTransport = await transport.connect();
@@ -205,7 +206,7 @@ describe("elicitation projection — ctx.elicit presence", () => {
           registry: [tool("probe")],
           resolveHandler: () => async (_input, ctx) => {
             elicitPresent = ctx.elicit !== undefined;
-            return { kind: "inline", content: [{ type: "text", text: "ok" }] };
+            return { kind: "inline", content: [blocks.text("ok")] };
           },
         },
         serverInfo: { name: "test", version: "0.0.0" },
@@ -262,7 +263,7 @@ describe("elicitation projection — round-trip happy paths", () => {
           } catch (err) {
             caught = err;
           }
-          return [{ type: "text", text: "done" }];
+          return [blocks.text("done")];
         },
       },
       { elicitWired: true },
@@ -332,7 +333,7 @@ describe("elicitation projection — decline + cancel", () => {
           } catch (err) {
             caught = err;
           }
-          return [{ type: "text", text: "done" }];
+          return [blocks.text("done")];
         },
       },
       { elicitWired: true },
@@ -371,7 +372,7 @@ describe("elicitation projection — try* variants return ElicitOutcome (no thro
     const { harness, transport } = await makeElicitServer({
       "handler:run": async (_input, ctx) => {
         captured = await method(ctx);
-        return [{ type: "text", text: "done" }];
+        return [blocks.text("done")];
       },
     });
     const clientTransport = await transport.connect();
@@ -436,7 +437,7 @@ describe("elicitation projection — URL mode", () => {
             message: "Approve",
             url: "https://example.com/approve",
           });
-          return [{ type: "text", text: "ok" }];
+          return [blocks.text("ok")];
         },
       },
       { elicitWired: true },
@@ -464,7 +465,7 @@ describe("elicitation projection — URL mode", () => {
           } catch (err) {
             caught = err;
           }
-          return [{ type: "text", text: "done" }];
+          return [blocks.text("done")];
         },
       },
       { elicitWired: true },
@@ -494,7 +495,7 @@ describe("elicitation projection — URL mode", () => {
           } catch (err) {
             caught = err;
           }
-          return [{ type: "text", text: "done" }];
+          return [blocks.text("done")];
         },
       },
       { elicitWired: true },
@@ -524,7 +525,7 @@ describe("elicitation projection — requireUrls (deferred auth)", () => {
               { message: "Authorize", url: "https://example.com/authorize" },
             ]);
             // Unreachable — requireUrls returns `never`.
-            return [{ type: "text", text: "should not reach" }];
+            return [blocks.text("should not reach")];
           } catch (err) {
             caught = err;
             // Re-throw so the tools/call path surfaces it on the wire.

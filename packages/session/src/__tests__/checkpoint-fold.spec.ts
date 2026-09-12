@@ -19,6 +19,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import type { CheckpointCapable, ExecutionTarget, HydrateCtx, PersistCtx } from "@agentick/spec";
 import { SessionBusyError } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { SessionHarness } from "../harness.js";
@@ -76,7 +77,7 @@ async function mkSession(
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       },

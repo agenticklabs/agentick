@@ -24,6 +24,7 @@ import { InMemorySessionStore } from "../session-store.js";
 import { stubStoreCtx } from "@agentick/store";
 import { waitFor } from "@agentick/utils/testing";
 import type { ExecutionTarget, ProtocolEvent, SessionRecord } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -44,7 +45,7 @@ const replyExec = () =>
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -98,7 +99,7 @@ async function mkSession(opts: {
 
 const send = (session: SessionHarness) =>
   session
-    .send({ messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] })
+    .send({ messages: [{ role: "user", content: [blocks.text("hi")] }] })
     .then((h) => h.result);
 
 describe("session:persist — the earn moment is a command", () => {

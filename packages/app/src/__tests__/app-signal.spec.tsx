@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock, ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -76,7 +77,7 @@ function gateScript() {
     {
       result: {
         specVersion: "2026-05-08" as const,
-        output: [{ type: "tool_use" as const, toolUseId: "tc-1", name: "gate", input: {} }],
+        output: [blocks.toolUse("tc-1", "gate", {})],
         stopReason: "tool_use" as const,
         toolCalls: [{ id: "tc-1", name: "gate", input: {} }],
         usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
@@ -85,7 +86,7 @@ function gateScript() {
     {
       result: {
         specVersion: "2026-05-08" as const,
-        output: [{ type: "text" as const, text: "GATED-DONE" }],
+        output: [blocks.text("GATED-DONE")],
         stopReason: "end" as const,
         usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
       },
@@ -185,7 +186,7 @@ describe("PA1 — app signal cascade", () => {
         async () => {
           entered();
           await gate;
-          return [{ type: "text", text: "released" }];
+          return [blocks.text("released")];
         },
       ],
     ]);

@@ -7,11 +7,12 @@ import { describe, expect, it } from "vitest";
 
 import type { StandardSchemaV1 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { GenerateObjectError, generateObject } from "../generate-object.js";
 import { scriptedAdapter } from "../testing/index.js";
 
-const MESSAGES = [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }];
+const MESSAGES = [{ role: "user" as const, content: [blocks.text("hi")] }];
 
 /** Minimal Standard Schema with real validation. */
 function personSchema(): StandardSchemaV1<unknown, { name: string; age: number }> {

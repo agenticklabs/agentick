@@ -41,6 +41,7 @@ import type {
   LoopExecutorFactory,
   ReasoningBlock,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 import { InMemorySessionStore } from "../session-store.js";
@@ -107,7 +108,7 @@ async function mkSession(
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage,
       },
@@ -161,7 +162,7 @@ describe("reasoning content survives the fold onto the timeline", () => {
           text: "the user wants a sum",
           providerMetadata: { anthropic: { signature: "sig-abc" } },
         },
-        { type: "text", text: "42" },
+        blocks.text("42"),
       ]),
     );
     await send(session);
@@ -186,10 +187,10 @@ describe("reasoning content survives the fold onto the timeline", () => {
     // "keep" every block and still lose this.
     const { session } = await mkSession(
       scriptedLoop([
-        { type: "reasoning", text: "first, look it up" },
-        { type: "tool_use", toolUseId: "c1", name: "lookup", input: { q: "x" } },
-        { type: "reasoning", text: "now explain it" },
-        { type: "text", text: "here you go" },
+        blocks.reasoning("first, look it up"),
+        blocks.toolUse("c1", "lookup", { q: "x" }),
+        blocks.reasoning("now explain it"),
+        blocks.text("here you go"),
       ]),
     );
     await send(session);
@@ -213,7 +214,7 @@ describe("reasoning content survives the fold onto the timeline", () => {
           isRedacted: true,
           providerMetadata: { anthropic: { redactedData: "opaque-blob" } },
         },
-        { type: "text", text: "done" },
+        blocks.text("done"),
       ]),
     );
     await send(session);
@@ -244,7 +245,7 @@ describe("reasoning content survives the fold onto the timeline", () => {
           text: "thinking out loud",
           providerMetadata: { anthropic: { signature: "sig-xyz" } },
         },
-        { type: "text", text: "answer" },
+        blocks.text("answer"),
       ]),
       new InMemorySessionStore(),
       { store: timelineStore, sessionId },

@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { LanguageModelInput, LanguageModelMessagePart } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { DEFAULT_MEDIA_TOKENS, estimateTokenBreakdown, estimateTokens } from "../token-estimate.js";
 import { effectiveModelInfo } from "../model-info.js";
@@ -19,11 +20,11 @@ const user = (...content: LanguageModelMessagePart[]): LanguageModelInput => ({
   messages: [{ role: "user", content }],
 });
 
-const text = (t: string): LanguageModelMessagePart => ({ type: "text", text: t });
+const text = (t: string): LanguageModelMessagePart => blocks.text(t);
 
 const image = (): LanguageModelMessagePart => ({
   type: "image",
-  source: { type: "url", url: "https://example.test/a.png" },
+  source: blocks.source.url("https://example.test/a.png"),
 });
 
 describe("text", () => {
@@ -42,7 +43,7 @@ describe("text", () => {
   });
 
   it("counts reasoning, which is billed like any other text", () => {
-    expect(estimateTokens(user({ type: "reasoning", text: "abcd" }))).toBe(1);
+    expect(estimateTokens(user(blocks.reasoning("abcd")))).toBe(1);
   });
 });
 
@@ -99,10 +100,10 @@ describe("media", () => {
     // The source is a pointer; its length says nothing about the cost. A
     // char-based walk over media would be worse than useless — it would look
     // like a real number.
-    const short = user({ type: "video", source: { type: "url", url: "a://b" } });
+    const short = user(blocks.video(blocks.source.url("a://b")));
     const long = user({
       type: "video",
-      source: { type: "url", url: `a://${"b".repeat(4000)}` },
+      source: blocks.source.url(`a://${"b".repeat(4000)}`),
     });
     expect(estimateTokenBreakdown(short).messages).toBe(estimateTokenBreakdown(long).messages);
   });

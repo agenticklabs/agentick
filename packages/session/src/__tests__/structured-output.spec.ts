@@ -47,6 +47,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -199,7 +200,7 @@ describe("structured output — injection", () => {
     const { session, resolver, executor, dispose } = await mkSession({
       scripts: [terminalCallResult({ answer: "hi" })],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     await (
       await session.send({
@@ -316,7 +317,7 @@ describe("structured output — detection, stop, capture", () => {
     const { session, resolver, dispose } = await mkSession({
       scripts: [terminalCallResult({ answer: "done" })],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const r = await (
       await session.send({
@@ -341,15 +342,15 @@ describe("structured output — detection, stop, capture", () => {
     const withText: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
       output: [
-        { type: "text", text: "Here is a short summary for you." },
-        { type: "tool_use", toolUseId: "tc-term", name: "submit_result", input: { answer: "hi" } },
+        blocks.text("Here is a short summary for you."),
+        blocks.toolUse("tc-term", "submit_result", { answer: "hi" }),
       ],
       stopReason: "tool_use",
       usage,
       toolCalls: [{ id: "tc-term", name: "submit_result", input: { answer: "hi" } }],
     };
     const { session, resolver, dispose } = await mkSession({ scripts: [withText] });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const r = await (
       await session.send({
@@ -372,8 +373,8 @@ describe("structured output — detection, stop, capture", () => {
     const mixed: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
       output: [
-        { type: "tool_use", toolUseId: "c-echo", name: "echo", input: { x: 1 } },
-        { type: "tool_use", toolUseId: "c-term", name: "submit_result", input: { answer: "z" } },
+        blocks.toolUse("c-echo", "echo", { x: 1 }),
+        blocks.toolUse("c-term", "submit_result", { answer: "z" }),
       ],
       stopReason: "tool_use",
       usage,
@@ -385,7 +386,7 @@ describe("structured output — detection, stop, capture", () => {
     const { session, resolver, dispose } = await mkSession({ scripts: [mixed] });
     resolver.register("h.echo", async () => {
       echoCalls += 1;
-      return [{ type: "text", text: "echoed" }];
+      return [blocks.text("echoed")];
     });
 
     const r = await (
@@ -411,7 +412,7 @@ describe("structured output — detection, stop, capture", () => {
     const { session, resolver, dispose } = await mkSession({
       scripts: [terminalCallResult({ answer: "first" }), textResult("second")],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const r1 = await (
       await session.send({
@@ -482,7 +483,7 @@ describe("structured output — wrap-up + steer-proof stop", () => {
         terminalCallResult({ answer: "forced" }), // wrap-up tick — forced call
       ],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const r = await (
       await session.send({
@@ -512,7 +513,7 @@ describe("structured output — wrap-up + steer-proof stop", () => {
       scripts: [terminalCallResult({ answer: "delivered" }), textResult("follow-up turn")],
       holdUntil: gate,
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const h1 = await session.send({
       messages: [{ role: "user", content: "ask" }],
@@ -538,7 +539,7 @@ describe("structured output — typed failures", () => {
     const { session, resolver, dispose } = await mkSession({
       scripts: [textResult("never calls the tool")],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const err = await session
       .send({
@@ -560,7 +561,7 @@ describe("structured output — typed failures", () => {
     const { session, resolver, dispose } = await mkSession({
       scripts: [terminalCallResult({ answer: 42 })],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const err = await session
       .send({
@@ -614,7 +615,7 @@ describe("structured output — typed failures", () => {
       agent: React.createElement(Agent),
       scripts: [textResult("noop")],
     });
-    resolver.register("h.clash", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.clash", async () => [blocks.text("ok")]);
 
     const err = await session
       .send({ messages: [{ role: "user", content: "hi" }], output: answerSchema })
@@ -649,7 +650,7 @@ describe("structured output — precedence + onBusy", () => {
       agent: React.createElement(Agent),
       scripts: [terminalCallResult({ answer: "sent" }, "submit_result")],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     const r = await (
       await session.send({
@@ -709,7 +710,7 @@ describe("structured output — precedence + onBusy", () => {
       ),
       scripts: [terminalCallResult({ answer: "idle-steer" }, "submit_result")],
     });
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
 
     // Explicit steer + output, but NO in-flight execution: the steer degrades
     // to a fresh send, where structured output is legal — no throw, data lands.

@@ -13,6 +13,7 @@ import { fakeToolHandlerCtx } from "@agentick/spec-conformance";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { HookBridges, ToolBridge, ToolHandler, Unsubscribe, Validator } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTool } from "../react/create-tool.js";
 import { fakeBridges } from "@agentick/compiler";
@@ -63,7 +64,7 @@ describe("compiler-react createTool — bundle shape", () => {
     const t = createTool({
       name: "ping",
       description: "ping",
-      handler: async () => [{ type: "text", text: "pong" }],
+      handler: async () => [blocks.text("pong")],
     });
     expect(t.declaration.name).toBe("ping");
     expect(typeof t.handler).toBe("function");
@@ -112,7 +113,7 @@ describe("compiler-react createTool — render-time wiring", () => {
       name: "tagged",
       description: "echo with tag",
       use: () => ({ tag: "ALPHA" }),
-      handler: async ({ word }, { use }) => [{ type: "text", text: `${use.tag}:${word}` }],
+      handler: async ({ word }, { use }) => [blocks.text(`${use.tag}:${word}`)],
     });
 
     const harness = await makeHarness();
@@ -126,7 +127,7 @@ describe("compiler-react createTool — render-time wiring", () => {
 
     expect(registered).toHaveLength(1);
     const result = await registered[0]!.handler({ word: "hello" }, { ctx: fakeCtx(), use: {} });
-    expect(result).toEqual([{ type: "text", text: "ALPHA:hello" }]);
+    expect(result).toEqual([blocks.text("ALPHA:hello")]);
   });
 
   it("treats omitted use() as empty deps", async () => {
@@ -136,7 +137,7 @@ describe("compiler-react createTool — render-time wiring", () => {
     const tool = createTool({
       name: "no-deps",
       description: "no deps",
-      handler: async (_input, { use }) => [{ type: "text", text: JSON.stringify(use) }],
+      handler: async (_input, { use }) => [blocks.text(JSON.stringify(use))],
     });
 
     const harness = await makeHarness();
@@ -149,7 +150,7 @@ describe("compiler-react createTool — render-time wiring", () => {
     await harness.renderTree({ mountId: "m3", sessionId: "s3" });
 
     const result = await registered[0]!.handler({}, { ctx: fakeCtx(), use: {} });
-    expect(result).toEqual([{ type: "text", text: "{}" }]);
+    expect(result).toEqual([blocks.text("{}")]);
   });
 
   it("renders the <tool> declaration even when no ToolBridge is wired", async () => {

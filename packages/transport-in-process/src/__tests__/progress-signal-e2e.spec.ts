@@ -41,6 +41,7 @@ import {
   type ToolHandler,
   type ToolRegistration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport";
 
 import { inProcessTransport } from "../index.js";
@@ -75,7 +76,7 @@ const doWorkHandler: ToolHandler = (_input, { ctx }) => {
   // bridge forwards the SIGNAL regardless of the token onto the send's
   // wire progressToken.
   ctx.progress(PROGRESS_TOKEN_ON_CTX, { progress: 2, total: 5, message: "halfway-ish" });
-  const content: ContentBlock[] = [{ type: "text", text: "done" }];
+  const content: ContentBlock[] = [blocks.text("done")];
   return content;
 };
 
@@ -90,9 +91,7 @@ async function makeStack() {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [
-            { type: "tool_use", toolUseId: "tc-1", name: "do_work", input: {} } as ContentBlock,
-          ],
+          output: [blocks.toolUse("tc-1", "do_work", {}) as ContentBlock],
           stopReason: "tool_use",
           toolCalls: [{ id: "tc-1", name: "do_work", input: {} }],
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -101,7 +100,7 @@ async function makeStack() {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "all done" } satisfies ContentBlock],
+          output: [blocks.text("all done") satisfies ContentBlock],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -179,7 +178,7 @@ describe("progress signal → wire bridge (ADR 64 / A2)", () => {
     // Two ticks ran (tool_use → tool dispatch → final text). Output is
     // cumulative across ticks; the run terminated on the scripted text.
     expect(result.result.ticks).toBe(2);
-    expect(result.result.output).toContainEqual({ type: "text", text: "all done" });
+    expect(result.result.output).toContainEqual(blocks.text("all done"));
 
     // Give the fire-and-forget signal fan-out a beat to land on the wire,
     // then close the stream to end the drain.

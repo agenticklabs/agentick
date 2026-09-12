@@ -22,6 +22,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { createLocalClusterRegistry, defineLocalCluster } from "@agentick/cluster/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -38,7 +39,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08" as const,
-            output: [{ type: "text" as const, text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end" as const,
           },
         },

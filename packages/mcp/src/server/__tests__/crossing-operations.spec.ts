@@ -41,6 +41,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { ResourcesHarness } from "@agentick/resources";
 import { PromptsHarness } from "@agentick/prompts";
 
@@ -222,7 +223,7 @@ describe("crossings are operations (name + scope)", () => {
       tools: [toolDecl("echo")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
       resources,
       prompts,
@@ -272,7 +273,7 @@ describe("crossings are operations (name + scope)", () => {
       tools: [toolDecl("echo")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
       auth: alwaysAda,
     }));
@@ -304,7 +305,7 @@ describe("work inside a crossing journals as a CHILD", () => {
       tools: [toolDecl("work")],
       resolveHandler: () => async (_input, ctx) => {
         await ctx.run("inner-step", async () => "done");
-        return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
       },
       auth: alwaysAda,
     }));
@@ -333,7 +334,7 @@ describe("work inside a crossing journals as a CHILD", () => {
         await ctx.run("outer", async () => {
           await ctx.run("inner", async () => "leaf");
         });
-        return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
       },
       auth: alwaysAda,
     }));
@@ -361,7 +362,7 @@ describe("identity reaches the handler ctx over the wire", () => {
       tools: [toolDecl("who")],
       resolveHandler: () => async (_input, ctx) => {
         seen = ctx;
-        return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
       },
       auth: alwaysAda,
     }));
@@ -536,7 +537,7 @@ describe("guard veto blocks a crossing", () => {
       tools: [toolDecl("danger")],
       resolveHandler: () => async () => {
         ran++;
-        return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
       },
     }));
     r.harness.guard((_input, ctx) =>
@@ -561,7 +562,7 @@ describe("guard veto blocks a crossing", () => {
       tools: [toolDecl("safe")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
     }));
     r.harness.guard((_input, ctx) =>
@@ -588,7 +589,7 @@ describe("security stages ride the crossing's guard seam", () => {
       tools: [toolDecl("search")],
       resolveHandler: () => async (input) => {
         order.push(`body:${JSON.stringify(input)}`);
-        return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
       },
       auth: stages,
     }));
@@ -680,7 +681,7 @@ describe("security stages ride the crossing's guard seam", () => {
       tools: [toolDecl("search")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
       auth: {
         inputSanitizer: async (
@@ -704,7 +705,7 @@ describe("security stages ride the crossing's guard seam", () => {
       tools: [toolDecl("search")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
       auth: {
         authenticator: async () => ({
@@ -741,7 +742,7 @@ describe("journal policy is honored per op class", () => {
       tools: [toolDecl("echo")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
     }));
     const client = await r.connect();
@@ -790,7 +791,7 @@ describe("single authentication per crossing", () => {
       tools: [toolDecl("echo")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
       auth: {
         authenticator: async () => {
@@ -816,7 +817,7 @@ describe("admission failure leaves a trace", () => {
       tools: [toolDecl("echo")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
       auth: {
         authenticator: async () => ({ authenticated: false, reason: "bad token" }),
@@ -847,7 +848,7 @@ describe("admission failure leaves a trace", () => {
       tools: [toolDecl("echo")],
       resolveHandler: () => async () => ({
         kind: "inline",
-        content: [{ type: "text", text: "ok" }] as ContentBlock[],
+        content: [blocks.text("ok")] as ContentBlock[],
       }),
       auth: { authenticator: async () => ({ authenticated: false, reason: "denied" }) },
     }));

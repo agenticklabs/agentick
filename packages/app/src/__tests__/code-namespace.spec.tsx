@@ -16,6 +16,7 @@ import { defineCode, withCode, type Code } from "@agentick/code";
 import { fakeCode, fakeCodeHarness, fakeCodeSource } from "@agentick/code/testing";
 import type { ContentBlock, SessionExtension, ToolHandler } from "@agentick/spec";
 import { jsonSchema, toRegistration } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement =>
   React.createElement("message", { role: "system" }, "code host");
@@ -182,7 +183,7 @@ describe("createApp({ code }) — the adopter entry point", () => {
         const handler: ToolHandler = async (_input, deps) => {
           const code = (deps as { readonly ctx: { readonly code?: Code } }).ctx.code;
           seen = await code?.execute({ source: fakeCodeSource.returns("from ctx") });
-          return [{ type: "text", text: "ok" } satisfies ContentBlock];
+          return [blocks.text("ok") satisfies ContentBlock];
         };
         const handlerRef = `code-ctx-probe:${installer.sessionId}`;
         installer.registerToolHandler(handlerRef, handler);

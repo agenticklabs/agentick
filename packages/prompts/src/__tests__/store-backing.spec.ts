@@ -21,6 +21,7 @@ import { PromptsHarness } from "../harness.js";
 import { InMemoryPromptStore } from "../store.js";
 import { runPromptStoreConformance } from "../store-conformance.js";
 import { hydrateFrom, hydrateFromStore } from "../hydrators.js";
+import * as blocks from "@agentick/spec/blocks";
 
 // ── store conformance: the bundled default passes the shared suite ──
 runPromptStoreConformance({
@@ -67,7 +68,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     expect(typeof decl?.render).toBe("function");
     // And it renders — the sidecar fn is live.
     const result = await h.render({ name: "summarize", args: { docId: "42" } });
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "Summarize 42" }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("Summarize 42")]);
     await h.close();
   });
 
@@ -119,7 +120,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     expect(await store.get("alpha", stubStoreCtx())).not.toHaveProperty("render");
     // But the harness can render alpha — its sidecar has the fn.
     const result = await h.render({ name: "alpha" });
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "a" }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("a")]);
     await h.close();
   });
 

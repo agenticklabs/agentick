@@ -2,6 +2,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import type { ContentBlock, ToolResultBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { Formatted, Message, Text, ToolResult, XML, compileTemplate } from "../index.js";
 
@@ -23,11 +24,11 @@ describe("<ToolResult>", () => {
     );
     expect(block.toolUseId).toBe("c1");
     expect(block.name).toBe("query");
-    expect(block.content).toEqual([{ type: "text", text: "3 rows" }]);
+    expect(block.content).toEqual([blocks.text("3 rows")]);
   });
 
   it("takes the content prop verbatim when it has no children", async () => {
-    const content: ContentBlock[] = [{ type: "json", data: { rows: 3 } }];
+    const content: ContentBlock[] = [blocks.json({ rows: 3 })];
     const block = await first(
       <Message role="user">
         <ToolResult toolUseId="c1" name="query" isError content={content} />

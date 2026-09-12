@@ -17,12 +17,13 @@ import type {
   RenderedTree,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { buildMessages } from "../canonical-projection.js";
 import { applyMediaSupport } from "../media-support.js";
 import { buildMessageProvenance } from "../provenance.js";
 
-const text = (t: string): ContentBlock => ({ type: "text", text: t }) as ContentBlock;
+const text = (t: string): ContentBlock => blocks.text(t) as ContentBlock;
 const imageRef = (fileId: string): ContentBlock =>
   ({ type: "image", source: { type: "reference", fileId } }) as ContentBlock;
 const imageUrl = (url: string): ContentBlock =>

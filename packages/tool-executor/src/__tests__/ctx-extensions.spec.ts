@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolHandlerCtx, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -46,7 +47,7 @@ describe("ToolExecutorHarness — ctxExtensions seam (ADR 66)", () => {
           handlerRef: "h.probe",
           handler: async (_input, { ctx }) => {
             seen = ctx;
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -79,7 +80,7 @@ describe("ToolExecutorHarness — ctxExtensions seam (ADR 66)", () => {
           handlerRef: "h.probe",
           handler: async (_input, { ctx }) => {
             const s = (ctx as unknown as { sandbox: { generation: number } }).sandbox;
-            return [{ type: "text", text: String(s.generation) }];
+            return [blocks.text(String(s.generation))];
           },
         },
       ],
@@ -91,7 +92,7 @@ describe("ToolExecutorHarness — ctxExtensions seam (ADR 66)", () => {
       input: {},
       context: { via: "dispatch" },
     });
-    expect(first.content).toEqual([{ type: "text", text: "1" }]);
+    expect(first.content).toEqual([blocks.text("1")]);
 
     live.generation = 2;
 
@@ -101,7 +102,7 @@ describe("ToolExecutorHarness — ctxExtensions seam (ADR 66)", () => {
       input: {},
       context: { via: "dispatch" },
     });
-    expect(second.content).toEqual([{ type: "text", text: "2" }]);
+    expect(second.content).toEqual([blocks.text("2")]);
   });
 
   it("leaves extension fields undefined when none are injected", async () => {
@@ -113,7 +114,7 @@ describe("ToolExecutorHarness — ctxExtensions seam (ADR 66)", () => {
           handlerRef: "h.probe",
           handler: async (_input, { ctx }) => {
             seen = ctx;
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -140,7 +141,7 @@ describe("ToolExecutorHarness — ctxExtensions seam (ADR 66)", () => {
           handlerRef: "h.probe",
           handler: async (_input, { ctx }) => {
             seen = ctx;
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],

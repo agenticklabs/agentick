@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { markdownFormatter } from "@agentick/formatters";
 import { Output } from "../react/components/index.js";
 import { createContainer } from "@agentick/compiler";
@@ -53,7 +54,7 @@ describe("collect — structural primitives", () => {
         sectionNode: {
           id: "s.todos",
           title: "Todos",
-          content: [{ type: "text", text: "1. ship compiler" }],
+          content: [blocks.text("1. ship compiler")],
           // The dialect declared at this position, carried so a section
           // nested in a message obeys the same law as this free-standing one:
           // the nearest declared scope decides. Here it names the root scope,
@@ -92,7 +93,7 @@ describe("collect — structural primitives", () => {
       throw new Error("expected messages");
     }
     expect(sys.role).toBe("system");
-    expect(sys.content).toEqual([{ type: "text", text: "You are helpful." }]);
+    expect(sys.content).toEqual([blocks.text("You are helpful.")]);
     expect(user.role).toBe("user");
   });
 
@@ -288,7 +289,7 @@ describe("collect — free-root content", () => {
     const { tree } = renderAndCollect(
       React.createElement(React.Fragment, null, "loose text at the root"),
     );
-    expect(tree.content).toEqual([{ type: "text", text: "loose text at the root" }]);
+    expect(tree.content).toEqual([blocks.text("loose text at the root")]);
     expect(tree.features).toContain("free-root-content");
   });
 });

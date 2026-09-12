@@ -25,6 +25,7 @@ import type {
   RunInput,
 } from "@agentick/spec";
 import { MalformedModelOutput, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model";
 
@@ -67,7 +68,7 @@ function stubAdapter(behavior: StubBehavior): LanguageModelAdapter<StubRaw, neve
       if (behavior.normalizeThrows !== undefined) throw behavior.normalizeThrows;
       return {
         specVersion: SPEC_VERSION,
-        output: [{ type: "text", text: raw.text }],
+        output: [blocks.text(raw.text)],
         stopReason: "end",
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       };

@@ -19,6 +19,7 @@ import { createGateway } from "@agentick/gateway";
 import { fakeCompiler } from "@agentick/compiler/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ErrorCode, type ContentBlock, type WireMethod } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { inProcessTransport } from "../index.js";
 
@@ -31,7 +32,7 @@ async function makeStack() {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end",
         },
       },

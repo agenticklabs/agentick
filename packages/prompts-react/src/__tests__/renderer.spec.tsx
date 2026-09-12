@@ -16,6 +16,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/
 import { PromptsHarness } from "@agentick/prompts";
 
 import { reactPromptRenderer, createReactPromptRenderer } from "../renderer.js";
+import { text as textBlock } from "@agentick/spec/blocks";
 
 async function makeHarness(): Promise<PromptsHarness> {
   const harness = new PromptsHarness(
@@ -50,7 +51,7 @@ describe("reactPromptRenderer — direct render()", () => {
     // ADR 94: title + text runs coalesce into ONE block — one block is one
     // projected message part.
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({ type: "text", text: "# Greeting\nHi." });
+    expect(blocks[0]).toMatchObject(textBlock("# Greeting\nHi."));
   });
 
   it("hands back wire-shape blocks — no sidecar reaches a consumer", async () => {

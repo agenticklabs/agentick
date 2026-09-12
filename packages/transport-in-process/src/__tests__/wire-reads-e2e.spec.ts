@@ -30,6 +30,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { hydrateFrom as hydrateSkillsFrom, withSkills } from "@agentick/skills";
 import { hydrateFrom as hydratePromptsFrom, withPrompts } from "@agentick/prompts";
 import { ErrorCode, type ContentBlock, type Skill, type WireMethod } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { inProcessTransport } from "../index.js";
 
@@ -55,7 +56,7 @@ async function makeStack(bulk = 0) {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end",
         },
       },

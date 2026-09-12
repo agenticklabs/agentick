@@ -29,6 +29,7 @@ import {
 import type { Resource } from "@modelcontextprotocol/sdk/types.js";
 
 import { InMemoryMcpTransport, NoneAuth, withMCP } from "../index.js";
+import { text } from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hi");
 
@@ -43,7 +44,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text" as const, text: "ok" }],
+            output: [text("ok")],
             stopReason: "end",
           },
         },

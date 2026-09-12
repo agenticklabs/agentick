@@ -23,6 +23,7 @@ import {
   type ToolAnnotations,
   type ToolRegistration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { TOOL_CALL_CHANNEL } from "../tool-call-schema.js";
 import { createTestHarness } from "../testing/index.js";
@@ -83,7 +84,7 @@ describe("ToolExecutorHarness — pending client-call snapshot (§6.1)", () => {
 
   it("fire-and-forget (no requiresResponse) leaves NOTHING pending", async () => {
     const { harness } = await createTestHarness({
-      tools: [clientTool("notify_client", { defaultResult: [{ type: "text", text: "ok" }] })],
+      tools: [clientTool("notify_client", { defaultResult: [blocks.text("ok")] })],
     });
 
     // Fire-and-forget resolves immediately (one-way notify, no Deferred) — there
@@ -104,7 +105,7 @@ describe("ToolExecutorHarness — pending client-call snapshot (§6.1)", () => {
 
     // Relay the client's result back through the inbox (the respond path the
     // wire's `session/respond_to_tool_call` uses).
-    await harness.respondToToolCall({ correlationId, result: [{ type: "text", text: "done" }] });
+    await harness.respondToToolCall({ correlationId, result: [blocks.text("done")] });
     await pending;
     void inbox;
 

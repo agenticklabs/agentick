@@ -36,6 +36,7 @@ import {
   type ToolHandler,
   type ToolRegistration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport";
 
 import { inProcessTransport } from "../index.js";
@@ -63,7 +64,7 @@ function toolRegistration(): ToolRegistration {
 }
 
 const doWorkHandler: ToolHandler = () => {
-  const content: ContentBlock[] = [{ type: "text", text: "done" }];
+  const content: ContentBlock[] = [blocks.text("done")];
   return content;
 };
 
@@ -77,9 +78,7 @@ async function makeStack() {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [
-            { type: "tool_use", toolUseId: "tc-1", name: "do_work", input: {} } as ContentBlock,
-          ],
+          output: [blocks.toolUse("tc-1", "do_work", {}) as ContentBlock],
           stopReason: "tool_use",
           toolCalls: [{ id: "tc-1", name: "do_work", input: {} }],
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -88,7 +87,7 @@ async function makeStack() {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "all done" } satisfies ContentBlock],
+          output: [blocks.text("all done") satisfies ContentBlock],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },

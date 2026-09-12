@@ -34,6 +34,7 @@ import { hydrateFrom as hydratePromptsFrom, withPrompts } from "@agentick/prompt
 import { withCompletions } from "@agentick/completions";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { inProcessTransport } from "../index.js";
 
@@ -56,7 +57,7 @@ async function makeStack() {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end",
         },
       },

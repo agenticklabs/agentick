@@ -47,12 +47,13 @@ import {
   type TimelineEntry,
   type WireMethod,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { inProcessTransport } from "../index.js";
 
 const entry = (id: string): TimelineEntry => ({
   kind: "message",
-  message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+  message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
 });
 
 const idOf = (e: TimelineEntry): string => (e.kind === "message" ? e.message.id : "boundary");
@@ -69,7 +70,7 @@ async function mkGateway(authorizer?: ReturnType<typeof staticAuthorizer>) {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end",
         },
       },

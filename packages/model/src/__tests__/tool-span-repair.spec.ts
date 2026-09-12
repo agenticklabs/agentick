@@ -10,11 +10,11 @@
 
 import { describe, expect, it } from "vitest";
 import type { LanguageModelMessage, LanguageModelMessagePart } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { repairToolSpans } from "../tool-span-repair.js";
 
-const text = (t: string): LanguageModelMessagePart =>
-  ({ type: "text", text: t }) as LanguageModelMessagePart;
+const text = (t: string): LanguageModelMessagePart => blocks.text(t) as LanguageModelMessagePart;
 const call = (id: string): LanguageModelMessagePart =>
   ({ type: "tool_use", id, name: "search", input: {} }) as LanguageModelMessagePart;
 const result = (toolUseId: string): LanguageModelMessagePart =>

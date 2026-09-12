@@ -26,6 +26,7 @@ import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ToolExecutorProtocol } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -45,7 +46,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text" as const, text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
           },
         },
@@ -114,32 +115,32 @@ async function mkMcpServer(): Promise<{
     const args = req.params.arguments as Record<string, unknown> | undefined;
     if (req.params.name === "echo") {
       return {
-        content: [{ type: "text", text: `echo: ${(args?.message as string | undefined) ?? ""}` }],
+        content: [blocks.text(`echo: ${(args?.message as string | undefined) ?? ""}`)],
       };
     }
     if (req.params.name === "add") {
       const a = (args?.a as number | undefined) ?? 0;
       const b = (args?.b as number | undefined) ?? 0;
       return {
-        content: [{ type: "text", text: String(a + b) }],
+        content: [blocks.text(String(a + b))],
       };
     }
     if (req.params.name === "fail_soft") {
       return {
-        content: [{ type: "text", text: "the ledger is closed" }],
+        content: [blocks.text("the ledger is closed")],
         isError: true,
       };
     }
     if (req.params.name === "render_widget") {
       // An MCP-Apps style result: the frame descriptor rides result `_meta`.
       return {
-        content: [{ type: "text", text: "widget ready" }],
+        content: [blocks.text("widget ready")],
         structuredContent: { rows: 2 },
         _meta: { ui: { resourceUri: "ui://widget/invoice-list", prefersBorder: true } },
       };
     }
     return {
-      content: [{ type: "text", text: `unknown tool ${req.params.name}` }],
+      content: [blocks.text(`unknown tool ${req.params.name}`)],
       isError: true,
     };
   });
@@ -179,7 +180,7 @@ async function mkPagedMcpServer(): Promise<{
       : { tools: [decl("second_page_tool")] };
   });
   server.setRequestHandler(CallToolRequestSchema, async (req) => ({
-    content: [{ type: "text", text: `ran ${req.params.name}` }],
+    content: [blocks.text(`ran ${req.params.name}`)],
   }));
 
   await server.connect(serverTransport);
@@ -210,10 +211,10 @@ describe("withMCP — end-to-end", () => {
 
     // Both pages' tools are dispatchable — the second page is not silently lost.
     expect(await session.tools.dispatch("paged__first_page_tool", {})).toEqual([
-      { type: "text", text: "ran first_page_tool" },
+      blocks.text("ran first_page_tool"),
     ]);
     expect(await session.tools.dispatch("paged__second_page_tool", {})).toEqual([
-      { type: "text", text: "ran second_page_tool" },
+      blocks.text("ran second_page_tool"),
     ]);
 
     await session.close();
@@ -243,7 +244,7 @@ describe("withMCP — end-to-end", () => {
     const content = await session.tools.dispatch("echo-server__echo", { message: "hi" });
 
     expect(content).toHaveLength(1);
-    expect(content[0]).toEqual({ type: "text", text: "echo: hi" });
+    expect(content[0]).toEqual(blocks.text("echo: hi"));
 
     await session.close();
     await app.closeApp();
@@ -314,7 +315,7 @@ describe("withMCP — end-to-end", () => {
     // A DOMAIN error, not a protocol failure: the dispatch resolves and the
     // model gets to reason about it — but it must not read as a success.
     expect(result.isError).toBe(true);
-    expect(result.content[0]).toMatchObject({ type: "text", text: "the ledger is closed" });
+    expect(result.content[0]).toMatchObject(blocks.text("the ledger is closed"));
 
     await session.close();
     await app.closeApp();
@@ -451,7 +452,7 @@ async function mkPartlyAnnotatedMcpServer(): Promise<{
     ],
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => ({
-    content: [{ type: "text", text: `ran ${req.params.name}` }],
+    content: [blocks.text(`ran ${req.params.name}`)],
   }));
 
   await server.connect(serverTransport);
@@ -507,12 +508,10 @@ describe("withMCP — a server's silence about a tool", () => {
       outcome: "accepted",
       value: { approved: true },
     });
-    expect(await dispatchP).toEqual([{ type: "text", text: "ran wipe" }]);
+    expect(await dispatchP).toEqual([blocks.text("ran wipe")]);
 
     // Nobody answers a second ask, so this dispatch resolving IS the claim.
-    expect(await session.tools.dispatch("quiet__peek", {})).toEqual([
-      { type: "text", text: "ran peek" },
-    ]);
+    expect(await session.tools.dispatch("quiet__peek", {})).toEqual([blocks.text("ran peek")]);
 
     await session.close();
     await app.closeApp();

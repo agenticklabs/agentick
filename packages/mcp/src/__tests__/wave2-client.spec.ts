@@ -30,6 +30,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { isResourceBlock } from "@agentick/spec";
+import { text } from "@agentick/spec/blocks";
 
 import { InMemoryMcpTransport } from "../transport/in-memory.js";
 import { McpClientHarness, NoneAuth } from "../client/index.js";
@@ -91,7 +92,7 @@ function makeServer(): { server: Server; fixture: ServerFixture } {
     return {
       description: "a greeting",
       messages: [
-        { role: "user", content: { type: "text", text: `Hello, ${who}!` } },
+        { role: "user", content: text(`Hello, ${who}!`) },
         {
           role: "assistant",
           content: {
@@ -230,7 +231,7 @@ describe("wave2 client — prompts", () => {
     expect(result.description).toBe("a greeting");
     expect(result.messages[0]).toEqual({
       role: "user",
-      content: [{ type: "text", text: "Hello, Ada!" }],
+      content: [text("Hello, Ada!")],
     });
     const asstBlock = result.messages[1]!.content[0]!;
     expect(isResourceBlock(asstBlock)).toBe(true);
@@ -293,30 +294,30 @@ describe("wave2 client — sampling", () => {
       return {
         model: "test-model",
         role: "assistant",
-        content: { type: "text", text: "sampled reply" },
+        content: text("sampled reply"),
       };
     };
     const { server } = await wire({ samplingHandler });
 
     // The server drives the round-trip: it asks the client to sample.
     const result = await server.createMessage({
-      messages: [{ role: "user", content: { type: "text", text: "hi" } }],
+      messages: [{ role: "user", content: text("hi") }],
       maxTokens: 100,
     });
 
     // Handler saw the request…
     expect(seen).toBeDefined();
-    expect(seen!.messages[0]!.content).toMatchObject({ type: "text", text: "hi" });
+    expect(seen!.messages[0]!.content).toMatchObject(text("hi"));
     // …and its response went back to the server.
     expect(result.model).toBe("test-model");
-    expect(result.content).toMatchObject({ type: "text", text: "sampled reply" });
+    expect(result.content).toMatchObject(text("sampled reply"));
   });
 
   it("responds method-not-found when no sampling handler is configured", async () => {
     const { server } = await wire(); // no samplingHandler → capability not advertised
     await expect(
       server.createMessage({
-        messages: [{ role: "user", content: { type: "text", text: "hi" } }],
+        messages: [{ role: "user", content: text("hi") }],
         maxTokens: 10,
       }),
     ).rejects.toThrow(/method not found|not supported|-32601/i);
@@ -393,19 +394,19 @@ describe("wave2 client — logging", () => {
 describe("wave2 content-mapper", () => {
   it("mapCallToolResult preserves structuredContent and isError", () => {
     const result: CallToolResult = {
-      content: [{ type: "text", text: "ok" }],
+      content: [text("ok")],
       structuredContent: { rows: 3, ok: true },
       isError: true,
     };
     const mapped = mapCallToolResult(result);
-    expect(mapped.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(mapped.content).toEqual([text("ok")]);
     expect(mapped.structuredContent).toEqual({ rows: 3, ok: true });
     expect(mapped.isError).toBe(true);
   });
 
   it("folds result _meta into the namespaced metadata.mcp.meta key", () => {
     const mapped = mapCallToolResult({
-      content: [{ type: "text", text: "ok" }],
+      content: [text("ok")],
       _meta: { ui: { resourceUri: "ui://widget/x", prefersBorder: false } },
     });
     // ONE key, both directions — the same convention the server-side
@@ -416,7 +417,7 @@ describe("wave2 content-mapper", () => {
   });
 
   it("omits absent structuredContent / isError / metadata", () => {
-    const mapped = mapCallToolResult({ content: [{ type: "text", text: "x" }] });
+    const mapped = mapCallToolResult({ content: [text("x")] });
     expect("structuredContent" in mapped).toBe(false);
     expect("isError" in mapped).toBe(false);
     expect("metadata" in mapped).toBe(false);

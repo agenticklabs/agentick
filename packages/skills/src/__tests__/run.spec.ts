@@ -35,6 +35,7 @@ import type {
   SessionExecutionHandle,
   SessionSendCapability,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SkillsHarness, type SkillsHarnessOptions } from "../harness.js";
 import type { SkillRunCompose } from "../handle.js";
@@ -45,7 +46,7 @@ const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 } as const;
 function mkSendResult(over: Partial<SendResult> = {}): SendResult {
   return {
     response: "assistant prose",
-    output: [{ type: "text", text: "assistant prose" }],
+    output: [blocks.text("assistant prose")],
     toolResults: [],
     usage,
     stopReason: "end",

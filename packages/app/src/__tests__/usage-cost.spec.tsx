@@ -32,6 +32,7 @@ import type {
   SessionExecutionHandle,
 } from "@agentick/spec";
 import { foldUsageRollup } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -74,7 +75,7 @@ function scriptedLoop(ticks: readonly ScriptedTick[], seen: RunExecutionInput[])
           tickId: `tick-${i++}`,
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
             usage: { ...USAGE },
             ...(tick.cost !== undefined ? { cost: tick.cost } : {}),
@@ -90,7 +91,7 @@ function scriptedLoop(ticks: readonly ScriptedTick[], seen: RunExecutionInput[])
           ticks: ticks.length,
           usage: rollup?.usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           stopReason: "end",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           toolResults: [],
           ...(rollup !== undefined ? { byModel: rollup.byModel } : {}),
           ...(cost !== undefined ? { cost } : {}),

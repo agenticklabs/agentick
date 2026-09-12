@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { SessionTaskWakePayload } from "@agentick/runtime";
 import type { TaskWakePolicy } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor, waitForStable } from "@agentick/utils/testing";
 
 import { fakeTasks, type FakeTasksBundle } from "../testing/fake-tasks.js";
@@ -70,7 +71,7 @@ describe("TASK-WAKE — unobserved completion fires exactly one wake", () => {
     const { bundle, wakes } = await mkWakeHarness();
     close = bundle.close;
 
-    const handle = bundle.harness.submit(async () => [{ type: "text", text: "SECRET-OUTPUT" }], {
+    const handle = bundle.harness.submit(async () => [blocks.text("SECRET-OUTPUT")], {
       wake: true,
     });
     // The originator's `handle.result` await does NOT consume the wake — only
@@ -134,7 +135,7 @@ describe("TASK-WAKE — consume-on-observe (observed-first → NO wake)", () => 
     const handle = bundle.harness.submit(
       async () => {
         await gate;
-        return [{ type: "text", text: "x" }];
+        return [blocks.text("x")];
       },
       { wake: true },
     );
@@ -152,7 +153,7 @@ describe("TASK-WAKE — consume-on-observe (observed-first → NO wake)", () => 
     const { bundle, wakes } = await mkWakeHarness();
     close = bundle.close;
 
-    const handle = bundle.harness.submit(async () => [{ type: "text", text: "x" }], { wake: true });
+    const handle = bundle.harness.submit(async () => [blocks.text("x")], { wake: true });
     // `await handle.result` resolves on a microtask; the deferred fire is a
     // macrotask (setImmediate). So a synchronous get() here runs BEFORE the
     // fire and observes the terminal snapshot → consumes.

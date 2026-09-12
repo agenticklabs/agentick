@@ -18,6 +18,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
 import type { ExecutionTarget, SessionHarnessProtocol } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { GatewayHarness } from "../harness.js";
 import { sessionWireExtension } from "../wire/session-extension.js";
@@ -41,7 +42,7 @@ describe("residency hooks through the gateway door + wire send", () => {
       scripted: {
         result: {
           specVersion: SPEC_VERSION,
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -118,7 +119,7 @@ describe("residency hooks through the gateway door + wire send", () => {
       scripted: {
         result: {
           specVersion: SPEC_VERSION,
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -164,7 +165,7 @@ describe("residency hooks through the gateway door + wire send", () => {
       scripted: {
         result: {
           specVersion: SPEC_VERSION,
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },

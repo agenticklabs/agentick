@@ -31,6 +31,7 @@ import type { ExecutionTarget } from "@agentick/spec";
 
 import { SessionHarness } from "../harness.js";
 import type { ProtocolEvent } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 /**
  * A bus that keeps every published envelope, for assertions about op SCOPE.
@@ -74,7 +75,7 @@ function endExec() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "done" }],
+            output: [blocks.text("done")],
             stopReason: "end",
             usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
           },

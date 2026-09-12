@@ -38,6 +38,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -119,7 +120,7 @@ async function mkSession(opts: {
 
 const okResult: LanguageModelExecutionResult = {
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "ok" }],
+  output: [blocks.text("ok")],
   stopReason: "end",
   usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
 };
@@ -183,12 +184,12 @@ describe("structured send — responseFormat threading + precedence", () => {
     };
     const final: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
-      output: [{ type: "text", text: "done" }],
+      output: [blocks.text("done")],
       stopReason: "end",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
     };
     const { session, resolver, executor, dispose } = await mkSession({ scripts: [toolUse, final] });
-    resolver.register("h.noop", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.noop", async () => [blocks.text("ok")]);
 
     const noopTool: ToolDeclaration = {
       id: "t.noop",

@@ -18,6 +18,7 @@ import type { LocalEventBus } from "@agentick/runtime";
 
 import type { DispatchInput, ProtocolEvent, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -83,7 +84,7 @@ describe("ToolExecutorHarness — confirmationMessage seam", () => {
           annotations: { requiresConfirmation: true, confirmationMessage: "Really delete it?" },
         }),
       ],
-      handlers: [{ handlerRef: "h.del", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.del", handler: async () => [blocks.text("ok")] }],
     });
 
     const envP = nextElicitation(bus);
@@ -114,7 +115,7 @@ describe("ToolExecutorHarness — confirmationMessage seam", () => {
           },
         }),
       ],
-      handlers: [{ handlerRef: "h.pay", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.pay", handler: async () => [blocks.text("ok")] }],
     });
 
     const envP = nextElicitation(bus);
@@ -141,9 +142,7 @@ describe("ToolExecutorHarness — confirmationMessage seam", () => {
           },
         }),
       ],
-      handlers: [
-        { handlerRef: "h.async-msg", handler: async () => [{ type: "text", text: "ok" }] },
-      ],
+      handlers: [{ handlerRef: "h.async-msg", handler: async () => [blocks.text("ok")] }],
     });
 
     const envP = nextElicitation(bus);
@@ -161,7 +160,7 @@ describe("ToolExecutorHarness — confirmationMessage seam", () => {
   it("regression: no confirmationMessage → the default prompt", async () => {
     const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmReg("plain", {})],
-      handlers: [{ handlerRef: "h.plain", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.plain", handler: async () => [blocks.text("ok")] }],
     });
 
     const envP = nextElicitation(bus);
@@ -192,7 +191,7 @@ describe("ToolExecutorHarness — confirmationPreview seam", () => {
           },
         }),
       ],
-      handlers: [{ handlerRef: "h.edit", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.edit", handler: async () => [blocks.text("ok")] }],
     });
 
     const envP = nextElicitation(bus);
@@ -220,9 +219,7 @@ describe("ToolExecutorHarness — confirmationPreview seam", () => {
   it("no preview → metadata carries no `preview` key", async () => {
     const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmReg("nopreview", {})],
-      handlers: [
-        { handlerRef: "h.nopreview", handler: async () => [{ type: "text", text: "ok" }] },
-      ],
+      handlers: [{ handlerRef: "h.nopreview", handler: async () => [blocks.text("ok")] }],
     });
 
     const envP = nextElicitation(bus);
@@ -264,7 +261,7 @@ describe("ToolExecutorHarness — defaultResult callable", () => {
         clientTool("fire_fn", {
           defaultResult: (input) => {
             seenInput = input;
-            return [{ type: "text", text: `ack ${(input as { id: string }).id}` }];
+            return [blocks.text(`ack ${(input as { id: string }).id}`)];
           },
         }),
       ],
@@ -282,9 +279,7 @@ describe("ToolExecutorHarness — defaultResult callable", () => {
         clientTool("slow_fn", {
           requiresResponse: true,
           responseTimeoutMs: 30,
-          defaultResult: async (input) => [
-            { type: "text", text: `fallback ${(input as { q: string }).q}` },
-          ],
+          defaultResult: async (input) => [blocks.text(`fallback ${(input as { q: string }).q}`)],
         }),
       ],
     });
@@ -318,7 +313,7 @@ describe("ToolExecutorHarness — alias dispatch resolution", () => {
           handlerRef: "h.ls",
           handler: async () => {
             ran++;
-            return [{ type: "text", text: "listed" }];
+            return [blocks.text("listed")];
           },
         },
       ],

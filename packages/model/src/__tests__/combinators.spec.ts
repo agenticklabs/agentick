@@ -7,12 +7,13 @@
 
 import { describe, expect, it } from "vitest";
 import type { EmbeddingModelAdapter, ImageModelAdapter } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { generate, generateStream } from "../generate.js";
 import { scriptedAdapter } from "../testing/index.js";
 import { isTransientProviderError, tapModel, withFallback, withRetry } from "../combinators.js";
 
-const MESSAGES = [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }];
+const MESSAGES = [{ role: "user" as const, content: [blocks.text("hi")] }];
 
 describe("withRetry", () => {
   it("retries transient failures then succeeds (non-streaming)", async () => {

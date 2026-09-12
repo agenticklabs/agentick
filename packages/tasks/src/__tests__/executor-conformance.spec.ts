@@ -12,6 +12,7 @@
 import { fileURLToPath } from "node:url";
 
 import type { ContentBlock, TaskHandle } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { runTaskExecutorConformance, type TaskExecutorCase } from "../executor-conformance.js";
 import { ChildProcessTaskExecutor } from "../child-executor.js";
@@ -30,9 +31,7 @@ runTaskExecutorConformance({
       submit: (kase: TaskExecutorCase, input?: unknown): TaskHandle => {
         switch (kase) {
           case "echo":
-            return bundle.harness.submit(async () => [
-              { type: "text", text: String(input) } as ContentBlock,
-            ]);
+            return bundle.harness.submit(async () => [blocks.text(String(input)) as ContentBlock]);
           case "progress":
             return bundle.harness.submit(async ({ onProgress }) => {
               // Yield first so the suite's event subscription attaches
@@ -42,7 +41,7 @@ runTaskExecutorConformance({
               onProgress({ progress: 1, total: 3 });
               onProgress({ progress: 2, total: 3 });
               onProgress({ progress: 3, total: 3 });
-              return [{ type: "text", text: "progress-done" } as ContentBlock];
+              return [blocks.text("progress-done") as ContentBlock];
             });
           case "thrower":
             return bundle.harness.submit(async () => {

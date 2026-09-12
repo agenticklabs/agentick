@@ -60,6 +60,7 @@ import type {
   ToolHandler,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -340,7 +341,7 @@ describe("A2.5 — prefix-cache stability (the prompt-cache invariant)", () => {
     const executor = new RecordingExecutor("rec-exec", journal, bus, inbox);
     await executor.ready;
 
-    const noop: ToolHandler = async () => [{ type: "text", text: "" } satisfies ContentBlock];
+    const noop: ToolHandler = async () => [blocks.text("") satisfies ContentBlock];
 
     const app = await createApp(React.createElement(RepresentativeAgent), {
       modelExecutor: executor,

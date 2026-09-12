@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import type { ContentBlock } from "@agentick/spec";
+import { source, text } from "@agentick/spec/blocks";
 import { createContainer } from "@agentick/compiler";
 import { createHostScope } from "@agentick/compiler";
 import { createCompiler } from "../react/compiler.js";
@@ -47,7 +48,7 @@ describe("content blocks — inside <section>", () => {
         "section",
         { id: "s" },
         React.createElement("image", {
-          source: { type: "url", url: "https://x.test/a.png" },
+          source: source.url("https://x.test/a.png"),
           altText: "a",
         }),
       ),
@@ -56,7 +57,7 @@ describe("content blocks — inside <section>", () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({
       type: "image",
-      source: { type: "url", url: "https://x.test/a.png" },
+      source: source.url("https://x.test/a.png"),
       altText: "a",
     });
   });
@@ -91,7 +92,7 @@ describe("content blocks — inside <section>", () => {
   });
 
   it("<document> + <audio> + <video>", () => {
-    const src = { type: "url", url: "https://x.test/file" } as const;
+    const src = source.url("https://x.test/file");
     const { tree } = renderAndCollect(
       React.createElement(
         "section",
@@ -284,7 +285,7 @@ describe("content blocks — composing inside <message>", () => {
         { role: "user" },
         "Look at this: ",
         React.createElement("image", {
-          source: { type: "url", url: "https://x.test/a.png" },
+          source: source.url("https://x.test/a.png"),
         }),
         " and the snippet ",
         React.createElement("code", { language: "typescript" }, "const x = 1"),
@@ -299,7 +300,7 @@ describe("content blocks — composing inside <message>", () => {
     // Replaying a stored message as children — the alternative is building the
     // `content` array by hand, which shadows every child and decides the dialect
     // at construction time.
-    const persisted: ContentBlock[] = [{ type: "text", text: "persisted" }];
+    const persisted: ContentBlock[] = [text("persisted")];
     const { tree } = renderAndCollect(
       React.createElement(
         "message",
@@ -322,13 +323,13 @@ describe("<message> — children win over the `content` prop", () => {
     // `<Message {...entry.message}>` is how a persisted message is replayed with
     // something added to it. When the prop won, that spread silently dropped
     // every child and the composition could not be written at all.
-    const prebuilt: ContentBlock[] = [{ type: "text", text: "from prop" }];
+    const prebuilt: ContentBlock[] = [text("from prop")];
     const { tree } = renderAndCollect(
       React.createElement(
         "message",
         { role: "user", content: prebuilt },
         "from children",
-        React.createElement("image", { source: { type: "url", url: "https://x.test/a.png" } }),
+        React.createElement("image", { source: source.url("https://x.test/a.png") }),
       ),
     );
     const blocks = contentOf(tree);
@@ -338,7 +339,7 @@ describe("<message> — children win over the `content` prop", () => {
 
   it("uses `content` when there are no children — the shorthand still works", () => {
     const prebuilt: ContentBlock[] = [
-      { type: "text", text: "from prop" },
+      text("from prop"),
       { type: "code", language: "typescript", text: "const x = 1" },
     ];
     const { tree } = renderAndCollect(
@@ -349,7 +350,7 @@ describe("<message> — children win over the `content` prop", () => {
 
   it("children that produce NO blocks fall back to `content`", () => {
     // A conditional that rendered nothing must not empty the message.
-    const prebuilt: ContentBlock[] = [{ type: "text", text: "from prop" }];
+    const prebuilt: ContentBlock[] = [text("from prop")];
     const { tree } = renderAndCollect(
       React.createElement("message", { role: "user", content: prebuilt }, null, false),
     );
@@ -364,7 +365,7 @@ describe("<message> — children win over the `content` prop", () => {
         "fallback text",
       ),
     );
-    expect(contentOf(tree)).toEqual([{ type: "text", text: "fallback text" }]);
+    expect(contentOf(tree)).toEqual([text("fallback text")]);
   });
 
   it("neither present is an empty message, not a crash", () => {
@@ -375,7 +376,7 @@ describe("<message> — children win over the `content` prop", () => {
 
 describe("content blocks — JSON firewall", () => {
   it("all block types survive JSON round-trip", () => {
-    const src = { type: "url", url: "https://x.test/" } as const;
+    const src = source.url("https://x.test/");
     const { tree } = renderAndCollect(
       React.createElement(
         "section",

@@ -30,6 +30,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { ToolExecutorHarness, InMemoryHandlerResolver } from "@agentick/tool-executor";
 import { ElicitationHarness } from "@agentick/elicitation";
@@ -141,7 +142,7 @@ describe("LoopExecutorHarness — no dangling tool_use (#33, ADR 67)", () => {
     const resolver = new InMemoryHandlerResolver();
     resolver.register(
       "h.record",
-      async (): Promise<readonly ContentBlock[]> => [{ type: "text", text: "tool ran" }],
+      async (): Promise<readonly ContentBlock[]> => [blocks.text("tool ran")],
     );
     const elic = new ElicitationHarness("loop_nd:elic", sub.journal, sub.bus, sub.inbox);
     await elic.ready;
@@ -158,7 +159,7 @@ describe("LoopExecutorHarness — no dangling tool_use (#33, ADR 67)", () => {
     // ran after the stop decision" scenario.
     const scriptedResult: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
-      output: [{ type: "text", text: "calling the tool" }],
+      output: [blocks.text("calling the tool")],
       stopReason: "tool_use",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       toolCalls: [{ id: "call-1", name: "record_me", input: {} }],
@@ -195,7 +196,7 @@ describe("LoopExecutorHarness — no dangling tool_use (#33, ADR 67)", () => {
     expect(toolResultCalls).toHaveLength(1);
     expect(toolResultCalls[0]!.map((r) => r.toolCallId)).toEqual(["call-1"]);
     expect(toolResultCalls[0]![0]!.succeeded).toBe(true);
-    expect(toolResultCalls[0]![0]!.content).toEqual([{ type: "text", text: "tool ran" }]);
+    expect(toolResultCalls[0]![0]!.content).toEqual([blocks.text("tool ran")]);
 
     // And it was persisted BEFORE the stop — the executor result and the
     // tool results are both recorded (persistence precedes the
@@ -231,7 +232,7 @@ describe("LoopExecutorHarness — tool calls continue the loop regardless of sto
     const resolver = new InMemoryHandlerResolver();
     resolver.register(
       "h.record",
-      async (): Promise<readonly ContentBlock[]> => [{ type: "text", text: "tool ran" }],
+      async (): Promise<readonly ContentBlock[]> => [blocks.text("tool ran")],
     );
     const elic = new ElicitationHarness("loop_tc:elic", sub.journal, sub.bus, sub.inbox);
     await elic.ready;
@@ -247,7 +248,7 @@ describe("LoopExecutorHarness — tool calls continue the loop regardless of sto
         {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "let me look that up" }],
+            output: [blocks.text("let me look that up")],
             // The lie the loop used to believe.
             stopReason: "end",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -257,7 +258,7 @@ describe("LoopExecutorHarness — tool calls continue the loop regardless of sto
         {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "here is what I found" }],
+            output: [blocks.text("here is what I found")],
             stopReason: "end",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           },
@@ -287,8 +288,8 @@ describe("LoopExecutorHarness — tool calls continue the loop regardless of sto
     // The aggregate carries BOTH ticks' output; what matters is that the second
     // tick — the one that saw the tool result — is in there at all.
     expect(terminal.result!.output).toEqual([
-      { type: "text", text: "let me look that up" },
-      { type: "text", text: "here is what I found" },
+      blocks.text("let me look that up"),
+      blocks.text("here is what I found"),
     ]);
   });
 
@@ -310,7 +311,7 @@ describe("LoopExecutorHarness — tool calls continue the loop regardless of sto
       scripted: {
         result: {
           specVersion: SPEC_VERSION,
-          output: [{ type: "text", text: "answered outright" }],
+          output: [blocks.text("answered outright")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },

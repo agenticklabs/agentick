@@ -20,6 +20,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { NormalizationFailed, ProjectionFailed, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 
 import { LoopExecutorHarness } from "../harness.js";
@@ -68,7 +69,7 @@ const toolExecutor = {
 
 const answered: LanguageModelExecutionResult = {
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "done" }],
+  output: [blocks.text("done")],
   stopReason: "end",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 };

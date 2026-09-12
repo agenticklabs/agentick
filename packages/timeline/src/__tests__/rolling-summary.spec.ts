@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { CompactGenerate, ProgressUpdate, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { deriveTestContext } from "@agentick/runtime/testing";
 
 import {
@@ -23,7 +24,7 @@ function entries(count: number, offset = 0): TimelineEntry[] {
       id: `m${i + offset}`,
       ts: i + offset,
       role: "user" as const,
-      content: [{ type: "text" as const, text: `turn ${i + offset}` }],
+      content: [blocks.text(`turn ${i + offset}`)],
     },
   }));
 }
@@ -117,7 +118,7 @@ describe("keepVerbatim bounds the tail by tokens, not just by count", () => {
         id: "img",
         ts: 0,
         role: "user",
-        content: [{ type: "image", source: { type: "url", url: "https://e.test/a.png" } }],
+        content: [blocks.image(blocks.source.url("https://e.test/a.png"))],
       },
     };
     void rollingSummary({
@@ -219,16 +220,16 @@ describe("what your log caught", () => {
   /** A real turn: user asks, assistant calls a tool, the tool replies, assistant answers. */
   const turn = (n: number): TimelineEntry[] =>
     [
-      { role: "user" as const, content: [{ type: "text" as const, text: `ask ${n}` }] },
+      { role: "user" as const, content: [blocks.text(`ask ${n}`)] },
       {
         role: "assistant" as const,
-        content: [{ type: "tool_use" as const, toolUseId: `c${n}`, name: "q", input: {} }],
+        content: [blocks.toolUse(`c${n}`, "q", {})],
       },
       {
         role: "tool" as const,
         content: [{ type: "tool_result" as const, toolUseId: `c${n}`, content: [] }],
       },
-      { role: "assistant" as const, content: [{ type: "text" as const, text: `answer ${n}` }] },
+      { role: "assistant" as const, content: [blocks.text(`answer ${n}`)] },
     ].map((message, i) => ({
       kind: "message" as const,
       message: { id: `t${n}_${i}`, ts: n * 10 + i, ...message },
@@ -259,10 +260,10 @@ describe("what your log caught", () => {
     // else to reach, which is exactly when the churn used to fire.
     const seen = vi.fn(stubGenerate());
     const openTurn = [
-      { role: "user" as const, content: [{ type: "text" as const, text: "ask" }] },
+      { role: "user" as const, content: [blocks.text("ask")] },
       ...Array.from({ length: 5 }, () => ({
         role: "assistant" as const,
-        content: [{ type: "text" as const, text: "step" }],
+        content: [blocks.text("step")],
       })),
     ].map((message, i) => ({
       kind: "message" as const,
@@ -543,7 +544,7 @@ describe("the fold cuts on a turn boundary", () => {
             role,
             content: [
               type === "text"
-                ? { type: "text", text: `t${t}` }
+                ? blocks.text(`t${t}`)
                 : type === "tool_use"
                   ? { type: "tool_use", id: `c${t}`, name: "nav", input: {} }
                   : { type: "tool_result", toolUseId: `c${t}`, content: [] },

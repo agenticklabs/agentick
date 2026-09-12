@@ -29,6 +29,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { MalformedModelOutput, ProviderRejected, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor, type MockScriptedRun } from "@agentick/model-executor";
 import { omitUndefined } from "@agentick/utils";
 
@@ -74,7 +75,7 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
   const ok = (i: { name: string; toolCallId: string }): DispatchResult => ({
     toolCallId: i.toolCallId,
     name: i.name,
-    content: [{ type: "text", text: "ok" }],
+    content: [blocks.text("ok")],
     durationMs: 1,
   });
   return {
@@ -94,13 +95,13 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
 
 const ended = (): LanguageModelExecutionResult => ({
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "done" }],
+  output: [blocks.text("done")],
   stopReason: "end",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 });
 const toolUse = (id: string): LanguageModelExecutionResult => ({
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "calling" }],
+  output: [blocks.text("calling")],
   stopReason: "tool_use",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
   toolCalls: [{ id, name: "t", input: {} } as ToolCall],

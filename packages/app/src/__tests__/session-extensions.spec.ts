@@ -33,6 +33,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock, SessionExtension, SessionInstaller, ToolHandler } from "@agentick/spec";
 import { jsonSchema, toRegistration } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hello");
 
@@ -46,7 +47,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
       scripted: Array.from({ length: 10 }, () => ({
         result: {
           specVersion: "2026-05-08" as const,
-          output: [{ type: "text" as const, text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end" as const,
         },
       })),
@@ -94,9 +95,7 @@ describe("SessionExtension — install lifecycle", () => {
       install: (installer) => {
         const handler: ToolHandler = async () => {
           handlerCalls++;
-          return [
-            { type: "text", text: `from session ${installer.sessionId}` } satisfies ContentBlock,
-          ];
+          return [blocks.text(`from session ${installer.sessionId}`) satisfies ContentBlock];
         };
         const handlerRef = `session-ext:${installer.sessionId}:hello`;
         installer.registerToolHandler(handlerRef, handler);
@@ -210,7 +209,7 @@ describe("SessionExtension — install lifecycle", () => {
       target: "session",
       install: (installer) => {
         const handler: ToolHandler = async () => [
-          { type: "text", text: "still-alive" } satisfies ContentBlock,
+          blocks.text("still-alive") satisfies ContentBlock,
         ];
         installer.registerToolHandler("ephemeral:handler", handler);
         installer.registerExtensionTool(

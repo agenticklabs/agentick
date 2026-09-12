@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, McpRoot, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { inMemoryServerTransport, McpServerHarness, type ToolHandlerResolver } from "../index.js";
 
@@ -40,7 +41,7 @@ const readRootsResolver: ToolHandlerResolver = (ref) => {
   if (ref !== "handler:read_roots") return null;
   return async (_input, ctx) => {
     const roots = ctx.mcp?.clientRoots ?? null;
-    const content: ContentBlock[] = [{ type: "text", text: JSON.stringify(roots) }];
+    const content: ContentBlock[] = [blocks.text(JSON.stringify(roots))];
     return { kind: "inline", content };
   };
 };

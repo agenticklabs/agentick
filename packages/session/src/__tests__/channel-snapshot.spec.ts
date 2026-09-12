@@ -24,6 +24,7 @@ import { CompilerHarness } from "@agentick/compiler-react";
 import { KnobsHarness } from "@agentick/knobs";
 import { jsonSchema } from "@agentick/spec";
 import type { ContentBlock, ExecutionTarget, StandardSchemaV1 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -63,7 +64,7 @@ async function mkSession(initialKnobs?: Readonly<Record<string, unknown>>) {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end",
         },
       },

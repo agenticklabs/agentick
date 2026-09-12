@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { TaskRecord } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { stubStoreCtx } from "@agentick/store";
 import { drainRejection } from "@agentick/utils/testing";
 
@@ -233,7 +234,7 @@ describe("TasksHarness — interrupted on hydration (ADR 68)", () => {
       executorKind: "in-process",
       detached: false,
       ttl: null,
-      result: [{ type: "text", text: "prior" }],
+      result: [blocks.text("prior")],
       createdAt: now - 10_000,
       updatedAt: now - 9_000,
     };
@@ -243,7 +244,7 @@ describe("TasksHarness — interrupted on hydration (ADR 68)", () => {
     try {
       await harness.hydrated;
       expect(harness.status("task:done")).toBe("completed");
-      expect(await harness.result("task:done")).toEqual([{ type: "text", text: "prior" }]);
+      expect(await harness.result("task:done")).toEqual([blocks.text("prior")]);
     } finally {
       await harness.close();
     }

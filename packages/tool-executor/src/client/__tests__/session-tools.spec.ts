@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ToolInfo, WireMethod, WireParams } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { makeSessionHandle } from "@agentick/client-core";
 import { waitFor } from "@agentick/utils/testing";
 
@@ -24,7 +25,7 @@ function fakeInternalClient(calls: Array<{ method: WireMethod; params: unknown }
     async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
       calls.push({ method, params });
       if (method === "session/list_tools") return { tools: TOOLS };
-      if (method === "session/dispatch") return { content: [{ type: "text", text: "ok" }] };
+      if (method === "session/dispatch") return { content: [blocks.text("ok")] };
       return null;
     },
     // Minimal SubscriptionStream double — the `clientToolCalls` slot opens one on
@@ -65,7 +66,7 @@ describe("session.tools (ADR 87 registrant)", () => {
 
     const out = await session.tools.dispatch("echo", { x: 1 });
 
-    expect(out).toEqual([{ type: "text", text: "ok" }]);
+    expect(out).toEqual([blocks.text("ok")]);
     const dispatch = calls.find((c) => c.method === "session/dispatch");
     expect(dispatch?.params).toEqual({ sessionId: "s1", tool: "echo", input: { x: 1 } });
   });

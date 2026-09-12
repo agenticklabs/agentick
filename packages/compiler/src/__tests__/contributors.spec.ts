@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { StandardSchemaV1 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   createElementInstance,
@@ -254,14 +255,14 @@ describe("block contributors — jsx-drift fields land", () => {
       el("message", { role: "user" }, [el("about", {}, [createTextInstance("just words")])]),
     );
     const first = tree.context.entries[0]!.content[0];
-    expect(first).toMatchObject({ type: "text", text: "just words" });
+    expect(first).toMatchObject(blocks.text("just words"));
   });
 
   it("media forwards shared BaseContentBlock fields (metadata / providerMetadata)", () => {
     const { tree } = run(
       el("message", { role: "user" }, [
         el("image", {
-          source: { type: "url", url: "http://img" },
+          source: blocks.source.url("http://img"),
           altText: "alt",
           metadata: { k: 1 },
           providerMetadata: { anthropic: { cacheControl: { type: "ephemeral" } } },

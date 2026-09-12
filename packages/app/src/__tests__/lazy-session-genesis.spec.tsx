@@ -17,6 +17,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemorySessionStore } from "@agentick/session";
 import type { ExecutionTarget, SessionStore } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -43,7 +44,7 @@ async function mkApp(store: SessionStore) {
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       },

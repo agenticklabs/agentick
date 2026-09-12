@@ -31,6 +31,7 @@ import {
 import { DefaultOAuthProvider } from "../oauth/index.js";
 import { deriveTestContext } from "@agentick/runtime/testing";
 import type { CompletionContext } from "../protocol/completions.js";
+import * as blocks from "@agentick/spec/blocks";
 
 /**
  * A full {@link CompletionContext} for the builder tests (ADR 91 §2 —
@@ -102,13 +103,13 @@ describe("toolError / toolResult / toMCPResult", () => {
   it("toMCPResult narrows the agentick union onto the wire (via toWireContent)", () => {
     const r = toMCPResult({
       content: [
-        { type: "text", text: "hi" },
-        { type: "image", source: { type: "base64", data: "abc", mimeType: "image/jpeg" } },
-        { type: "json", data: { x: 1 } },
+        blocks.text("hi"),
+        blocks.image(blocks.source.base64("abc", "image/jpeg")),
+        blocks.json({ x: 1 }),
       ],
     });
     expect(r.content).toHaveLength(3);
-    expect(r.content[0]).toEqual({ type: "text", text: "hi" });
+    expect(r.content[0]).toEqual(blocks.text("hi"));
     expect(r.content[1]).toEqual({ type: "image", data: "abc", mimeType: "image/jpeg" });
     // No wire kind for `json` — fenced text naming what was projected.
     expect((r.content[2] as { type: string; text: string }).type).toBe("text");

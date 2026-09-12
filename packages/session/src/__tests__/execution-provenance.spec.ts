@@ -17,6 +17,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ExecutionTarget, SessionMessage, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 
 import { SessionHarness } from "../harness.js";
@@ -43,7 +44,7 @@ async function mkSession(sessionId: string) {
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
       },
     },
@@ -111,7 +112,7 @@ describe("execution provenance on a user turn", () => {
 
     await session.appendEntry({
       sessionId: "prov-3",
-      entry: { role: "user", content: [{ type: "text", text: "seed" }] },
+      entry: { role: "user", content: [blocks.text("seed")] },
     });
 
     const user = messages(session.timeline.read().entries).find((m) => m.role === "user");

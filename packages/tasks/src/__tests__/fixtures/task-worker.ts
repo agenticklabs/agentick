@@ -11,10 +11,11 @@
 
 import { registerTaskHandler, runTaskWorker } from "@agentick/tasks";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 // `echo` — returns its input as a text content block. Round-trip proof.
 registerTaskHandler<unknown, readonly ContentBlock[]>("echo", (_ctx, input) => [
-  { type: "text", text: String(input) },
+  blocks.text(String(input)),
 ]);
 
 // `roundtrip` — echoes its `input` back as the result. With the executor's
@@ -28,7 +29,7 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("progress", async (ctx) =>
   ctx.onProgress({ progress: 1, total: 3 });
   ctx.onProgress({ progress: 2, total: 3 });
   ctx.onProgress({ progress: 3, total: 3 });
-  return [{ type: "text", text: "progress-done" }];
+  return [blocks.text("progress-done")];
 });
 
 // `thrower` — fails with a reason.
@@ -45,7 +46,7 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("slow", async (ctx) => {
     }
     ctx.signal.addEventListener("abort", () => reject(new Error("aborted")));
   });
-  return [{ type: "text", text: "should-not-reach" }];
+  return [blocks.text("should-not-reach")];
 });
 
 // `awaits-input` — pauses on an EXTERNAL input via `ctx.awaitingInput`,
@@ -69,7 +70,7 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("awaits-input", async (ctx
     process.on("message", onMessage);
   });
   await ctx.awaitingInput(released, { message: "need input" });
-  return [{ type: "text", text: "input-provided" }];
+  return [blocks.text("input-provided")];
 });
 
 // `hang` — ignores the signal and never resolves. Forces the SIGKILL
@@ -97,7 +98,7 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("asks-approval", async (ct
 // rethrows child-side → the task fails with that reason).
 registerTaskHandler<unknown, readonly ContentBlock[]>("asks-text", async (ctx) => {
   const answer = await ctx.elicit.text("Your name?");
-  return [{ type: "text", text: answer }];
+  return [blocks.text(answer)];
 });
 
 // `elicit-live-schema` — deliberately hits the raw `form(liveSchema)` path
@@ -116,7 +117,7 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("elicit-live-schema", asyn
     form: (schema: unknown) => Promise<unknown>;
   };
   await rawForm.form(liveSchema);
-  return [{ type: "text", text: "should-not-reach" }];
+  return [blocks.text("should-not-reach")];
 });
 
 runTaskWorker();

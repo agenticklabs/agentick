@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 
 import { StreamAccumulator } from "../stream-accumulator.js";
+import { reasoning as reasoningBlock, text as textBlock } from "@agentick/spec/blocks";
 
 /** Drive the accumulator the way an adapter does: open a block, fill it, close it. */
 function text(accum: StreamAccumulator, blockIndex: number, delta: string): void {
@@ -48,8 +49,8 @@ describe("toContentBlocks", () => {
     text(accum, 1, "Here are the numbers.");
 
     expect(accum.toContentBlocks()).toEqual([
-      { type: "reasoning", text: "the user wants last quarter" },
-      { type: "text", text: "Here are the numbers." },
+      reasoningBlock("the user wants last quarter"),
+      textBlock("Here are the numbers."),
     ]);
   });
 
@@ -64,7 +65,7 @@ describe("toContentBlocks", () => {
     const blocks = accum.toContentBlocks();
     const textBlocks = blocks.filter((b) => b.type === "text");
     expect(textBlocks).toHaveLength(1);
-    expect(textBlocks[0]).toEqual({ type: "text", text: "The last query returned 767 rows." });
+    expect(textBlocks[0]).toEqual(textBlock("The last query returned 767 rows."));
   });
 
   it("keeps one block per text block instead of concatenating", () => {
@@ -73,8 +74,8 @@ describe("toContentBlocks", () => {
     text(accum, 1, "Found it.");
 
     expect(accum.toContentBlocks()).toEqual([
-      { type: "text", text: "Let me check that." },
-      { type: "text", text: "Found it." },
+      textBlock("Let me check that."),
+      textBlock("Found it."),
     ]);
   });
 
@@ -118,7 +119,7 @@ describe("toContentBlocks", () => {
     accum.apply({ type: "reasoning-end", blockIndex: 1 });
     text(accum, 2, "Real content.");
 
-    expect(accum.toContentBlocks()).toEqual([{ type: "text", text: "Real content." }]);
+    expect(accum.toContentBlocks()).toEqual([textBlock("Real content.")]);
   });
 
   it("leaves totalText / totalReasoning flattening the whole channel", () => {

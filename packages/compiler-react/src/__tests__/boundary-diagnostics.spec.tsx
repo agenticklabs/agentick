@@ -5,6 +5,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "../harness/compiler-harness.js";
 import { fakeBridges } from "@agentick/compiler";
 import type { TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { useData } from "../react/hooks/use-data.js";
 
 async function makeHarness(scope = `bd-${Math.random()}`) {
@@ -106,7 +107,7 @@ describe("error-boundary-active diagnostic", () => {
     // behavior of error boundaries.
     const m = tree.context.entries[0]!;
     if (m.kind !== "message") throw new Error("expected message");
-    expect(m.content).toEqual([{ type: "text", text: "[knowledge base unavailable]" }]);
+    expect(m.content).toEqual([blocks.text("[knowledge base unavailable]")]);
   });
 
   it("no ErrorBoundary in the tree → render error → RenderFailed (no diagnostic)", async () => {

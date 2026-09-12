@@ -20,6 +20,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 import type { ExecutionTarget, SessionRecord } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 import { InMemorySessionStore } from "../session-store.js";
@@ -60,7 +61,7 @@ async function mkSession(
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       },

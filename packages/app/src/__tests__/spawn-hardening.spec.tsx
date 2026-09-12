@@ -23,6 +23,7 @@ import type {
   SessionExecutionHandle,
   SessionHarnessProtocol,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { createApp } from "../react.js";
@@ -89,7 +90,7 @@ const calcScript = [
   {
     result: {
       specVersion: "2026-05-08" as const,
-      output: [{ type: "tool_use" as const, toolUseId: "tc-1", name: "calculator", input: {} }],
+      output: [blocks.toolUse("tc-1", "calculator", {})],
       stopReason: "tool_use" as const,
       toolCalls: [{ id: "tc-1", name: "calculator", input: { expression: "47 * 23" } }],
       usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
@@ -98,7 +99,7 @@ const calcScript = [
   {
     result: {
       specVersion: "2026-05-08" as const,
-      output: [{ type: "text" as const, text: "47 × 23 = 1081." }],
+      output: [blocks.text("47 × 23 = 1081.")],
       stopReason: "end" as const,
       usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
     },
@@ -109,7 +110,7 @@ const gateScript = [
   {
     result: {
       specVersion: "2026-05-08" as const,
-      output: [{ type: "tool_use" as const, toolUseId: "tc-1", name: "gate", input: {} }],
+      output: [blocks.toolUse("tc-1", "gate", {})],
       stopReason: "tool_use" as const,
       toolCalls: [{ id: "tc-1", name: "gate", input: {} }],
       usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
@@ -118,7 +119,7 @@ const gateScript = [
   {
     result: {
       specVersion: "2026-05-08" as const,
-      output: [{ type: "text" as const, text: "GATED-DONE" }],
+      output: [blocks.text("GATED-DONE")],
       stopReason: "end" as const,
       usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
     },
@@ -126,7 +127,7 @@ const gateScript = [
 ];
 
 const calcHandlers = new Map<string, (input: unknown) => Promise<ContentBlock[]>>([
-  ["handlers/calculator", async () => [{ type: "text", text: "1081" }]],
+  ["handlers/calculator", async () => [blocks.text("1081")]],
 ]);
 
 /** Build a standalone app (its own substrate) rooted on `MinimalAgent`. */
@@ -331,7 +332,7 @@ describe("SP6 — parent teardown cascades to children", () => {
         async () => {
           entered();
           await gate;
-          return [{ type: "text", text: "released" }];
+          return [blocks.text("released")];
         },
       ],
     ]);

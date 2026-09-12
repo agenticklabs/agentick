@@ -29,6 +29,7 @@ import type {
   SessionStatus,
   SessionStatusFrame,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { SessionHarness } from "../harness.js";
@@ -60,7 +61,7 @@ async function mkSession(holdUntil?: Promise<void>, failing = false) {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end",
         },
         ...(holdUntil !== undefined ? { holdUntil } : {}),

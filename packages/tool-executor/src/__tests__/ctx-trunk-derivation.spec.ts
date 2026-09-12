@@ -17,6 +17,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 import type { TestHarnessBundle } from "../testing/index.js";
@@ -74,7 +75,7 @@ describe("tool dispatch ctx — trunk derivation (ADR 91)", () => {
           handlerRef: "h.trunk-tool",
           handler: (_input, { ctx }) => {
             seen = ctx;
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],

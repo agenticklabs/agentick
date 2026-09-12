@@ -27,6 +27,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ProtocolEvent, TimelineEntry, TimelineStore } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { MemoryTimelineStore } from "../store.js";
 import { TimelineHarness, type TimelineHarnessOptions } from "../harness.js";
@@ -40,7 +41,7 @@ const SCOPE_ID = `${SESSION_ID}:timeline`;
 
 const entry = (id: string): TimelineEntry => ({
   kind: "message",
-  message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+  message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
 });
 
 const ids = (page: TimelineHistoryPage): string[] =>

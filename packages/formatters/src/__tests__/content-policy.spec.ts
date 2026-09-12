@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SemanticContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import {
   textOnlyFormatter,
   summarizedFormatter,
@@ -15,7 +16,7 @@ import {
 } from "../index.js";
 
 function text(t: string): SemanticContentBlock {
-  return { type: "text", text: t } as SemanticContentBlock;
+  return blocks.text(t) as SemanticContentBlock;
 }
 function toolUse(name: string, input: Record<string, unknown>): SemanticContentBlock {
   return { type: "tool_use", toolUseId: `tu-${name}`, name, input } as SemanticContentBlock;
@@ -36,16 +37,13 @@ describe("textOnlyFormatter", () => {
       toolResult("file listing"),
       text("done"),
     ]);
-    expect(out).toEqual([
-      { type: "text", text: "hello" },
-      { type: "text", text: "done" },
-    ]);
+    expect(out).toEqual([blocks.text("hello"), blocks.text("done")]);
   });
 
   it("keeps media blocks", () => {
     const img = {
       type: "image",
-      source: { type: "url", url: "http://x/y.png" },
+      source: blocks.source.url("http://x/y.png"),
     } as SemanticContentBlock;
     const out = textOnlyFormatter([img, toolUse("read_file", { path: "a" })]);
     expect(out).toEqual([img]);
@@ -59,20 +57,17 @@ describe("summarizedFormatter", () => {
       toolUse("bash", { command: "npm test" }),
       toolResult("all passed"),
     ]);
-    expect(out).toEqual([
-      { type: "text", text: "working" },
-      { type: "text", text: "[Ran: npm test]" },
-    ]);
+    expect(out).toEqual([blocks.text("working"), blocks.text("[Ran: npm test]")]);
   });
 
   it("summarizes known file tools", () => {
     const out = summarizedFormatter([toolUse("read_file", { path: "/etc/hosts" })]);
-    expect(out).toEqual([{ type: "text", text: "[Read /etc/hosts]" }]);
+    expect(out).toEqual([blocks.text("[Read /etc/hosts]")]);
   });
 
   it("falls back to a generic summary for unknown tools", () => {
     const out = summarizedFormatter([toolUse("teleport", { to: "mars" })]);
-    expect(out).toEqual([{ type: "text", text: "[Used teleport]" }]);
+    expect(out).toEqual([blocks.text("[Used teleport]")]);
   });
 });
 
@@ -82,6 +77,6 @@ describe("createToolSummarizer / createSummarizedFormatter", () => {
       createToolSummarizer({ deploy: (i) => `[Deploying to ${i.env}]` }),
     );
     const out = fmt([toolUse("deploy", { env: "prod" })]);
-    expect(out).toEqual([{ type: "text", text: "[Deploying to prod]" }]);
+    expect(out).toEqual([blocks.text("[Deploying to prod]")]);
   });
 });

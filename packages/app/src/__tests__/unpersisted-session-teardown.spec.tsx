@@ -14,6 +14,7 @@ import { fakeCompiler } from "@agentick/compiler/testing";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemorySessionStore } from "@agentick/session";
+import * as blocks from "@agentick/spec/blocks";
 
 const PlainAgent = () => null;
 
@@ -25,7 +26,7 @@ async function mk() {
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
       },
     },

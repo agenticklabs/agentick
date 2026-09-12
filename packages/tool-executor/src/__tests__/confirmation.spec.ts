@@ -26,6 +26,7 @@ import type { LocalEventBus } from "@agentick/runtime";
 
 import type { DispatchInput, ProtocolEvent, ToolRegistration } from "@agentick/spec";
 import { ToolConfirmationTimeoutError, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -101,7 +102,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
           handlerRef: "h.delete-file",
           handler: async () => {
             handlerRan++;
-            return [{ type: "text", text: "deleted" }];
+            return [blocks.text("deleted")];
           },
         },
       ],
@@ -131,7 +132,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
           handlerRef: "h.delete-file",
           handler: async () => {
             handlerRan++;
-            return [{ type: "text", text: "deleted" }];
+            return [blocks.text("deleted")];
           },
         },
       ],
@@ -162,7 +163,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
           handlerRef: "h.delete-file",
           handler: async () => {
             handlerRan++;
-            return [{ type: "text", text: "deleted" }];
+            return [blocks.text("deleted")];
           },
         },
       ],
@@ -192,7 +193,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
           handlerRef: "h.delete-file",
           handler: async (input) => {
             receivedInput = input;
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -217,7 +218,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
       handlers: [
         {
           handlerRef: "h.delete-file",
-          handler: async () => [{ type: "text", text: "never" }],
+          handler: async () => [blocks.text("never")],
         },
       ],
     });
@@ -241,7 +242,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
       handlers: [
         {
           handlerRef: "h.delete-file",
-          handler: async () => [{ type: "text", text: "never" }],
+          handler: async () => [blocks.text("never")],
         },
       ],
     });
@@ -257,7 +258,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
       handlers: [
         {
           handlerRef: "h.delete-file",
-          handler: async () => [{ type: "text", text: "ok" }],
+          handler: async () => [blocks.text("ok")],
         },
       ],
     });

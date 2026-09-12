@@ -57,6 +57,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock, ExecutionTarget, LanguageModelExecutor } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { defineEval } from "../index.js";
 
@@ -111,7 +112,7 @@ function mkCompliantExecutor(): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "tool_use", toolUseId: "s1", name: "search", input: { q: "topic" } }],
+            output: [blocks.toolUse("s1", "search", { q: "topic" })],
             stopReason: "tool_use",
             toolCalls: [{ id: "s1", name: "search", input: { q: "topic" } }],
             usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
@@ -145,7 +146,7 @@ function mkCompliantExecutor(): FakeLanguageModelExecutor {
 }
 
 const searchHandlers = new Map<string, (input: unknown) => Promise<ContentBlock[]>>([
-  ["handlers/search", async () => [{ type: "text", text: "result: X" }]],
+  ["handlers/search", async () => [blocks.text("result: X")]],
 ]);
 
 type Overrides = { executor?: LanguageModelExecutor; target?: ExecutionTarget };

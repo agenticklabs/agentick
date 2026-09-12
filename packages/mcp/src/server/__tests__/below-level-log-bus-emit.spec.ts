@@ -26,6 +26,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, LogEventPayload, ProtocolEvent, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema, logEventName, logEventQuery } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { inMemoryServerTransport, McpServerHarness, type ToolHandlerResolver } from "../index.js";
 
@@ -45,7 +46,7 @@ const logResolver: ToolHandlerResolver = (ref) => {
   return async (_input, ctx) => {
     ctx.log("debug", { msg: "below-level-debug" }, "diag");
     ctx.log("error", { msg: "at-level-error" }, "diag");
-    const content: ContentBlock[] = [{ type: "text", text: "done" }];
+    const content: ContentBlock[] = [blocks.text("done")];
     return { kind: "inline", content };
   };
 };

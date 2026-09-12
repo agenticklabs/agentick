@@ -33,6 +33,7 @@ import { fakeTasks } from "@agentick/tasks/testing";
 import { stubStoreCtx } from "@agentick/store";
 
 import { postgresTaskStore } from "../store.ts";
+import { text } from "@agentick/spec/blocks";
 
 const url = process.env.TASKS_PG_URL;
 const pool = url ? new Pool({ connectionString: url }) : undefined;
@@ -121,7 +122,7 @@ describe.skipIf(pool === undefined)("postgresTaskStore — cross-process resume 
   it("terminal adoption across restart returns the stored result from pg", async () => {
     const table = freshTable();
     const sessionId = "resume-terminal";
-    const blocks = [{ type: "text", text: "done-across-restart" }] as const;
+    const blocks = [text("done-across-restart")] as const;
 
     // ── "old process": submit a task that completes. ──
     const store1 = postgresTaskStore({ executor: pool!, table, migrate: "create-if-absent" });

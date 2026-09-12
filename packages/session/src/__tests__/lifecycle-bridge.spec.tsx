@@ -48,6 +48,7 @@ import type {
   TickResult,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -76,7 +77,7 @@ function toolThenReplyExec() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "calling echo" }],
+            output: [blocks.text("calling echo")],
             toolCalls: [{ id: "tc1", name: "echo", input: {} }],
             stopReason: "tool_use",
             usage: { inputTokens: 250, outputTokens: 10, totalTokens: 260 },
@@ -85,7 +86,7 @@ function toolThenReplyExec() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "done" }],
+            output: [blocks.text("done")],
             stopReason: "end",
             usage: { inputTokens: 250, outputTokens: 10, totalTokens: 260 },
           },
@@ -142,7 +143,7 @@ describe("lifecycle bridge — real loop drives the WHOLE hook family (#206 / AD
     const compiler = new CompilerHarness("lc-r", journal, bus, inbox);
     const loop = new LoopExecutorHarness("lc-l", journal, bus, inbox);
     const resolver = new InMemoryHandlerResolver();
-    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+    resolver.register("h.echo", async () => [blocks.text("ok")]);
     const elicitation = new ElicitationHarness("lc-t:elicitation", journal, bus, inbox);
     const tools = new ToolExecutorHarness("lc-t", journal, bus, inbox, {
       handlerResolver: resolver,
@@ -265,7 +266,7 @@ async function mkSession(
 ): Promise<{ session: SessionHarness; tools: ToolExecutorHarness }> {
   const { journal, bus, inbox } = stack;
   const resolver = new InMemoryHandlerResolver();
-  resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+  resolver.register("h.echo", async () => [blocks.text("ok")]);
   resolver.register("h.boom", async () => {
     throw new Error("handler exploded");
   });
@@ -437,7 +438,7 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "done" }],
+              output: [blocks.text("done")],
               stopReason: "end",
               usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
             },
@@ -602,7 +603,7 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
         scripted: {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "never" }],
+            output: [blocks.text("never")],
             stopReason: "end",
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           },
@@ -664,7 +665,7 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "calling boom" }],
+              output: [blocks.text("calling boom")],
               toolCalls: [{ id: "tc-boom", name: "boom", input: {} }],
               stopReason: "tool_use",
               usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -673,7 +674,7 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "done" }],
+              output: [blocks.text("done")],
               stopReason: "end",
               usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
             },

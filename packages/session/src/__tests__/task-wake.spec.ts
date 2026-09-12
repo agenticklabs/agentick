@@ -23,6 +23,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import type { ExecutionTarget, ToolCall, ToolRegistration, TimelineEntry } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor, waitForStable } from "@agentick/utils/testing";
 
 import { SessionHarness } from "../harness.js";
@@ -37,7 +38,7 @@ const target: ExecutionTarget = {
 
 const okReply = () => ({
   specVersion: "2026-05-08",
-  output: [{ type: "text" as const, text: "ok" }],
+  output: [blocks.text("ok")],
   stopReason: "end" as const,
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 });
@@ -126,7 +127,7 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
 
     // Idle session, backgrounded task with wake. `handle.result` is the
     // ORIGINATOR await — it does NOT consume the wake.
-    const handle = session.tasks.submit(async () => [{ type: "text", text: "SECRET-OUTPUT" }], {
+    const handle = session.tasks.submit(async () => [blocks.text("SECRET-OUTPUT")], {
       wake: true,
     });
     await handle.result;
@@ -160,7 +161,7 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
     const { session } = await mkSession();
     close = () => session.close();
 
-    const handle = session.tasks.submit(async () => [{ type: "text", text: "x" }], { wake: true });
+    const handle = session.tasks.submit(async () => [blocks.text("x")], { wake: true });
     // Observe in-band (the task_await path) — consumes the wake.
     await session.tasks.result(handle.taskId);
 
@@ -182,7 +183,7 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
       {
         result: {
           ...okReply(),
-          output: [{ type: "text" as const, text: "" }],
+          output: [blocks.text("")],
           toolCalls: [blockerCall],
           stopReason: "tool_use" as unknown as "end",
         },
@@ -206,7 +207,7 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
       register: (r) =>
         r.register("h.blocker", async () => {
           await toolGate;
-          return [{ type: "text", text: "tool-done" }];
+          return [blocks.text("tool-done")];
         }),
     });
     close = () => session.close();
@@ -216,7 +217,7 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
     await waitFor(() => session.hasInFlightExecution === true);
 
     // Complete a backgrounded wake task WHILE the execution runs.
-    const taskHandle = session.tasks.submit(async () => [{ type: "text", text: "x" }], {
+    const taskHandle = session.tasks.submit(async () => [blocks.text("x")], {
       wake: true,
     });
     await taskHandle.result;

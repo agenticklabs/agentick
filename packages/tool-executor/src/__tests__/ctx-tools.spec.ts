@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -35,12 +36,12 @@ describe("ToolExecutorHarness — ctx.tools (#273)", () => {
           handler: async (_input, { ctx }) => {
             const [block] = await ctx.tools!.dispatch("inner", { from: "outer" });
             const text = block?.type === "text" ? block.text : "no text block";
-            return [{ type: "text", text: `inner said: ${text}` }];
+            return [blocks.text(`inner said: ${text}`)];
           },
         },
         {
           handlerRef: "h.inner",
-          handler: async (input) => [{ type: "text", text: `echo:${JSON.stringify(input)}` }],
+          handler: async (input) => [blocks.text(`echo:${JSON.stringify(input)}`)],
         },
       ],
     });
@@ -66,14 +67,14 @@ describe("ToolExecutorHarness — ctx.tools (#273)", () => {
           handlerRef: "h.outer",
           handler: async (_input, { ctx }) => {
             await expect(ctx.tools!.dispatch("model-only", {})).rejects.toThrow(/not exposed/);
-            return [{ type: "text", text: "gate held" }];
+            return [blocks.text("gate held")];
           },
         },
         {
           handlerRef: "h.model-only",
           handler: async () => {
             innerRan = true;
-            return [{ type: "text", text: "should never run" }];
+            return [blocks.text("should never run")];
           },
         },
       ],
@@ -102,10 +103,10 @@ describe("ToolExecutorHarness — ctx.tools (#273)", () => {
               .tools!.list()
               .map((info) => info.name)
               .sort();
-            return [{ type: "text", text: names.join(",") }];
+            return [blocks.text(names.join(","))];
           },
         },
-        { handlerRef: "h.inner", handler: async () => [{ type: "text", text: "unused" }] },
+        { handlerRef: "h.inner", handler: async () => [blocks.text("unused")] },
       ],
     });
 

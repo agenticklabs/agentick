@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { InMemoryHandlerResolver } from "../handler-resolver.js";
 import { permissiveValidator } from "../validator.js";
 import type { Validator } from "../types.js";
+import * as blocks from "@agentick/spec/blocks";
 
 describe("InMemoryHandlerResolver", () => {
   it("register + resolve round-trip", () => {
     const r = new InMemoryHandlerResolver();
-    const handler = async () => [{ type: "text" as const, text: "ok" }];
+    const handler = async () => [blocks.text("ok")];
     r.register("h.echo", handler);
     const entry = r.resolve("h.echo");
     expect(entry?.handler).toBe(handler);
@@ -28,7 +29,7 @@ describe("InMemoryHandlerResolver", () => {
   it("re-registering overwrites (last-writer-wins)", () => {
     const r = new InMemoryHandlerResolver();
     const first = async () => [];
-    const second = async () => [{ type: "text" as const, text: "v2" }];
+    const second = async () => [blocks.text("v2")];
     r.register("h.same", first);
     r.register("h.same", second);
     expect(r.resolve("h.same")?.handler).toBe(second);

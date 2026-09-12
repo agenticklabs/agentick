@@ -28,6 +28,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildElicitSugar } from "@agentick/elicitation";
 import { DetachedTaskCannotElicitError } from "@agentick/spec";
 import type { ElicitationResult, Unsubscribe } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import type { EscalationEnvelopePayload } from "@agentick/runtime";
 import { drainRejection } from "@agentick/utils/testing";
 
@@ -68,7 +69,7 @@ describe("TasksHarness — escalation origin guards (ADR 69)", () => {
         // A detached task cannot pause on client input — this must throw,
         // never await a promise that would strand the task.
         await ctx.awaitingInput(new Promise<string>(() => {}), { message: "need input" });
-        return [{ type: "text", text: "unreachable" }];
+        return [blocks.text("unreachable")];
       },
       { detached: true },
     );
@@ -89,7 +90,7 @@ describe("TasksHarness — escalation origin guards (ADR 69)", () => {
 
     const handle = bundle.harness.submit(async (ctx) => {
       const answer = await ctx.elicit.text("Approve?");
-      return [{ type: "text", text: answer }];
+      return [blocks.text(answer)];
     });
 
     const rejection = await drainRejection(handle.result);
@@ -107,7 +108,7 @@ describe("TasksHarness — escalation origin guards (ADR 69)", () => {
     const handle = bundle.harness.submit(async (ctx) => {
       probedForm = ctx.elicit.canDoForm();
       probedUrl = ctx.elicit.canDoUrl();
-      return [{ type: "text", text: "done" }];
+      return [blocks.text("done")];
     });
 
     await handle.result;
@@ -139,8 +140,8 @@ describe("TasksHarness — escalation routes per ORIGINATING session (app-scoped
       { scope: { sessionId: "sess-B" } },
     );
 
-    expect(await hA.result).toEqual([{ type: "text", text: "A-yes" }]);
-    expect(await hB.result).toEqual([{ type: "text", text: "B-no" }]);
+    expect(await hA.result).toEqual([blocks.text("A-yes")]);
+    expect(await hB.result).toEqual([blocks.text("B-no")]);
 
     // Each escalation reached ONLY its originating session's terminal, and the
     // lineage origin is stamped from the record's scope — not the harness's.

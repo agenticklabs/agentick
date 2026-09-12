@@ -41,6 +41,7 @@ import type {
   SessionRecord,
   UsageStats,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 import { InMemorySessionStore } from "../session-store.js";
@@ -103,7 +104,7 @@ function scriptedLoop(
           tickId: `tick-${i++}`,
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
             usage: tick.usage,
             ...(tick.cost !== undefined ? { cost: tick.cost } : {}),
@@ -125,7 +126,7 @@ function scriptedLoop(
             usage(0, 0),
           ),
           stopReason: "end",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           toolResults: [],
           ...report,
         },
@@ -161,7 +162,7 @@ async function mkSession(
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage: usage(1, 1),
       },
@@ -518,7 +519,7 @@ async function mkRealLoopSession(
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage: usage(1_000_000, 1_000_000),
       },

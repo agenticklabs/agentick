@@ -17,6 +17,7 @@ import { waitFor } from "@agentick/utils/testing";
 
 import { defineConnector } from "@agentick/connector";
 import type { ConnectorSpec } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { connectorProbe, type ConnectorProbe } from "@agentick/connector/testing";
 
 function Agent() {
@@ -76,7 +77,7 @@ describe("connector — inbound", () => {
   it("emit → session.send runs and the user message carries metadata.source", async () => {
     const appended: ProtocolEvent[] = [];
     const probe = connectorProbe();
-    const { gateway } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
+    const { gateway } = await buildStack(probe, {}, [blocks.text("reply")]);
     const sub = (
       gateway as unknown as { events: (f: object) => AsyncIterable<ProtocolEvent> }
     ).events({
@@ -115,7 +116,7 @@ describe("connector — one-way ingress (no deliver)", () => {
     expect(probe.spec.deliver).toBeUndefined();
     expect(probe.spec.confirm).toBeUndefined();
 
-    const { app } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
+    const { app } = await buildStack(probe, {}, [blocks.text("reply")]);
     probe.emit({ messages: "webhook fired" });
 
     await waitFor(() => (app.getSession("connector:test") ? true : undefined), {
@@ -129,7 +130,7 @@ describe("connector — one-way ingress (no deliver)", () => {
 describe("connector — outbound (optional deliver)", () => {
   it("hands the agent's raw output to a spec that implements deliver", async () => {
     const probe = connectorProbe();
-    await buildStack(probe, {}, [{ type: "text", text: "the answer is 42" }]);
+    await buildStack(probe, {}, [blocks.text("the answer is 42")]);
 
     probe.emit({ messages: "what is the answer" });
     await waitFor(() => (probe.delivered.length > 0 ? true : undefined), {
@@ -139,13 +140,13 @@ describe("connector — outbound (optional deliver)", () => {
     const delivery = probe.delivered[0]!;
     expect(delivery.response).toContain("the answer is 42");
     expect(delivery.output).toHaveLength(1);
-    expect(delivery.output[0]).toMatchObject({ type: "text", text: "the answer is 42" });
+    expect(delivery.output[0]).toMatchObject(blocks.text("the answer is 42"));
   });
 });
 
 describe("connector — confirmations (optional)", () => {
   async function confirmVia(probe: ConnectorProbe, replyText: string): Promise<boolean> {
-    const { app } = await buildStack(probe, {}, [{ type: "text", text: "ok" }]);
+    const { app } = await buildStack(probe, {}, [blocks.text("ok")]);
     probe.emit({ messages: "start" });
     await waitFor(() => (app.getSession("connector:test") ? true : undefined), {
       description: "connector session exists",
@@ -178,7 +179,7 @@ describe("connector — confirmations (optional)", () => {
 describe("connector — teardown", () => {
   it("gateway close runs the teardown returned by start", async () => {
     const probe = connectorProbe();
-    const { gateway } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
+    const { gateway } = await buildStack(probe, {}, [blocks.text("reply")]);
     expect(probe.stopped).toBe(false);
     await gateway.close();
     gateways.pop();
@@ -189,7 +190,7 @@ describe("connector — teardown", () => {
 describe("connector — the gateway policy seam (ADR 104 §5)", () => {
   it("gateway.guard({ connectorsInbound }) vetoes an inbound before it reaches the app", async () => {
     const probe = connectorProbe();
-    const { gateway } = await buildStack(probe, {}, [{ type: "text", text: "reply" }]);
+    const { gateway } = await buildStack(probe, {}, [blocks.text("reply")]);
 
     const off = gateway.guard({
       connectorsInbound: (input) =>
@@ -216,7 +217,7 @@ describe("connector — spec-level session/send policy (layered under the event)
     const { app } = await buildStack(
       probe,
       { session: { title: "Channel chat", metadata: { channel: "probe" } } },
-      [{ type: "text", text: "reply" }],
+      [blocks.text("reply")],
     );
 
     probe.emit({

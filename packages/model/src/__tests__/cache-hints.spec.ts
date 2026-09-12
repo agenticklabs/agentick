@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RenderedTree } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { buildMessages } from "../canonical-projection.js";
 
@@ -22,7 +23,7 @@ describe("buildMessages — CacheHint carry (#185)", () => {
           kind: "message",
           id: "m1",
           role: "user",
-          content: [{ type: "text", text: "hi" }],
+          content: [blocks.text("hi")],
           metadata: { cache: { ttl: "5m" } },
         },
       ]),
@@ -42,7 +43,7 @@ describe("buildMessages — CacheHint carry (#185)", () => {
           role: "system",
           content: [
             { type: "text", text: "STABLE PREFIX", cache: { ttl: "1h" } },
-            { type: "text", text: "volatile" },
+            blocks.text("volatile"),
           ],
         },
       ]),
@@ -64,9 +65,9 @@ describe("buildMessages — CacheHint carry (#185)", () => {
           kind: "message",
           role: "system",
           content: [
-            { type: "text", text: "A" },
-            { type: "image", source: { type: "url", url: "https://example.test/1.png" } },
-            { type: "text", text: "B" },
+            blocks.text("A"),
+            blocks.image(blocks.source.url("https://example.test/1.png")),
+            blocks.text("B"),
           ],
           metadata: { cache: { ttl: "5m" } },
         },
@@ -101,7 +102,7 @@ describe("buildMessages — adjacent text parts join at the wire", () => {
         },
       ]),
     );
-    expect(messages[0]!.content).toEqual([{ type: "text", text: "# A\nfirst\n\n# B\nsecond" }]);
+    expect(messages[0]!.content).toEqual([blocks.text("# A\nfirst\n\n# B\nsecond")]);
   });
 
   it("refuses to join across a cache hint — the breakpoint IS the boundary", () => {
@@ -114,7 +115,7 @@ describe("buildMessages — adjacent text parts join at the wire", () => {
           role: "system",
           content: [
             { type: "text", text: "# A\nfirst", cache: { ttl: "1h" } },
-            { type: "text", text: "# B\nsecond" },
+            blocks.text("# B\nsecond"),
           ],
         },
       ]),
@@ -133,9 +134,9 @@ describe("buildMessages — adjacent text parts join at the wire", () => {
           kind: "message",
           role: "user",
           content: [
-            { type: "text", text: "plain" },
+            blocks.text("plain"),
             { type: "text", text: "knobbed", providerMetadata: { anthropic: { x: 1 } } },
-            { type: "text", text: "plain again" },
+            blocks.text("plain again"),
           ],
         },
       ]),
@@ -154,10 +155,10 @@ describe("buildMessages — adjacent text parts join at the wire", () => {
           kind: "message",
           role: "user",
           content: [
-            { type: "text", text: "one" },
-            { type: "text", text: "two" },
-            { type: "image", source: { type: "url", url: "https://example.test/1.png" } },
-            { type: "text", text: "three" },
+            blocks.text("one"),
+            blocks.text("two"),
+            blocks.image(blocks.source.url("https://example.test/1.png")),
+            blocks.text("three"),
           ],
         },
       ]),
@@ -173,8 +174,8 @@ describe("buildMessages — adjacent text parts join at the wire", () => {
     const entry = {
       kind: "message" as const,
       role: "user",
-      content: [{ type: "text" as const, text: "hi" }],
+      content: [blocks.text("hi")],
     };
-    expect(buildMessages(tree([entry]))[0]!.content).toEqual([{ type: "text", text: "hi" }]);
+    expect(buildMessages(tree([entry]))[0]!.content).toEqual([blocks.text("hi")]);
   });
 });

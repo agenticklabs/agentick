@@ -37,6 +37,7 @@ import type {
   TimelineEntry,
 } from "@agentick/spec";
 import { BranchSourceEntryNotFoundError, relation } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 import { InMemorySessionStore } from "../session-store.js";
@@ -51,7 +52,7 @@ const target: ExecutionTarget = {
 function entry(id: string): TimelineEntry {
   return {
     kind: "message",
-    message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+    message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
   } as unknown as TimelineEntry;
 }
 
@@ -118,7 +119,7 @@ async function mkSession(id: string, db: Stores, opts: Options = {}): Promise<Se
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },

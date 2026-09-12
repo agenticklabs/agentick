@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import type { MessageEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { markdownFormatter, xmlFormatter } from "@agentick/formatters";
 import { createContainer } from "@agentick/compiler";
 import { createHostScope } from "@agentick/compiler";
@@ -203,7 +204,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
         text: "",
         sectionNode: {
           id: "s.wrap",
-          content: [{ type: "text", text: "wrapped text" }],
+          content: [blocks.text("wrapped text")],
           // The section's own dialect stamp — the same ref the entry carries,
           // because nothing inner was declared for the section itself.
           renderedWith: { id: "markdown", format: "markdown" },

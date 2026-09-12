@@ -22,6 +22,7 @@ import type {
   TimelineEntry,
   UsageStats,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -51,7 +52,7 @@ function crashedTimeline(): TimelineEntry[] {
       message: {
         id: "in-1",
         role: "user",
-        content: [{ type: "text", text: "remember: OPAL" }],
+        content: [blocks.text("remember: OPAL")],
         ts: 0,
         metadata: { executionId: CRASHED },
       },
@@ -61,7 +62,7 @@ function crashedTimeline(): TimelineEntry[] {
       message: {
         id: "as-1",
         role: "assistant",
-        content: [{ type: "text", text: "working on it" }],
+        content: [blocks.text("working on it")],
         ts: 0,
         metadata: { executionId: CRASHED, tickId: "tick-1", tickIndex: 1 },
       },
@@ -94,7 +95,7 @@ async function mkCrashedApp(decision: "resume" | "drop") {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "recovered" }],
+          output: [blocks.text("recovered")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },

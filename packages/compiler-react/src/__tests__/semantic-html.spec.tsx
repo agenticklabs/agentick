@@ -17,6 +17,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { CompilerHarness } from "../harness/compiler-harness.js";
 import { fakeBridges } from "@agentick/compiler";
+import * as blocks from "@agentick/spec/blocks";
 
 async function makeHarness() {
   const h = new CompilerHarness(
@@ -52,7 +53,7 @@ describe("semantic HTML — coalescing", () => {
       sessionId: "s",
     });
     const msg = getMessage(tree);
-    expect(msg.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(msg.content).toEqual([blocks.text("Hello world")]);
   });
 
   it("text + inline semantic folds into one TextBlock", async () => {
@@ -94,7 +95,7 @@ describe("semantic HTML — coalescing", () => {
         "Hello ",
         React.createElement("strong", null, "world"),
         React.createElement("image", {
-          source: { type: "url", url: "https://x.test/a.png" },
+          source: blocks.source.url("https://x.test/a.png"),
         }),
         "After.",
       ),
@@ -109,7 +110,7 @@ describe("semantic HTML — coalescing", () => {
     expect((msg.content[0] as { type: string }).type).toBe("text");
     expect((msg.content[0] as { text: string }).text).toBe("Hello **world**");
     expect((msg.content[1] as { type: string }).type).toBe("image");
-    expect(msg.content[2]).toEqual({ type: "text", text: "After." });
+    expect(msg.content[2]).toEqual(blocks.text("After."));
   });
 
   it("paragraph + emphasis renders with markdown line breaks", async () => {

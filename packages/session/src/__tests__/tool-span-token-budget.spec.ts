@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { LanguageModelMessage, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { repairToolSpans } from "@agentick/model";
 import { compactEntries } from "@agentick/timeline/react";
 
@@ -35,13 +36,10 @@ const ids = (entries: readonly MessageEntry[]): string[] => entries.map((e) => e
 
 /** A turn whose assistant half is far too fat to fit, and whose result is tiny. */
 const CONVERSATION: readonly MessageEntry[] = [
-  entry("u1", "user", [{ type: "text", text: filler(40) }]),
-  entry("a1", "assistant", [
-    { type: "text", text: filler(400) },
-    { type: "tool_use", toolUseId: "c1", name: "search", input: {} },
-  ]),
+  entry("u1", "user", [blocks.text(filler(40))]),
+  entry("a1", "assistant", [blocks.text(filler(400)), blocks.toolUse("c1", "search", {})]),
   entry("t1", "tool", [{ type: "tool_result", toolUseId: "c1", content: [] }]),
-  entry("a2", "assistant", [{ type: "text", text: filler(40) }]),
+  entry("a2", "assistant", [blocks.text(filler(40))]),
 ];
 
 describe.each(["truncate", "sliding-window"] as const)("%s eviction", (strategy) => {

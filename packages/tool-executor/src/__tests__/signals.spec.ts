@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import type { DispatchInput, ProtocolEvent, ToolRegistration } from "@agentick/spec";
 import { jsonSchema, logEventName, progressEventName } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -76,7 +77,7 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
           handlerRef: "h.signaller",
           handler: async (_input, { ctx }) => {
             ctx.log("warning", { code: 7 }, "tool-logger");
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -104,7 +105,7 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
           handlerRef: "h.signaller",
           handler: async (_input, { ctx }) => {
             ctx.progress("job-1", { progress: 5, total: 20, message: "halfway-ish" });
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -134,7 +135,7 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
           handlerRef: "h.signaller",
           handler: async (_input, { ctx }) => {
             ctx.progress(42, { progress: 1 });
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -158,7 +159,7 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
             const p = ctx.progress.begin({ total: 3, message: "starting" });
             p.advance(1, "one");
             p.done();
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -193,7 +194,7 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
             const p = ctx.progress.begin();
             p.note("scanning");
             p.advance();
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -220,7 +221,7 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
           handlerRef: "h.signaller",
           handler: async (_input, { ctx }) => {
             ctx.progress.begin({ total: 2 }).advance(1);
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],

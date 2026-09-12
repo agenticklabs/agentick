@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExecutionTarget, ImageModelAdapter } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
@@ -44,7 +45,7 @@ async function rig(gatewayImages: ImageModelAdapter) {
     scripted: {
       result: {
         specVersion: SPEC_VERSION,
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       },

@@ -17,6 +17,7 @@ import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-exe
 import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import type { ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -37,7 +38,7 @@ const replyExec = () =>
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },

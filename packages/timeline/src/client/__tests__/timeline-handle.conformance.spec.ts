@@ -9,12 +9,13 @@
 
 import { runClientHandleConformance, spyClientTransport } from "@agentick/client-core/testing";
 import type { TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { timelineHandle, type TimelineHandle } from "../timeline-handle.js";
 
 const entry = (id: string): TimelineEntry => ({
   kind: "message",
-  message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+  message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
 });
 
 runClientHandleConformance<TimelineHandle, TimelineEntry, string>({

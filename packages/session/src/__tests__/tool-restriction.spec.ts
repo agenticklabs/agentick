@@ -28,6 +28,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { ToolExecutorHarness, InMemoryHandlerResolver } from "@agentick/tool-executor";
 import { ElicitationHarness } from "@agentick/elicitation";
@@ -116,7 +117,7 @@ async function mkSession(opts: {
   const loop = new LoopExecutorHarness("tr-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   for (const name of ["calc", "search", "echo"]) {
-    resolver.register(`h.${name}`, async () => [{ type: "text", text: `${name}-ok` }]);
+    resolver.register(`h.${name}`, async () => [blocks.text(`${name}-ok`)]);
   }
   const elicitation = new ElicitationHarness("tr-t:elic", journal, bus, inbox);
   const tools = new ToolExecutorHarness("tr-t", journal, bus, inbox, {
@@ -205,7 +206,7 @@ describe("SendInput.allowedTools — restriction reaches the model", () => {
 
     // The host door reaches `calc` despite it never being exposed to the model.
     const content = await session.tools.dispatch("calc", {});
-    expect(content[0]).toMatchObject({ type: "text", text: "calc-ok" });
+    expect(content[0]).toMatchObject(blocks.text("calc-ok"));
     await dispose();
   });
 

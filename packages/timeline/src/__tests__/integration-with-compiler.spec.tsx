@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { extractText } from "@agentick/spec";
 import type { HookBridges, MessageEntry, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { Message, CompilerHarness } from "@agentick/compiler-react";
 import { fakeBridges, fakeTimelineHarness } from "@agentick/compiler";
@@ -327,8 +328,8 @@ describe("getEntryTokens sees media (ADR 97)", () => {
         ts: 0,
         role: "user",
         content: [
-          { type: "text", text: "look" },
-          { type: "image", source: { type: "url", url: "https://example.test/a.png" } },
+          blocks.text("look"),
+          blocks.image(blocks.source.url("https://example.test/a.png")),
         ],
       },
     }) as MessageTimelineEntry;
@@ -401,7 +402,7 @@ describe("<Timeline> — fine-grained rendering (README reference pattern)", () 
             type: "tool_result",
             toolUseId: "tc1",
             name: "query_jobs",
-            content: [{ type: "text", text: "HUGE 48KB payload ..." }],
+            content: [blocks.text("HUGE 48KB payload ...")],
             metadata: { file: ref },
           } as never,
         ],

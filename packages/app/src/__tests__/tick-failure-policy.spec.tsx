@@ -12,6 +12,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { reactCompiler } from "@agentick/compiler-react";
 import type { ExecutionTarget, LanguageModelExecutionResult } from "@agentick/spec";
 import { MalformedModelOutput, ProviderRejected } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -33,7 +34,7 @@ const target: ExecutionTarget = {
 
 const ended: LanguageModelExecutionResult = {
   specVersion: "2026-05-08",
-  output: [{ type: "text", text: "recovered" }],
+  output: [blocks.text("recovered")],
   stopReason: "end",
   usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
 };

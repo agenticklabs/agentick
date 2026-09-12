@@ -26,6 +26,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -59,7 +60,7 @@ const probeThenEnd = (turn: number): readonly LanguageModelExecutionResult[] => 
   },
   {
     specVersion: SPEC_VERSION,
-    output: [{ type: "text", text: "done" }],
+    output: [blocks.text("done")],
     stopReason: "end",
     usage,
   },
@@ -110,7 +111,7 @@ async function mkSession(sends = 1): Promise<Built> {
 
   resolver.register("h.probe", async (_input, { ctx }) => {
     handlerSaw.push(ctx.responseFormat);
-    return [{ type: "text", text: "probed" }];
+    return [blocks.text("probed")];
   });
 
   function Agent() {

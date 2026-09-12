@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { defaultSessionConformanceDeps } from "@agentick/spec-conformance";
 import { SPEC_VERSION, type ContentBlock, type TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -77,7 +78,7 @@ describe("SessionHarness + timeline — send", () => {
 describe("SessionHarness + timeline — state applicators", () => {
   it("appendEntry lands the entry on the durable log", async () => {
     const session = await mkSession("tl-int-apply-1");
-    const content: ContentBlock[] = [{ type: "text", text: "marker" }];
+    const content: ContentBlock[] = [blocks.text("marker")];
     const res = await session.appendEntry({
       sessionId: "tl-int-apply-1",
       entry: { role: "user", content },
@@ -100,7 +101,7 @@ describe("SessionHarness + timeline — state applicators", () => {
       tickId: "tick-x",
       result: {
         specVersion: SPEC_VERSION,
-        output: [{ type: "text", text: "from-applicator" }],
+        output: [blocks.text("from-applicator")],
         stopReason: "end",
       },
     });
@@ -125,14 +126,14 @@ describe("SessionHarness + timeline — state applicators", () => {
           toolCallId: "tc-1",
           toolName: "calc",
           succeeded: true,
-          content: [{ type: "text", text: "42" }],
+          content: [blocks.text("42")],
           durationMs: 1,
         },
         {
           toolCallId: "tc-2",
           toolName: "calc",
           succeeded: true,
-          content: [{ type: "text", text: "84" }],
+          content: [blocks.text("84")],
           durationMs: 1,
         },
       ],

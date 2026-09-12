@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DispatchInput, ProtocolEvent, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import type { LocalEventBus } from "@agentick/runtime";
 
 import { createTestHarness } from "../testing/index.js";
@@ -46,7 +47,7 @@ const dispatchOf = (via: "model" | "dispatch", toolCallId: string): DispatchInpu
 async function makeHarness() {
   return createTestHarness({
     tools: [echoReg()],
-    handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+    handlers: [{ handlerRef: "h.echo", handler: async () => [blocks.text("ok")] }],
   });
 }
 
@@ -73,7 +74,7 @@ describe("ToolExecutorHarness — .fx.dispatch dual-typed edge", () => {
     expect(eff).not.toBeInstanceOf(Promise);
 
     const result = await Effect.runPromise(eff);
-    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(result.content).toEqual([blocks.text("ok")]);
   });
 
   it("the plain dispatch() is the Promise facade", async () => {
@@ -84,7 +85,7 @@ describe("ToolExecutorHarness — .fx.dispatch dual-typed edge", () => {
     expect(Effect.isEffect(p)).toBe(false);
 
     const result = await p;
-    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(result.content).toEqual([blocks.text("ok")]);
   });
 
   it("the twin PRESERVES the door → origin mapping (via 'model' → origin 'model')", async () => {
@@ -114,8 +115,8 @@ describe("ToolExecutorHarness — .fx.dispatch dual-typed edge", () => {
       }),
     );
 
-    expect(a.content).toEqual([{ type: "text", text: "ok" }]);
-    expect(b.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(a.content).toEqual([blocks.text("ok")]);
+    expect(b.content).toEqual([blocks.text("ok")]);
   });
 });
 

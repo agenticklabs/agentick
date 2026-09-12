@@ -18,6 +18,7 @@ import type {
   ToolResultInput,
 } from "@agentick/spec";
 import { jsonSchema, ToolValidationError } from "@agentick/spec";
+import { text } from "@agentick/spec/blocks";
 import { createTestHarness } from "../testing/index.js";
 
 // A dependency-free Standard-Schema that actually validates: accepts an
@@ -60,16 +61,13 @@ describe("ADR 70 — result currency normalization", () => {
       handlers: [{ handlerRef: "h.s", handler: async () => "hello world" }],
     });
     const result = await harness.dispatch(dispatchOf("s"));
-    expect(result.content).toEqual([{ type: "text", text: "hello world" }]);
+    expect(result.content).toEqual([text("hello world")]);
     expect(result.isError ?? false).toBe(false);
     expect(result.structuredContent).toBeUndefined();
   });
 
   it("bare ContentBlock[] return is behavior-identical (parity)", async () => {
-    const blocks = [
-      { type: "text" as const, text: "a" },
-      { type: "text" as const, text: "b" },
-    ];
+    const blocks = [text("a"), text("b")];
     const { harness } = await createTestHarness({
       tools: [reg("arr")],
       handlers: [{ handlerRef: "h.arr", handler: async () => blocks }],
@@ -98,7 +96,7 @@ describe("ADR 70 — result currency normalization", () => {
       ],
     });
     const result = await harness.dispatch(dispatchOf("env"));
-    expect(result.content).toEqual([{ type: "text", text: "72F, clear" }]);
+    expect(result.content).toEqual([text("72F, clear")]);
     expect(result.structuredContent).toEqual({ tempF: 72, condition: "clear" });
     expect(result.isError).toBe(false);
     expect(result.metadata).toEqual({ source: "cache" });
@@ -118,7 +116,7 @@ describe("ADR 70 — isError (soft) vs throw (hard)", () => {
     });
     const result = await harness.dispatch(dispatchOf("soft"));
     expect(result.isError).toBe(true);
-    expect(result.content).toEqual([{ type: "text", text: "file not found" }]);
+    expect(result.content).toEqual([text("file not found")]);
   });
 
   it("a thrown handler is a HARD failure — the dispatch REJECTS (distinct from isError)", async () => {
@@ -171,7 +169,7 @@ describe("ADR 70 — structuredContent × outputSchema validation", () => {
       handlers: [{ handlerRef: "h.skip", handler: async () => "just text" }],
     });
     const result = await harness.dispatch(dispatchOf("skip"));
-    expect(result.content).toEqual([{ type: "text", text: "just text" }]);
+    expect(result.content).toEqual([text("just text")]);
     expect(result.structuredContent).toBeUndefined();
   });
 });
@@ -210,7 +208,7 @@ describe("ADR 70 — provenance is executor-stamped, never handler-declarable", 
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
     expect(result.durationMs).toBeLessThan(SMUGGLED_DURATION);
     // Content still normalizes; the spoof keys never leaked onto the result.
-    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(result.content).toEqual([text("ok")]);
   });
 
   it("smuggling executedBy inside envelope.metadata cannot forge the top-level provenance", async () => {
@@ -242,7 +240,7 @@ describe("ADR 70 — inference sharpness (anti-plain-object)", () => {
     void bad;
 
     const asString: ToolResultInput = "ok";
-    const asArray: ToolResultInput = [{ type: "text", text: "x" }];
+    const asArray: ToolResultInput = [text("x")];
     const asEnvelope: ToolResultInput = { content: "hi", structuredContent: { n: 1 } };
     expect([typeof asString, Array.isArray(asArray), "content" in asEnvelope]).toEqual([
       "string",

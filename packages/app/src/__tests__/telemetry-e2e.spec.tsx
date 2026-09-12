@@ -17,6 +17,7 @@ import { spyTelemetrySink } from "@agentick/runtime/testing";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 import { createTelemetry } from "../telemetry-wiring.js";
@@ -54,9 +55,7 @@ async function mkToolExecutor() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [
-              { type: "tool_use", toolUseId: "tc-1", name: "search", input: { q: "hi" } },
-            ] as ContentBlock[],
+            output: [blocks.toolUse("tc-1", "search", { q: "hi" })] as ContentBlock[],
             stopReason: "tool_use",
             toolCalls: [{ id: "tc-1", name: "search", input: { q: "hi" } }],
           },
@@ -64,7 +63,7 @@ async function mkToolExecutor() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "done" } satisfies ContentBlock],
+            output: [blocks.text("done") satisfies ContentBlock],
             stopReason: "end",
           },
         },
@@ -90,7 +89,7 @@ const toolHandlers = new Map<
       await ctx.trace("retrieval", (span) => {
         span.setAttribute("result.count", 3);
       });
-      return [{ type: "text", text: "done" }];
+      return [blocks.text("done")];
     },
   ],
 ]);

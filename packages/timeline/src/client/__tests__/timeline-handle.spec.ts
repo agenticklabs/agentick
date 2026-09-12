@@ -14,6 +14,7 @@ import type {
   WireMethod,
   WireParams,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { spyClientTransport } from "@agentick/client-core/testing";
 
 import type { TimelineHistoryPage } from "../../wire-augment.js";
@@ -21,7 +22,7 @@ import { timelineHandle } from "../timeline-handle.js";
 
 const entry = (id: string): TimelineEntry => ({
   kind: "message",
-  message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+  message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
 });
 
 const ids = (window: readonly TimelineEntry[]): string[] =>

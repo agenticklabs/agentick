@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { LocalEventBus } from "@agentick/runtime";
 import type { ProtocolEvent, TaskInfo } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { drainRejection, waitFor } from "@agentick/utils/testing";
 import { stubStoreCtx } from "@agentick/store";
 
@@ -72,7 +73,7 @@ describe("TasksHarness — input_required (awaitingInput)", () => {
 
     const handle = bundle.harness.submit(async (ctx) => {
       const provided = await ctx.awaitingInput(gate.promise, { message: "need input" });
-      return [{ type: "text", text: provided }];
+      return [blocks.text(provided)];
     });
 
     // The work fn called awaitingInput synchronously during start() → the
@@ -89,7 +90,7 @@ describe("TasksHarness — input_required (awaitingInput)", () => {
     // Provide the input → back to working, then completes.
     gate.resolve("hello");
     const result = await handle.result;
-    expect(result).toEqual([{ type: "text", text: "hello" }]);
+    expect(result).toEqual([blocks.text("hello")]);
     expect(bundle.harness.status(handle.taskId)).toBe("completed");
 
     const infos = (await envsP).map((e) => e.payload as TaskInfo);
@@ -112,7 +113,7 @@ describe("TasksHarness — input_required (awaitingInput)", () => {
     const handle = bundle.harness.submit(async (ctx) => {
       const provided = await ctx.awaitingInput(gate.promise, { message: "need input" });
       workReturned = true;
-      return [{ type: "text", text: provided }];
+      return [blocks.text(provided)];
     });
     expect(bundle.harness.status(handle.taskId)).toBe("input_required");
 
@@ -153,7 +154,7 @@ describe("TasksHarness — awaitingInput(Effect) real interruptibility (ADR 69 T
           message: "awaiting effect",
         },
       );
-      return [{ type: "text", text: provided }];
+      return [blocks.text(provided)];
     });
 
     expect(bundle.harness.status(handle.taskId)).toBe("input_required");
@@ -161,7 +162,7 @@ describe("TasksHarness — awaitingInput(Effect) real interruptibility (ADR 69 T
 
     gate.resolve("effect-value");
     const result = await handle.result;
-    expect(result).toEqual([{ type: "text", text: "effect-value" }]);
+    expect(result).toEqual([blocks.text("effect-value")]);
     expect(bundle.harness.status(handle.taskId)).toBe("completed");
 
     const infos = (await envsP).map((e) => e.payload as TaskInfo);
@@ -191,7 +192,7 @@ describe("TasksHarness — awaitingInput(Effect) real interruptibility (ADR 69 T
 
     const handle = bundle.harness.submit(async (ctx) => {
       const v = await ctx.awaitingInput(paused, { message: "awaiting effect" });
-      return [{ type: "text", text: String(v) }];
+      return [blocks.text(String(v))];
     });
     expect(bundle.harness.status(handle.taskId)).toBe("input_required");
 

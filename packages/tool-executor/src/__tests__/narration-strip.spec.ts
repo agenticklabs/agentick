@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolRegistration, Validator } from "@agentick/spec";
 import { jsonSchema, TOOL_NARRATION_FIELD } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createTestHarness } from "../testing/index.js";
 
 /** Validator that FAILS if `_summary` reaches it — proves the strip is pre-validation. */
@@ -55,7 +56,7 @@ describe("dispatchBody — `_summary` strip (Pass B)", () => {
           handlerRef: "h.search",
           handler: async (input) => {
             received = input;
-            return [{ type: "text", text: "done" }];
+            return [blocks.text("done")];
           },
           validator: rejectSummary, // throws (soft-fails) if `_summary` survives
         },
@@ -81,7 +82,7 @@ describe("dispatchBody — `_summary` strip (Pass B)", () => {
   it("does not mutate the caller's input object (shallow copy)", async () => {
     const { harness } = await createTestHarness({
       tools: [reg("search")],
-      handlers: [{ handlerRef: "h.search", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.search", handler: async () => [blocks.text("ok")] }],
     });
     const callerInput = { query: "x", [TOOL_NARRATION_FIELD]: "narration" };
     await harness.dispatch({
@@ -103,7 +104,7 @@ describe("dispatchBody — presentation: four distinct fields (Pass B)", () => {
   ) {
     const { harness } = await createTestHarness({
       tools: [reg("mytool", annotations)],
-      handlers: [{ handlerRef: "h.mytool", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.mytool", handler: async () => [blocks.text("ok")] }],
     });
     return harness.dispatch({
       toolCallId: `c_${Math.random()}`,

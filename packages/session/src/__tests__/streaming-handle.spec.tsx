@@ -20,6 +20,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import { fakeBridges } from "@agentick/compiler";
 import type { ExecutionTarget, StreamEvent } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -51,7 +52,7 @@ async function mkSession(opts: { withDeltas?: boolean } = {}) {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "hello" }],
+          output: [blocks.text("hello")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -63,7 +64,7 @@ async function mkSession(opts: { withDeltas?: boolean } = {}) {
                 { type: "content-delta", blockIndex: 0, delta: "he" },
                 { type: "content-delta", blockIndex: 0, delta: "llo" },
                 { type: "content-end", blockIndex: 0 },
-                { type: "content", blockIndex: 0, content: { type: "text", text: "hello" } },
+                { type: "content", blockIndex: 0, content: blocks.text("hello") },
                 {
                   type: "message-end",
                   stopReason: "end",
@@ -71,7 +72,7 @@ async function mkSession(opts: { withDeltas?: boolean } = {}) {
                 },
                 {
                   type: "message",
-                  message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+                  message: { role: "assistant", content: [blocks.text("hello")] },
                   stopReason: "end",
                   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
                 },

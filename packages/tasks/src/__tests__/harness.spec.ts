@@ -6,6 +6,7 @@ import { Chunk, Effect, Ref, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProtocolEvent, TaskEvent, TaskInfo, TaskRejection } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import type { LocalEventBus } from "@agentick/runtime";
 import { drainRejection, waitForStable } from "@agentick/utils/testing";
 import { stubStoreCtx } from "@agentick/store";
@@ -709,10 +710,10 @@ describe("TasksHarness — ttl reaper (ADR 68)", () => {
   it("a task that completes before its ttl is unaffected (reaper cleared on settle)", async () => {
     const bundle = await fakeTasks({ sessionId: "s-ttl-ok" });
     try {
-      const handle = bundle.harness.submit(async () => [{ type: "text", text: "done" }], {
+      const handle = bundle.harness.submit(async () => [blocks.text("done")], {
         ttl: 10_000,
       });
-      expect(await handle.result).toEqual([{ type: "text", text: "done" }]);
+      expect(await handle.result).toEqual([blocks.text("done")]);
       expect(bundle.harness.status(handle.taskId)).toBe("completed");
     } finally {
       await bundle.close();

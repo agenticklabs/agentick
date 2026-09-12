@@ -24,6 +24,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import type { CompactStrategy, ExecutionTarget, TimelineEntry } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -59,7 +60,7 @@ const twoTickExec = (secondTick = 500_000) =>
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "calling echo" }],
+            output: [blocks.text("calling echo")],
             toolCalls: [{ id: "tc1", name: "echo", input: {} }],
             stopReason: "tool_use",
             usage: { inputTokens: 500_000, outputTokens: 1, totalTokens: 500_001 },
@@ -68,7 +69,7 @@ const twoTickExec = (secondTick = 500_000) =>
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "done" }],
+            output: [blocks.text("done")],
             stopReason: "end",
             usage: { inputTokens: secondTick, outputTokens: 1, totalTokens: secondTick + 1 },
           },
@@ -95,7 +96,7 @@ async function mkSession(sessionId: string, compact: CompactStrategy, secondTick
   const loop = new LoopExecutorHarness(`${sessionId}-l`, journal, bus, inbox);
   const elicitation = new ElicitationHarness(`${sessionId}-t:elicitation`, journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
-  resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+  resolver.register("h.echo", async () => [blocks.text("ok")]);
   const tools = new ToolExecutorHarness(`${sessionId}-t`, journal, bus, inbox, {
     handlerResolver: resolver,
     elicitation,

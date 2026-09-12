@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { CompactStrategy, TimelineEntry } from "@agentick/spec";
 import { CompactStrategyMissing } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { TimelineHarness } from "../harness.js";
 import { MemoryTimelineStore } from "../store.js";
@@ -23,7 +24,7 @@ import { stubStoreCtx } from "@agentick/store";
 function entry(id: string): TimelineEntry {
   return {
     kind: "message",
-    message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+    message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
   } as unknown as TimelineEntry;
 }
 

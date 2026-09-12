@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { deriveTestContext } from "@agentick/runtime/testing";
 import type { CompactGenerate, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { projectLog } from "../project.js";
 import { rollingSummary } from "../strategies.js";
@@ -23,7 +24,7 @@ function entries(count: number, offset = 0): TimelineEntry[] {
       id: `m${i + offset}`,
       ts: i + offset,
       role: "user" as const,
-      content: [{ type: "text" as const, text: `turn ${i + offset}` }],
+      content: [blocks.text(`turn ${i + offset}`)],
     },
   }));
 }

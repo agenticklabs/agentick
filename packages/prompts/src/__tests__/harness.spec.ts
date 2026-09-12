@@ -18,6 +18,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/
 
 import { PromptsHarness } from "../harness.js";
 import type { PromptRenderer } from "../renderer.js";
+import * as blocks from "@agentick/spec/blocks";
 
 async function makeHarness(renderers: PromptRenderer[] = []): Promise<PromptsHarness> {
   const harness = new PromptsHarness(
@@ -79,7 +80,7 @@ describe("PromptsHarness — invoke + native content", () => {
     expect(result.description).toBe("Greet");
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]!.role).toBe("system");
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "Hello, world." }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("Hello, world.")]);
   });
 
   it("render(args) string → system message", async () => {
@@ -93,7 +94,7 @@ describe("PromptsHarness — invoke + native content", () => {
       },
     });
     const result = await h.render({ name: "summarize", args: { docId: "42" } });
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "Summarize doc 42." }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("Summarize doc 42.")]);
   });
 
   it("MessageEntry[] content → passthrough", async () => {
@@ -106,12 +107,12 @@ describe("PromptsHarness — invoke + native content", () => {
           {
             kind: "message" as const,
             role: "system" as const,
-            content: [{ type: "text" as const, text: "You are helpful." }],
+            content: [blocks.text("You are helpful.")],
           },
           {
             kind: "message" as const,
             role: "user" as const,
-            content: [{ type: "text" as const, text: "Hi" }],
+            content: [blocks.text("Hi")],
           },
         ],
       },
@@ -185,7 +186,7 @@ describe("PromptsHarness — argument validation", () => {
       },
     });
     const result = await h.render({ name: "p" });
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "got default" }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("got default")]);
   });
 
   it("schema validation passes valid values", async () => {
@@ -211,7 +212,7 @@ describe("PromptsHarness — argument validation", () => {
       },
     });
     const result = await h.render({ name: "p", args: { n: 42 } });
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "got 42" }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("got 42")]);
   });
 
   it("schema validation rejects invalid → PromptArgumentInvalid", async () => {
@@ -255,7 +256,7 @@ describe("PromptsHarness — custom renderer dispatch", () => {
           {
             kind: "message",
             role: "user",
-            content: [{ type: "text", text: `rendered ${String(args.x)}` }],
+            content: [blocks.text(`rendered ${String(args.x)}`)],
           },
         ];
       },
@@ -270,7 +271,7 @@ describe("PromptsHarness — custom renderer dispatch", () => {
       },
     });
     const result = await h.render({ name: "p", args: { x: "hello" } });
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "rendered hello" }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("rendered hello")]);
   });
 
   it("PromptRenderFailed when no renderer matches non-native content", async () => {

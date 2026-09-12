@@ -17,6 +17,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline";
 import type { ExecutionTarget, StoreCtx } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -37,7 +38,7 @@ const replyExec = () =>
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -106,7 +107,7 @@ describe("bridge principal attribution (ADR 48)", () => {
     await session.mountReady;
 
     const handle = await session.send({
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
     await handle.result;
 

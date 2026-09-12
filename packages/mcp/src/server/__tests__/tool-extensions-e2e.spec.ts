@@ -30,6 +30,7 @@ import {
   WWW_AUTHENTICATE_META_KEY,
   wwwAuthenticateMeta,
 } from "../index.js";
+import * as blocks from "@agentick/spec/blocks";
 
 async function makeServer(tools: readonly CreatedTool[]): Promise<{
   readonly harness: McpServerHarness;
@@ -66,7 +67,7 @@ describe("3b-0b-B — result-side _meta (step-up auth) reaches the wire", () => 
       name: "pay_invoice",
       description: "Pay an invoice (needs write scope).",
       handler: async () => ({
-        content: [{ type: "text", text: "Re-authentication required." }],
+        content: [blocks.text("Re-authentication required.")],
         isError: true,
         metadata: mcpResultExtensions({
           meta: wwwAuthenticateMeta({
@@ -99,7 +100,7 @@ describe("3b-0b-B — result-side _meta (step-up auth) reaches the wire", () => 
     const plain = createTool({
       name: "echo",
       description: "echo",
-      handler: async (input) => [{ type: "text", text: `echo: ${(input as { q: string }).q}` }],
+      handler: async (input) => [blocks.text(`echo: ${(input as { q: string }).q}`)],
     });
     const { harness, transport } = await makeServer([plain]);
     const client = await connect(transport);
@@ -108,7 +109,7 @@ describe("3b-0b-B — result-side _meta (step-up auth) reaches the wire", () => 
       { name: "echo", arguments: { q: "hi" } },
       CallToolResultSchema,
     );
-    expect(result.content).toEqual([{ type: "text", text: "echo: hi" }]);
+    expect(result.content).toEqual([blocks.text("echo: hi")]);
     expect(result._meta).toBeUndefined();
 
     await client.close();
@@ -121,7 +122,7 @@ describe("3b-0b-B — declaration-side _meta + annotations reach tools/list", ()
     const search = createTool({
       name: "search_invoices",
       description: "Search invoices (read-only).",
-      handler: async () => [{ type: "text", text: "ok" }],
+      handler: async () => [blocks.text("ok")],
       metadata: mcpToolExtensions({
         annotations: { readOnlyHint: true, openWorldHint: false },
         meta: { "openai/outputTemplate": "ui://widget/invoice-list" },
@@ -144,7 +145,7 @@ describe("3b-0b-B — declaration-side _meta + annotations reach tools/list", ()
     const plain = createTool({
       name: "plain",
       description: "plain",
-      handler: async () => [{ type: "text", text: "ok" }],
+      handler: async () => [blocks.text("ok")],
     });
     const { harness, transport } = await makeServer([plain]);
     const client = await connect(transport);

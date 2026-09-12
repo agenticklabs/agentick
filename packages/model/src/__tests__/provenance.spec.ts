@@ -17,11 +17,12 @@
 import { describe, expect, it } from "vitest";
 import type { CacheHint, ContentBlock, MessageEntry, RenderedTree } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import { text as textBlock } from "@agentick/spec/blocks";
 
 import { buildMessages } from "../canonical-projection.js";
 import { buildMessageProvenance } from "../provenance.js";
 
-const text = (t: string): ContentBlock => ({ type: "text", text: t }) as ContentBlock;
+const text = (t: string): ContentBlock => textBlock(t) as ContentBlock;
 const imageRef = (fileId: string): ContentBlock =>
   ({ type: "image", source: { type: "reference", fileId } }) as ContentBlock;
 

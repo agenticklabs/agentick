@@ -16,6 +16,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 
 import { SessionHarness } from "../harness.js";
@@ -42,7 +43,7 @@ async function mkSession(sessionId: string) {
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
       },
     },
@@ -75,7 +76,7 @@ describe("base64 media sources at the send door", () => {
           {
             role: "user",
             content: [
-              { type: "text", text: "see attached" },
+              blocks.text("see attached"),
               {
                 type: "image",
                 source: {
@@ -104,9 +105,7 @@ describe("base64 media sources at the send door", () => {
       messages: [
         {
           role: "user",
-          content: [
-            { type: "image", source: { type: "base64", data: RAW, mimeType: "image/png" } },
-          ],
+          content: [blocks.image(blocks.source.base64(RAW, "image/png"))],
         },
       ],
     });

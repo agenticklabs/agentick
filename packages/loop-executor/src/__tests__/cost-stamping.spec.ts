@@ -52,6 +52,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 
 import { LoopExecutorHarness } from "../harness.js";
@@ -171,7 +172,7 @@ function dispatchOk(call: { name: string; toolCallId: string }): DispatchResult 
   return {
     toolCallId: call.toolCallId,
     name: call.name,
-    content: [{ type: "text", text: "ok" }],
+    content: [blocks.text("ok")],
     durationMs: 1,
   };
 }
@@ -196,14 +197,14 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
 
 const toolUse = (id: string): LanguageModelExecutionResult => ({
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "calling" }],
+  output: [blocks.text("calling")],
   stopReason: "tool_use",
   usage: { ...USAGE },
   toolCalls: [{ id, name: "t", input: {} } as ToolCall],
 });
 const ended = (): LanguageModelExecutionResult => ({
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "done" }],
+  output: [blocks.text("done")],
   stopReason: "end",
   usage: { ...USAGE },
 });
@@ -451,7 +452,7 @@ describe("the honesty rule (usage-cost.md §6)", () => {
   it("a run that recorded NO usage has no cost at all — absent, not a zero rollup", async () => {
     const noUsage: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
-      output: [{ type: "text", text: "done" }],
+      output: [blocks.text("done")],
       stopReason: "end",
     };
     const { terminal } = await runCosted({

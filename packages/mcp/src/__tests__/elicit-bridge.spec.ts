@@ -39,6 +39,7 @@ import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { EventEnvelope } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -58,7 +59,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text" as const, text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
           },
         },
@@ -93,7 +94,7 @@ async function mkElicitingServer(): Promise<{
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (req.params.name !== "ask_name") {
       return {
-        content: [{ type: "text" as const, text: `unknown tool ${req.params.name}` }],
+        content: [blocks.text(`unknown tool ${req.params.name}`)],
         isError: true,
       };
     }
@@ -109,12 +110,12 @@ async function mkElicitingServer(): Promise<{
     });
     if (elicitResult.action !== "accept") {
       return {
-        content: [{ type: "text" as const, text: `no answer (${elicitResult.action})` }],
+        content: [blocks.text(`no answer (${elicitResult.action})`)],
       };
     }
     const name = (elicitResult.content as { name?: string } | undefined)?.name ?? "stranger";
     return {
-      content: [{ type: "text" as const, text: `Hello, ${name}` }],
+      content: [blocks.text(`Hello, ${name}`)],
     };
   });
 
@@ -308,7 +309,7 @@ async function mkUrlElicitingServer(): Promise<{
       elicitationId: "oauth-flow-1",
     });
     return {
-      content: [{ type: "text" as const, text: `oauth: ${elicitResult.action}` }],
+      content: [blocks.text(`oauth: ${elicitResult.action}`)],
     };
   });
 
@@ -380,9 +381,9 @@ describe("ElicitationBridge — capability + concurrency (#149)", () => {
           required: ["answer"],
         },
       });
-      if (r.action !== "accept") return { content: [{ type: "text" as const, text: "no" }] };
+      if (r.action !== "accept") return { content: [blocks.text("no")] };
       const answer = (r.content as { answer: string }).answer;
-      return { content: [{ type: "text" as const, text: `${q}=>${answer}` }] };
+      return { content: [blocks.text(`${q}=>${answer}`)] };
     });
     await server.connect(serverTransport);
 
@@ -484,8 +485,8 @@ describe("ElicitationBridge — related-task routing (#173)", () => {
           "io.modelcontextprotocol/related-task": { taskId: "task:long-running-shell-7" },
         },
       });
-      if (r.action !== "accept") return { content: [{ type: "text" as const, text: "no" }] };
-      return { content: [{ type: "text" as const, text: "did it" }] };
+      if (r.action !== "accept") return { content: [blocks.text("no")] };
+      return { content: [blocks.text("did it")] };
     });
     await server.connect(serverTransport);
 

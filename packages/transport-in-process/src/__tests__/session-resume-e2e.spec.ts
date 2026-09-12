@@ -27,6 +27,7 @@ import {
   type SessionStatusFrame,
   type SubscriptionScope,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { inProcessTransport } from "../index.js";
@@ -42,7 +43,7 @@ async function makeStack() {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "still here" } satisfies ContentBlock],
+          output: [blocks.text("still here") satisfies ContentBlock],
           stopReason: "end",
         },
       },
@@ -97,7 +98,7 @@ describe("session/send remounts a paged-out session", () => {
 
     const result = await client.session("alpha").send(say("are you there?")).result;
 
-    expect(result.output[0]).toMatchObject({ type: "text", text: "still here" });
+    expect(result.output[0]).toMatchObject(blocks.text("still here"));
     expect(app.getSession("alpha")).toBeDefined();
 
     await cleanup();
@@ -214,7 +215,7 @@ describe("session/close goes through the owning app", () => {
     expect(fresh.status).toBe("idle");
 
     const result = await client.session("alpha").send(say("hello again")).result;
-    expect(result.output[0]).toMatchObject({ type: "text", text: "still here" });
+    expect(result.output[0]).toMatchObject(blocks.text("still here"));
 
     await cleanup();
   });

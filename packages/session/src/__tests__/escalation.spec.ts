@@ -48,6 +48,7 @@ import type {
   ProtocolEvent,
   TaskInfo,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { drainRejection } from "@agentick/utils/testing";
 import { omitUndefined } from "@agentick/utils";
 
@@ -70,7 +71,7 @@ const replyExec = () =>
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -172,14 +173,14 @@ describe("SessionHarness — task elicit escalation (ADR 69 T1)", () => {
 
     const handle = session.tasks.submit(async (ctx) => {
       const answer = await ctx.elicit.text("Approve?");
-      return [{ type: "text", text: answer }];
+      return [blocks.text(answer)];
     });
 
     const result = (await handle.result) as ReadonlyArray<{ type: string; text: string }>;
     await clientAnswered;
 
     // The client's answer threaded all the way back to the work fn.
-    expect(result).toEqual([{ type: "text", text: "approved" }]);
+    expect(result).toEqual([blocks.text("approved")]);
     expect(session.tasks.status(handle.taskId)).toBe("completed");
 
     const statuses = (await statusesP).map((e) => (e.payload as TaskInfo).status);
@@ -200,7 +201,7 @@ describe("SessionHarness — task elicit escalation (ADR 69 T1)", () => {
     const handle = session.tasks.submit(
       async (ctx) => {
         const answer = await ctx.elicit.text("Approve?");
-        return [{ type: "text", text: answer }];
+        return [blocks.text(answer)];
       },
       { detached: true },
     );
@@ -316,7 +317,7 @@ describe("SessionHarness — escalation bubbling + interception + lineage (ADR 6
 
     const handle = chain.child.tasks.submit(async (ctx) => {
       const answer = await ctx.elicit.text("Approve?");
-      return [{ type: "text", text: answer }];
+      return [blocks.text(answer)];
     });
 
     const result = (await handle.result) as ReadonlyArray<{ type: string; text: string }>;
@@ -324,7 +325,7 @@ describe("SessionHarness — escalation bubbling + interception + lineage (ADR 6
 
     // The root's answer threaded back down the nested-ask stack to the
     // child's task work fn.
-    expect(result).toEqual([{ type: "text", text: "approved-by-root" }]);
+    expect(result).toEqual([blocks.text("approved-by-root")]);
     expect(chain.child.tasks.status(handle.taskId)).toBe("completed");
 
     const statuses = (await statusesP).map((e) => (e.payload as TaskInfo).status);
@@ -356,11 +357,11 @@ describe("SessionHarness — escalation bubbling + interception + lineage (ADR 6
 
     const handle = chain.child.tasks.submit(async (ctx) => {
       const answer = await ctx.elicit.text("Approve?");
-      return [{ type: "text", text: answer }];
+      return [blocks.text(answer)];
     });
 
     const result = (await handle.result) as ReadonlyArray<{ type: string; text: string }>;
-    expect(result).toEqual([{ type: "text", text: "answered-by-ancestor" }]);
+    expect(result).toEqual([blocks.text("answered-by-ancestor")]);
     expect(realElicitCalls).toBe(0);
   });
 
@@ -374,7 +375,7 @@ describe("SessionHarness — escalation bubbling + interception + lineage (ADR 6
 
     const handle = chain.child.tasks.submit(async (ctx) => {
       const answer = await ctx.elicit.text("Approve?");
-      return [{ type: "text", text: answer }];
+      return [blocks.text(answer)];
     });
 
     const rejection = await drainRejection(handle.result);
@@ -408,7 +409,7 @@ describe("SessionHarness — escalation bubbling + interception + lineage (ADR 6
     const result = (await handle.result) as ReadonlyArray<{ type: string; text: string }>;
     await clientAnswered;
     expect(interceptorCalls).toBe(1);
-    expect(result).toEqual([{ type: "text", text: "terminal-answer" }]);
+    expect(result).toEqual([blocks.text("terminal-answer")]);
   });
 
   it("lineage: the envelope reaching the parent carries [origin(task+session), child-session hop] in order", async () => {
@@ -531,7 +532,7 @@ describe("SessionHarness — forked-child elicit bridge composes the chain (ADR 
     ).submit({ executorKind: "child-process", handlerRef: "asks-approval" });
 
     const result = await handle.result;
-    expect(result).toEqual([{ type: "text", text: "approved" }]);
+    expect(result).toEqual([blocks.text("approved")]);
     // The ancestor interceptor answered the FORKED child's elicit; the
     // parent's real client elicit was never consulted — interception +
     // lineage compose for a cross-process task exactly as in-process.

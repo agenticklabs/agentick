@@ -31,6 +31,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { LoopExecutorHarness } from "../harness.js";
 import { NoopStateApplicator } from "../noop-state-applicator.js";
@@ -41,7 +42,7 @@ function mkSubstrate() {
 
 const okResult: LanguageModelExecutionResult = {
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "done" }],
+  output: [blocks.text("done")],
   stopReason: "end",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 };
@@ -193,7 +194,7 @@ describe("LoopExecutorHarness — structured cancellation (Stage 5)", () => {
             outcome: "succeeded",
             result: {
               specVersion: SPEC_VERSION,
-              output: [{ type: "text", text: "calling" }],
+              output: [blocks.text("calling")],
               stopReason: "tool_use",
               usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
               toolCalls: [{ id: "tc1", name: "t", input: {} }],
@@ -259,7 +260,7 @@ function multiToolExec(toolCalls: readonly { id: string; name: string }[]): Lang
               outcome: "succeeded",
               result: {
                 specVersion: SPEC_VERSION,
-                output: [{ type: "text", text: "calling" }],
+                output: [blocks.text("calling")],
                 stopReason: "tool_use",
                 usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
                 toolCalls: toolCalls.map((t) => ({ id: t.id, name: t.name, input: {} })),

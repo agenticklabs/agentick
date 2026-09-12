@@ -28,6 +28,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { waitFor } from "@agentick/utils/testing";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createTool } from "@agentick/tool";
 import { z } from "zod";
 
@@ -84,7 +85,7 @@ const LintRepo = createTool({
         void stage;
       }
       const summary = strict ? "0 errors, 0 warnings (strict)" : "0 errors, 3 warnings";
-      return [{ type: "text", text: `lint complete — ${summary}` } as ContentBlock];
+      return [blocks.text(`lint complete — ${summary}`) as ContentBlock];
     });
   },
 });
@@ -261,7 +262,7 @@ describe("MCP server tasks projection — Pattern B over the wire", () => {
       handler: async (_args, { ctx }) => {
         return ctx.tasks!.submit(async (task) => {
           await task.awaitingInput(gate, { message: "need input" });
-          return [{ type: "text", text: "input provided" } as ContentBlock];
+          return [blocks.text("input provided") as ContentBlock];
         });
       },
     });

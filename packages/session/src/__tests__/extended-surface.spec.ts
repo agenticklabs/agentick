@@ -29,6 +29,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec";
 import { ExecutionFailed, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 import { omitUndefined } from "@agentick/utils";
@@ -92,7 +93,7 @@ async function mkSession(
   const compiler = new CompilerHarness("test-r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("test-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
-  resolver.register("h.calc", async () => [{ type: "text", text: "42" }]);
+  resolver.register("h.calc", async () => [blocks.text("42")]);
   for (const [ref, handler] of Object.entries(opts.handlers ?? {})) {
     resolver.register(ref, handler);
   }
@@ -130,7 +131,7 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
   it("invokes a registered tool with via:'dispatch' and returns its content", async () => {
     const { session, tools } = await mkSession({ tools: [calcTool] });
     const content = await session.tools.dispatch("calc", { a: 1, b: 2 });
-    expect(content[0]).toMatchObject({ type: "text", text: "42" });
+    expect(content[0]).toMatchObject(blocks.text("42"));
     await session.close();
     await tools.close();
   });
@@ -145,7 +146,7 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
     const handle = session.tools.get("calc");
     expect(handle?.name).toBe("calc");
     const viaHandle = await handle!.dispatch({ a: 1, b: 2 });
-    expect(viaHandle[0]).toMatchObject({ type: "text", text: "42" });
+    expect(viaHandle[0]).toMatchObject(blocks.text("42"));
     await session.close();
     await tools.close();
   });
@@ -197,7 +198,7 @@ describe("SessionHarness — timeline handle (top-level)", () => {
 
   it("append writes an entry directly to log + projection", async () => {
     const { session } = await mkSession();
-    const content: ContentBlock[] = [{ type: "text", text: "manual entry" }];
+    const content: ContentBlock[] = [blocks.text("manual entry")];
     await session.timeline.append({
       kind: "message",
       message: { id: "m-manual", role: "user", content, ts: Date.now() },
@@ -221,7 +222,7 @@ describe("SessionHarness — timeline handle (top-level)", () => {
     });
     await session.timeline.append({
       kind: "message",
-      message: { id: "m-app", role: "user", content: [{ type: "text", text: "a1" }], ts: 0 },
+      message: { id: "m-app", role: "user", content: [blocks.text("a1")], ts: 0 },
     });
     expect(notifications).toBeGreaterThanOrEqual(1);
     unsub();
@@ -446,9 +447,7 @@ describe("SessionHarness — tool-dispatch StreamEvent projection", () => {
             {
               result: {
                 specVersion: "2026-05-08",
-                output: [
-                  { type: "tool_use", toolUseId: "call-9", name: "report", input: {} },
-                ] as ContentBlock[],
+                output: [blocks.toolUse("call-9", "report", {})] as ContentBlock[],
                 stopReason: "tool_use",
                 toolCalls: [{ id: "call-9", name: "report", input: {} }],
                 usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -457,7 +456,7 @@ describe("SessionHarness — tool-dispatch StreamEvent projection", () => {
             {
               result: {
                 specVersion: "2026-05-08",
-                output: [{ type: "text", text: "reported" }] as ContentBlock[],
+                output: [blocks.text("reported")] as ContentBlock[],
                 stopReason: "end",
                 usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
               },
@@ -469,7 +468,7 @@ describe("SessionHarness — tool-dispatch StreamEvent projection", () => {
         // A result-level metadata bag — the carriage an MCP-App `ui`
         // descriptor rides on.
         "h.report": async () => ({
-          content: [{ type: "text", text: "done" }] as ContentBlock[],
+          content: [blocks.text("done")] as ContentBlock[],
           metadata: uiMeta,
         }),
       },
@@ -550,9 +549,7 @@ function spawnToolScriptExec() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [
-              { type: "tool_use", toolUseId: "call-77", name: "spawn_child", input: {} },
-            ] as ContentBlock[],
+            output: [blocks.toolUse("call-77", "spawn_child", {})] as ContentBlock[],
             stopReason: "tool_use",
             toolCalls: [{ id: "call-77", name: "spawn_child", input: {} }],
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -561,7 +558,7 @@ function spawnToolScriptExec() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "child done" }] as ContentBlock[],
+            output: [blocks.text("child done")] as ContentBlock[],
             stopReason: "end",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           },
@@ -607,7 +604,7 @@ describe("SessionHarness — spawn boundary events (parent stream)", () => {
             originCallId: handlerCtx.toolCallId,
           });
           settleChild(undefined);
-          return [{ type: "text", text: "spawned" }];
+          return [blocks.text("spawned")];
         },
       },
     });
@@ -660,7 +657,7 @@ describe("SessionHarness — spawn boundary events (parent stream)", () => {
       handlers: {
         "h.spawn_child": async () => {
           await sessionRef!.spawn({ agent: null, sessionId: "child-unbound" });
-          return [{ type: "text", text: "spawned" }];
+          return [blocks.text("spawned")];
         },
       },
     });
@@ -696,7 +693,7 @@ describe("steering — send() during a running execution (ADR 53)", () => {
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "first answer" }],
+              output: [blocks.text("first answer")],
               stopReason: "end",
               usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
             },
@@ -704,7 +701,7 @@ describe("steering — send() during a running execution (ADR 53)", () => {
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "steered answer" }],
+              output: [blocks.text("steered answer")],
               stopReason: "end",
               usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
             },
@@ -1147,8 +1144,8 @@ describe("internal tools — backlog F, the tool rung end to end", () => {
               result: {
                 specVersion: "2026-05-08",
                 output: [
-                  { type: "text", text: "let me check" },
-                  { type: "tool_use", toolUseId: "call-p", name: "peek", input: {} },
+                  blocks.text("let me check"),
+                  blocks.toolUse("call-p", "peek", {}),
                 ] as ContentBlock[],
                 stopReason: "tool_use",
                 toolCalls: [{ id: "call-p", name: "peek", input: {} }],
@@ -1158,7 +1155,7 @@ describe("internal tools — backlog F, the tool rung end to end", () => {
             {
               result: {
                 specVersion: "2026-05-08",
-                output: [{ type: "text", text: "Ernesto" }] as ContentBlock[],
+                output: [blocks.text("Ernesto")] as ContentBlock[],
                 stopReason: "end",
                 usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
               },
@@ -1167,7 +1164,7 @@ describe("internal tools — backlog F, the tool rung end to end", () => {
         },
       ),
       handlers: {
-        "h.peek": async () => ({ content: [{ type: "text", text: "Ernesto" }] as ContentBlock[] }),
+        "h.peek": async () => ({ content: [blocks.text("Ernesto")] as ContentBlock[] }),
       },
     });
 

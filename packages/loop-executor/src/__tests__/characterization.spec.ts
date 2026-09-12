@@ -47,6 +47,7 @@ import type {
 } from "@agentick/spec";
 import { MalformedModelOutput, SPEC_VERSION, ToolValidationError } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor, type MockScriptedRun } from "@agentick/model-executor";
 import { omitUndefined } from "@agentick/utils";
 
@@ -115,7 +116,7 @@ function mkRecordingApplicator(order: string[]): StateApplicator {
 /** A full DispatchResult for a given call — success unless `isError`. */
 function dispatchOk(
   call: { name: string; toolCallId: string },
-  content: ContentBlock[] = [{ type: "text", text: "ok" }],
+  content: ContentBlock[] = [blocks.text("ok")],
 ): DispatchResult {
   return { toolCallId: call.toolCallId, name: call.name, content, durationMs: 1 };
 }
@@ -309,14 +310,14 @@ const failRun = (
 
 const toolUse = (id: string): LanguageModelExecutionResult => ({
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "calling" }],
+  output: [blocks.text("calling")],
   stopReason: "tool_use",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
   toolCalls: [{ id, name: "t", input: {} } as ToolCall],
 });
 const ended = (): LanguageModelExecutionResult => ({
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "done" }],
+  output: [blocks.text("done")],
   stopReason: "end",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 });
@@ -695,7 +696,7 @@ describe("LoopExecutorHarness [characterization] — tool-dispatch outcomes", ()
         {
           type: "tool_result",
           toolCallId: "srv-1",
-          content: [{ type: "text", text: "server ran" }],
+          content: [blocks.text("server ran")],
         } as unknown as ContentBlock,
       ],
       stopReason: "end",
@@ -727,14 +728,14 @@ describe("LoopExecutorHarness [characterization] — usage accumulation", () => 
   it("sums usage across ticks; terminal usage is the total", async () => {
     const t1: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
-      output: [{ type: "text", text: "a" }],
+      output: [blocks.text("a")],
       stopReason: "tool_use",
       usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       toolCalls: [{ id: "c1", name: "t", input: {} } as ToolCall],
     };
     const t2: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
-      output: [{ type: "text", text: "b" }],
+      output: [blocks.text("b")],
       stopReason: "end",
       usage: { inputTokens: 4, outputTokens: 5, totalTokens: 9 },
     };
@@ -764,14 +765,14 @@ describe("LoopExecutorHarness [characterization] — event sequence", () => {
   it("emits the run-level `execution` summary after execution-end, totals intact", async () => {
     const t1: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
-      output: [{ type: "text", text: "a" }],
+      output: [blocks.text("a")],
       stopReason: "tool_use",
       usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       toolCalls: [{ id: "c1", name: "t", input: {} } as ToolCall],
     };
     const t2: LanguageModelExecutionResult = {
       specVersion: SPEC_VERSION,
-      output: [{ type: "text", text: "b" }],
+      output: [blocks.text("b")],
       stopReason: "end",
       usage: { inputTokens: 4, outputTokens: 5, totalTokens: 9 },
     };
@@ -968,7 +969,7 @@ describe("LoopExecutorHarness — failure classification", () => {
         throw new ToolValidationError({ toolName: "t", issues: [] });
       },
     });
-    const expected = [{ type: "text", text: "tool t validation failed" }];
+    const expected = [blocks.text("tool t validation failed")];
     const result = trace.terminal.result!.toolResults[0]!;
     expect(result.succeeded).toBe(false);
     expect(result.content).toEqual(expected);

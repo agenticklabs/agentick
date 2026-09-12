@@ -21,6 +21,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { AppExtension, AppInstaller, ContentBlock } from "@agentick/spec";
 import type { ToolExecutorProtocol } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = () => React.createElement("message", { role: "user" }, "hello");
 
@@ -35,7 +36,7 @@ async function mkExecutor() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
           },
         },
@@ -168,7 +169,7 @@ describe("AppExtension — installer surfaces", () => {
       install(installer) {
         installer.registerToolHandler("ext.handlers/ping", async () => {
           dispatched = true;
-          return [{ type: "text", text: "pong" } as ContentBlock];
+          return [blocks.text("pong") as ContentBlock];
         });
       },
     };
@@ -200,7 +201,7 @@ describe("AppExtension — installer surfaces", () => {
     });
     const content = await session.tools.dispatch("ping", {});
     expect(dispatched).toBe(true);
-    expect(content).toEqual([{ type: "text", text: "pong" }]);
+    expect(content).toEqual([blocks.text("pong")]);
     await app.closeApp();
   });
 
@@ -215,9 +216,7 @@ describe("AppExtension — installer surfaces", () => {
             seen.push((input as { name: string }).name);
           },
         });
-        installer.registerToolHandler("ext.handlers/ping", async () => [
-          { type: "text", text: "pong" },
-        ]);
+        installer.registerToolHandler("ext.handlers/ping", async () => [blocks.text("pong")]);
         installer.registerExtensionTool({
           declaration: {
             id: "ping",
@@ -281,7 +280,7 @@ describe("AppExtension — ctx extension threading (ADR 66)", () => {
       install(installer) {
         installer.registerToolHandler("probe.handlers/ctx", async (_input, { ctx }) => {
           captured = ctx as unknown as Record<string, unknown>;
-          return [{ type: "text", text: "ok" } as ContentBlock];
+          return [blocks.text("ok") as ContentBlock];
         });
       },
     };

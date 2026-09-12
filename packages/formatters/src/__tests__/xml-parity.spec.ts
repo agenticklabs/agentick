@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SemanticContentBlock, SemanticNode, ContentBlock } from "@agentick/spec";
+import { json, reasoning, source, text, toolResult } from "@agentick/spec/blocks";
 
 import { xmlFormatter } from "../xml.js";
 
@@ -20,7 +21,7 @@ const s = (
 ): SemanticNode => ({ semantic, children, ...(props ? { props } : {}) }) as SemanticNode;
 
 const FIXTURE: SemanticContentBlock[] = [
-  { type: "text", text: 'plain & "quoted" <text>' } as SemanticContentBlock,
+  text('plain & "quoted" <text>') as SemanticContentBlock,
   semantic(
     s("paragraph", [t("a "), s("strong", [t("b")]), t(" c "), s("em", [t("d")]), t("\nline two")]),
   ),
@@ -58,9 +59,9 @@ const FIXTURE: SemanticContentBlock[] = [
   semantic(
     s("custom", [], { tag: "file-ref", attrs: { id: "f1", name: 'c "q".pdf' }, selfClosing: true }),
   ),
-  { type: "reasoning", text: "think <hard>" } as SemanticContentBlock,
+  reasoning("think <hard>") as SemanticContentBlock,
   { type: "code", language: "ts", text: "const a = b < c && d;" } as SemanticContentBlock,
-  { type: "json", data: { a: "<b>", c: 'd"e' } } as SemanticContentBlock,
+  json({ a: "<b>", c: 'd"e' }) as SemanticContentBlock,
   { type: "csv", text: 'a,b\n1,"2,3"' } as SemanticContentBlock,
   { type: "xml", text: "<raw>island</raw>" } as SemanticContentBlock,
   {
@@ -94,12 +95,12 @@ const FIXTURE: SemanticContentBlock[] = [
 const TREE_LEVEL: ContentBlock[] = [
   {
     type: "image",
-    source: { type: "url", url: "https://x.test/i.png?a=1&b=2" },
+    source: source.url("https://x.test/i.png?a=1&b=2"),
     altText: 'alt "q"',
   } as ContentBlock,
   {
     type: "document",
-    source: { type: "base64", data: "AAA", mimeType: "application/pdf" },
+    source: source.base64("AAA", "application/pdf"),
   } as ContentBlock,
   {
     type: "tool_use",
@@ -111,7 +112,7 @@ const TREE_LEVEL: ContentBlock[] = [
     type: "tool_result",
     toolUseId: "c1",
     name: "query",
-    content: [{ type: "text", text: "3 rows & <more>" }],
+    content: [text("3 rows & <more>")],
   } as ContentBlock,
 ];
 
@@ -134,7 +135,7 @@ describe("XML dialect — a stored tool block without an id", () => {
   it("renders the frame without the attribute", () => {
     const blocks = [
       { type: "tool_use", name: "query", input: {} },
-      { type: "tool_result", name: "query", content: [{ type: "text", text: "ok" }] },
+      { type: "tool_result", name: "query", content: [text("ok")] },
     ] as unknown as ContentBlock[];
     expect(xmlFormatter.blocksToText!(blocks)).toBe(
       '<tool_use name="query">{}</tool_use>\n\n<tool_result name="query">ok</tool_result>',
@@ -144,15 +145,13 @@ describe("XML dialect — a stored tool block without an id", () => {
 
 describe("XML dialect — a tool result's frame", () => {
   it("hugs a one-line body and stands off a multi-line one", () => {
-    const one = [
-      { type: "tool_result", toolUseId: "c1", name: "q", content: [{ type: "text", text: "ok" }] },
-    ] as unknown as ContentBlock[];
+    const one = [toolResult("c1", "q", [text("ok")])] as unknown as ContentBlock[];
     const many = [
       {
         type: "tool_result",
         toolUseId: "c1",
         name: "q",
-        content: [{ type: "text", text: "<a>\n<b/>\n</a>" }],
+        content: [text("<a>\n<b/>\n</a>")],
       },
     ] as unknown as ContentBlock[];
     expect(xmlFormatter.blocksToText!(one)).toBe('<tool_result id="c1" name="q">ok</tool_result>');

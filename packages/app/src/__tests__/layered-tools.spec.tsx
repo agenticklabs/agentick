@@ -19,6 +19,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration, ToolExecutorProtocol } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = () => React.createElement("message", { role: "user" }, "hello");
 
@@ -33,7 +34,7 @@ async function mkExecutor() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
           },
         },

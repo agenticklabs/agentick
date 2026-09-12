@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 import { TimelineWriteFailed, type TimelineEntry, type TimelineStore } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { stubStoreCtx } from "@agentick/store";
 
@@ -22,7 +23,7 @@ import { stubTimelineHarness } from "../testing/index.js";
 function messageEntry(id: string): TimelineEntry {
   return {
     kind: "message",
-    message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+    message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
   } as unknown as TimelineEntry;
 }
 

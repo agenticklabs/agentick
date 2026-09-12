@@ -27,6 +27,7 @@ import {
   type McpRequestContext,
   type ToolDeclaration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createTool } from "@agentick/tool";
 
 import { resolveToolsOption } from "../config.js";
@@ -49,7 +50,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
     const echo = createTool({
       name: "echo",
       description: "echo",
-      handler: async () => [{ type: "text", text: "ok" }],
+      handler: async () => [blocks.text("ok")],
     });
     const resolved = resolveToolsOption([echo]);
     expect(resolved.registry.list()).toEqual([echo.declaration]);
@@ -64,7 +65,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
     // Pattern B TaskHandle returns. echo is inline by construction.
     expect(result.kind).toBe("inline");
     if (result.kind === "inline") {
-      expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+      expect(result.content).toEqual([blocks.text("ok")]);
     }
   });
 
@@ -78,7 +79,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
     const result = await resolved.resolveHandler(t.handlerRef!)!({}, fakeCtx());
     expect(result.kind).toBe("inline");
     if (result.kind === "inline") {
-      expect(result.content).toEqual([{ type: "text", text: "hi there" }]);
+      expect(result.content).toEqual([blocks.text("hi there")]);
       expect(result.structuredContent).toBeUndefined();
       expect(result.isError).toBeUndefined();
     }
@@ -98,7 +99,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
     const result = await resolved.resolveHandler(t.handlerRef!)!({}, fakeCtx());
     expect(result.kind).toBe("inline");
     if (result.kind === "inline") {
-      expect(result.content).toEqual([{ type: "text", text: "72F, clear" }]);
+      expect(result.content).toEqual([blocks.text("72F, clear")]);
       expect(result.structuredContent).toEqual({ tempF: 72 });
       expect(result.isError).toBe(true);
     }
@@ -161,7 +162,7 @@ describe("resolveToolsOption — form C: low-level registry + resolveHandler", (
       ref === "ref:a"
         ? async () => ({
             kind: "inline" as const,
-            content: [{ type: "text" as const, text: "alpha" }],
+            content: [blocks.text("alpha")],
           })
         : null;
     const resolved = resolveToolsOption({ registry: reg, resolveHandler: resolver });
@@ -175,7 +176,7 @@ describe("resolveToolsOption — form C: low-level registry + resolveHandler", (
     const result = await handler!({}, fakeCtx());
     expect(result.kind).toBe("inline");
     if (result.kind === "inline") {
-      expect(result.content).toEqual([{ type: "text", text: "alpha" }]);
+      expect(result.content).toEqual([blocks.text("alpha")]);
     }
     expect(resolved.resolveHandler("ref:unknown")).toBeNull();
   });

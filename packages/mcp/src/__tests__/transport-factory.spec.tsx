@@ -36,6 +36,7 @@ import {
   type TransportFactory,
   type TransportFactoryDeps,
 } from "../index.js";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hello");
 
@@ -50,7 +51,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text" as const, text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
           },
         },
@@ -86,7 +87,7 @@ async function mkEchoServer(): Promise<{
   }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const args = req.params.arguments as { message?: string } | undefined;
-    return { content: [{ type: "text", text: `echo: ${args?.message ?? ""}` }] };
+    return { content: [blocks.text(`echo: ${args?.message ?? ""}`)] };
   });
   await server.connect(serverTransport);
   return { server, clientTransport };
@@ -140,7 +141,7 @@ describe("withMCP — transport factory (#154)", () => {
 
         const content = await session.tools.dispatch("echo-server__echo", { message: "hi" });
         expect(content).toHaveLength(1);
-        expect(content[0]).toEqual({ type: "text", text: "echo: hi" });
+        expect(content[0]).toEqual(blocks.text("echo: hi"));
       } finally {
         await session.close();
       }

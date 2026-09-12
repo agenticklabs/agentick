@@ -30,6 +30,7 @@ import type {
   SessionInstaller,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -42,7 +43,7 @@ const target: ExecutionTarget = {
 
 const result: LanguageModelExecutionResult = {
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "ok" }],
+  output: [blocks.text("ok")],
   stopReason: "end",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 };

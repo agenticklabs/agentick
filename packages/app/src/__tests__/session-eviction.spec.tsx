@@ -26,6 +26,7 @@ import { InMemorySessionStore } from "@agentick/session";
 import { MemoryTimelineStore } from "@agentick/timeline";
 import { waitFor } from "@agentick/utils/testing";
 import type { ContentBlock, ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -78,7 +79,7 @@ function gateScript() {
     {
       result: {
         specVersion: "2026-05-08" as const,
-        output: [{ type: "tool_use" as const, toolUseId: "tc-1", name: "gate", input: {} }],
+        output: [blocks.toolUse("tc-1", "gate", {})],
         stopReason: "tool_use" as const,
         toolCalls: [{ id: "tc-1", name: "gate", input: {} }],
         usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
@@ -87,7 +88,7 @@ function gateScript() {
     {
       result: {
         specVersion: "2026-05-08" as const,
-        output: [{ type: "text" as const, text: "GATED-DONE" }],
+        output: [blocks.text("GATED-DONE")],
         stopReason: "end" as const,
         usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
       },
@@ -268,7 +269,7 @@ describe("PA2 — in-flight guard", () => {
         async () => {
           entered();
           await gate;
-          return [{ type: "text", text: "released" }];
+          return [blocks.text("released")];
         },
       ],
     ]);
@@ -472,7 +473,7 @@ describe("evictSession — the same operation, invoked by hand", () => {
         async () => {
           entered();
           await gate;
-          return [{ type: "text", text: "released" }];
+          return [blocks.text("released")];
         },
       ],
     ]);
@@ -656,7 +657,7 @@ describe("app shutdown pages out an IN-FLIGHT session", () => {
         async () => {
           entered();
           await held;
-          return [{ type: "text", text: "released" }];
+          return [blocks.text("released")];
         },
       ],
     ]);

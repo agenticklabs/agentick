@@ -66,6 +66,7 @@ import {
   SPEC_VERSION,
   sortSessionRecords,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createGateway, staticAuthorizer, permissiveAuthorizer } from "@agentick/gateway";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
@@ -87,7 +88,7 @@ function mkAppOptions() {
         scripted: {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end" as const,
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           },

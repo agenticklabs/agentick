@@ -38,6 +38,7 @@ import type {
   UrlElicitationRequest,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   bearerTokenAuth,
@@ -77,7 +78,7 @@ const echoHandlers: ToolHandlerResolver = (ref) => {
   if (ref !== "handler:echo") return null;
   return async (input) => ({
     kind: "inline",
-    content: [{ type: "text", text: `echo: ${(input as { q: string }).q}` }] as ContentBlock[],
+    content: [blocks.text(`echo: ${(input as { q: string }).q}`)] as ContentBlock[],
   });
 };
 

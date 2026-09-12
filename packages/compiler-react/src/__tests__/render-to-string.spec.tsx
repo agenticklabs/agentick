@@ -5,6 +5,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "../harness/compiler-harness.js";
 import { fakeBridges } from "@agentick/compiler";
 import { XML } from "../react/components/format-scope.js";
+import * as blocks from "@agentick/spec/blocks";
 
 async function makeHarness(scope = `rts-${Math.random()}`) {
   const harness = new CompilerHarness(
@@ -170,7 +171,7 @@ describe("renderToString — content-block serialization", () => {
         "section",
         { id: "s" },
         React.createElement("image", {
-          source: { type: "url", url: "https://x.test/a.png" },
+          source: blocks.source.url("https://x.test/a.png"),
           altText: "alt text",
         }),
       ),

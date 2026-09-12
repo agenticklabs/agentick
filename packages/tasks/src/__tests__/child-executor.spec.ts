@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { drainRejection, waitFor } from "@agentick/utils/testing";
 import type { TaskRecord, TaskStatus } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { InMemoryTaskStore } from "../store.js";
 import { ChildProcessTaskExecutor } from "../child-executor.js";
 import type { WorkerToParentMessage } from "../child-protocol.js";
@@ -45,7 +46,7 @@ describe("ChildProcessTaskExecutor — fork + IPC round-trip", () => {
     });
     expect(handle.initialStatus).toBe("working");
     const result = await handle.result;
-    expect(result).toEqual([{ type: "text", text: "hello-child" }]);
+    expect(result).toEqual([blocks.text("hello-child")]);
     expect(bundle.harness.status(handle.taskId)).toBe("completed");
   });
 
@@ -171,15 +172,15 @@ describe("ChildProcessTaskExecutor — registry + lifetime", () => {
     const bundle = await fakeTasks({ executors: [executor] });
     try {
       // Default in-process still resolvable (closure path).
-      const inProc = bundle.harness.submit(async () => [{ type: "text", text: "in-proc" }]);
-      expect(await inProc.result).toEqual([{ type: "text", text: "in-proc" }]);
+      const inProc = bundle.harness.submit(async () => [blocks.text("in-proc")]);
+      expect(await inProc.result).toEqual([blocks.text("in-proc")]);
       // Provided child-process resolvable (by-ref path).
       const child = bundle.harness.submit({
         executorKind: "child-process",
         handlerRef: "echo",
         input: "child",
       });
-      expect(await child.result).toEqual([{ type: "text", text: "child" }]);
+      expect(await child.result).toEqual([blocks.text("child")]);
     } finally {
       await bundle.close();
     }

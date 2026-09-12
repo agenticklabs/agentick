@@ -14,6 +14,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness, reactCompiler } from "@agentick/compiler-react";
 import type { ContentBlock, ExecutionTarget, ExecutorFactoryDeps } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { AppHarness } from "../index.js";
 import { createApp } from "../react.js";
@@ -74,7 +75,7 @@ function mkExecutor(
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "47 × 23 = 1081." }],
+          output: [blocks.text("47 × 23 = 1081.")],
           stopReason: "end",
           usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
         },
@@ -107,7 +108,7 @@ async function mkApp(opts: { shareSubstrate?: boolean } = {}) {
       async (input) => {
         const { expression } = input as { expression: string };
         const value = Function(`"use strict"; return (${expression});`)();
-        return [{ type: "text", text: String(value) }];
+        return [blocks.text(String(value))];
       },
     ],
   ]);
@@ -461,7 +462,7 @@ describe("AppHarness — telemetry slot (4f.7 placeholder)", () => {
           async (input: unknown) => {
             const { expression } = input as { expression: string };
             const v = Function(`"use strict"; return (${expression});`)();
-            return [{ type: "text", text: String(v) } as ContentBlock];
+            return [blocks.text(String(v)) as ContentBlock];
           },
         ],
       ]),
@@ -608,7 +609,7 @@ describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
           async (input: unknown) => {
             const { expression } = input as { expression: string };
             const v = Function(`"use strict"; return (${expression});`)();
-            return [{ type: "text", text: String(v) } as ContentBlock];
+            return [blocks.text(String(v)) as ContentBlock];
           },
         ],
       ]),
@@ -664,7 +665,7 @@ describe("AppHarness — slot cascade", () => {
           async (input: unknown) => {
             const { expression } = input as { expression: string };
             const v = Function(`"use strict"; return (${expression});`)();
-            return [{ type: "text", text: String(v) } as ContentBlock];
+            return [blocks.text(String(v)) as ContentBlock];
           },
         ],
       ]),
@@ -693,7 +694,7 @@ describe("AppHarness — slot cascade", () => {
           async (input: unknown) => {
             const { expression } = input as { expression: string };
             const v = Function(`"use strict"; return (${expression});`)();
-            return [{ type: "text", text: String(v) } as ContentBlock];
+            return [blocks.text(String(v)) as ContentBlock];
           },
         ],
       ]),
@@ -725,7 +726,7 @@ describe("AppHarness — slot cascade", () => {
           async (input: unknown) => {
             const { expression } = input as { expression: string };
             const v = Function(`"use strict"; return (${expression});`)();
-            return [{ type: "text", text: String(v) } as ContentBlock];
+            return [blocks.text(String(v)) as ContentBlock];
           },
         ],
       ]),
@@ -757,7 +758,7 @@ describe("AppHarness — constructor variant", () => {
           async (input: unknown) => {
             const { expression } = input as { expression: string };
             const v = Function(`"use strict"; return (${expression});`)();
-            return [{ type: "text", text: String(v) } as ContentBlock];
+            return [blocks.text(String(v)) as ContentBlock];
           },
         ],
       ]),

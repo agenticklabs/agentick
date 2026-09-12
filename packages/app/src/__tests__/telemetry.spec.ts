@@ -14,6 +14,7 @@ import { createApp } from "../react.js";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = () => React.createElement("message", { role: "user" }, "hi");
 
@@ -28,7 +29,7 @@ async function mkExecutor() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
           },
         },
@@ -171,7 +172,7 @@ async function mkToolExecutor() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "1081" } satisfies ContentBlock],
+            output: [blocks.text("1081") satisfies ContentBlock],
             stopReason: "end",
             usage: { inputTokens: 10, outputTokens: 6, totalTokens: 16 },
           },
@@ -193,7 +194,7 @@ const pricedTarget = {
 };
 
 const toolHandlers = new Map<string, (input: unknown) => Promise<ContentBlock[]>>([
-  ["handlers/calculator", async () => [{ type: "text", text: "1081" }]],
+  ["handlers/calculator", async () => [blocks.text("1081")]],
 ]);
 
 describe("App telemetry rung 1 — the enrichment switch", () => {

@@ -36,6 +36,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { PromptsHarness } from "@agentick/prompts";
 import { ResourcesHarness } from "@agentick/resources";
 
@@ -119,7 +120,7 @@ async function rig(
       registry: [toolDecl("echo")],
       resolveHandler: () => async (_input, ctx) => {
         options.toolHandler?.(ctx);
-        return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
       },
       ...(options.toolsFilter ? { filter: options.toolsFilter } : {}),
     },

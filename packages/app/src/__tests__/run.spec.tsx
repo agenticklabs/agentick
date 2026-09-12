@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { scriptedAdapter } from "@agentick/model/testing";
 
 import { run } from "../react.js";
+import * as blocks from "@agentick/spec/blocks";
 
 function MinimalAgent() {
   return React.createElement("message" as never, { role: "user" }, "ping");
@@ -92,7 +93,7 @@ describe("run({ history }) — timeline seeding (#187)", () => {
       message: {
         id: "h1",
         role: "user",
-        content: [{ type: "text", text: "REMEMBER: heliotrope" }],
+        content: [blocks.text("REMEMBER: heliotrope")],
         ts: 0,
       },
     },

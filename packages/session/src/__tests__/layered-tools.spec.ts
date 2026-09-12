@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ExecutionTarget, ToolDeclaration, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { ToolExecutorHarness, InMemoryHandlerResolver } from "@agentick/tool-executor";
 import { ElicitationHarness } from "@agentick/elicitation";
@@ -55,7 +56,7 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
   // tests (the fake never emits tool_use), but the registry's register()
   // path still verifies that handlerRefs resolve.
   for (const name of ["calc", "search", "exec_only"]) {
-    resolver.register(`h.${name}`, async () => [{ type: "text", text: "ok" }]);
+    resolver.register(`h.${name}`, async () => [blocks.text("ok")]);
   }
   const elicitation = new ElicitationHarness("test-t:elicitation", journal, bus, inbox);
   const toolExecutor = new ToolExecutorHarness("test-t", journal, bus, inbox, {

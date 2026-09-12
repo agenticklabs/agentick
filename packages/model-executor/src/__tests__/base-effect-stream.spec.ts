@@ -26,6 +26,7 @@ import type {
   LanguageModelExecutionResult,
   LanguageModelInput,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { drainRejection } from "@agentick/utils/testing";
 
@@ -108,7 +109,7 @@ function stubAdapter(
     normalize(raw: StubRaw): LanguageModelExecutionResult {
       return {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: raw.text }],
+        output: [blocks.text(raw.text)],
         stopReason: "end",
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       };
@@ -135,9 +136,7 @@ const mkInput = (): {
   compiled: {
     specVersion: "2026-05-08",
     context: {
-      entries: [
-        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
-      ],
+      entries: [{ kind: "message", id: "m_1", role: "user", content: [blocks.text("hi")] }],
     },
   },
   target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },

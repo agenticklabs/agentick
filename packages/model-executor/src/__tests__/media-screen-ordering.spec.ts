@@ -30,6 +30,7 @@ import type {
   LanguageModelMessage,
   MediaSource,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model";
 
@@ -80,7 +81,7 @@ function recordingAdapter(): {
     normalize(raw: StubRaw): LanguageModelExecutionResult {
       return {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: raw.text }],
+        output: [blocks.text(raw.text)],
         stopReason: "end",
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       };
@@ -120,27 +121,21 @@ describe("the screen runs before the adapter", () => {
   it("drops a declared-unprojectable source so prepareRequest never sees it", async () => {
     const { adapter, seen } = recordingAdapter();
     const exec = await makeExecutor(adapter, "exec-screen-1");
-    await execute(exec, [
-      textPart("what is this?"),
-      imagePart({ type: "reference", fileId: "f-1" }),
-    ]);
+    await execute(exec, [textPart("what is this?"), imagePart(blocks.source.reference("f-1"))]);
     expect(imageSources(seen()[0]!)).toEqual([]);
   });
 
   it("keeps a declared-carryable source", async () => {
     const { adapter, seen } = recordingAdapter();
     const exec = await makeExecutor(adapter, "exec-screen-2");
-    await execute(exec, [imagePart({ type: "url", url: "gs://b/o" })]);
+    await execute(exec, [imagePart(blocks.source.url("gs://b/o"))]);
     expect(imageSources(seen()[0]!)).toEqual(["url"]);
   });
 
   it("never takes neighbouring text with the dropped part", async () => {
     const { adapter, seen } = recordingAdapter();
     const exec = await makeExecutor(adapter, "exec-screen-3");
-    await execute(exec, [
-      textPart("what is this?"),
-      imagePart({ type: "reference", fileId: "f-1" }),
-    ]);
+    await execute(exec, [textPart("what is this?"), imagePart(blocks.source.reference("f-1"))]);
     expect(seen()[0]![0]!.content.map((p) => p.type)).toEqual(["text"]);
   });
 });
@@ -166,14 +161,14 @@ describe("the screen runs AFTER onBeforeModelGenerate — the regression that ma
           ...m,
           content: m.content.map((p) =>
             p.type === "image" && p.source.type === "reference"
-              ? imagePart({ type: "url", url: `gs://resolved/${p.source.fileId}` })
+              ? imagePart(blocks.source.url(`gs://resolved/${p.source.fileId}`))
               : p,
           ),
         })),
       },
     }));
 
-    await execute(exec, [imagePart({ type: "reference", fileId: "f-1" })]);
+    await execute(exec, [imagePart(blocks.source.reference("f-1"))]);
     off();
 
     // Survived, in the form the hook produced.
@@ -193,7 +188,7 @@ describe("the screen runs AFTER onBeforeModelGenerate — the regression that ma
 
     const off = exec.hooks.onBeforeModelGenerate((input) => input); // resolves nothing
 
-    await execute(exec, [textPart("hi"), imagePart({ type: "reference", fileId: "f-1" })]);
+    await execute(exec, [textPart("hi"), imagePart(blocks.source.reference("f-1"))]);
     off();
     expect(imageSources(seen()[0]!)).toEqual([]);
     expect(seen()[0]![0]!.content.map((p) => p.type)).toEqual(["text"]);
@@ -216,7 +211,7 @@ describe("project() itself does not screen", () => {
               kind: "message",
               id: "m_1",
               role: "user",
-              content: [{ type: "image", source: { type: "reference", fileId: "f-1" } }],
+              content: [blocks.image(blocks.source.reference("f-1"))],
             },
           ],
         },
@@ -272,10 +267,7 @@ describe("a declined part is REPORTED, not merely droppable", () => {
     await exec.ready;
 
     const logs = await collectLogs(bus, () =>
-      execute(exec, [
-        textPart("what is this?"),
-        imagePart({ type: "reference", fileId: "019faa2c" }),
-      ]),
+      execute(exec, [textPart("what is this?"), imagePart(blocks.source.reference("019faa2c"))]),
     );
 
     const declines = declineLogs(logs);
@@ -303,7 +295,7 @@ describe("a declined part is REPORTED, not merely droppable", () => {
     );
     await exec.ready;
     const logs = await collectLogs(bus, () =>
-      execute(exec, [imagePart({ type: "url", url: "gs://b/o" })]),
+      execute(exec, [imagePart(blocks.source.url("gs://b/o"))]),
     );
     expect(declineLogs(logs)).toEqual([]);
   });

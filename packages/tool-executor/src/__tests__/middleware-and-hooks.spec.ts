@@ -15,6 +15,7 @@ import { Effect } from "effect";
 
 import type { DispatchInput, DispatchResult, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -49,7 +50,7 @@ describe("ToolExecutorHarness — .fx.use(middleware)", () => {
       handlers: [
         {
           handlerRef: "h.echo",
-          handler: async () => [{ type: "text", text: "ran" }],
+          handler: async () => [blocks.text("ran")],
         },
       ],
     });
@@ -77,7 +78,7 @@ describe("ToolExecutorHarness — .fx.use(middleware)", () => {
       handlers: [
         {
           handlerRef: "h.echo",
-          handler: async () => [{ type: "text", text: "x" }],
+          handler: async () => [blocks.text("x")],
         },
       ],
     });
@@ -110,7 +111,7 @@ describe("ToolExecutorHarness — .fx.use(middleware)", () => {
       handlers: [
         {
           handlerRef: "h.echo",
-          handler: async () => [{ type: "text", text: "y" }],
+          handler: async () => [blocks.text("y")],
         },
       ],
     });
@@ -137,7 +138,7 @@ describe("ToolExecutorHarness — .fx.guard(decider)", () => {
           handlerRef: "h.echo",
           handler: async () => {
             ran++;
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -157,7 +158,7 @@ describe("ToolExecutorHarness — .fx.guard(decider)", () => {
           handlerRef: "h.echo",
           handler: async () => {
             ran++;
-            return [{ type: "text", text: "should-not-run" }];
+            return [blocks.text("should-not-run")];
           },
         },
       ],
@@ -180,7 +181,7 @@ describe("ToolExecutorHarness — .fx.guard(decider)", () => {
       handlers: [
         {
           handlerRef: "h.echo",
-          handler: async () => [{ type: "text", text: "z" }],
+          handler: async () => [blocks.text("z")],
         },
       ],
     });

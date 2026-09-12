@@ -29,6 +29,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { CommandHooks } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hello");
 
@@ -43,7 +44,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
           },
         },
@@ -73,7 +74,7 @@ function makeEchoHandler(seen: { value?: unknown }): ToolHandler {
   return async (input) => {
     const value = (input as { value?: unknown }).value;
     seen.value = value;
-    return [{ type: "text", text: String(value) } satisfies ContentBlock];
+    return [blocks.text(String(value)) satisfies ContentBlock];
   };
 }
 
@@ -159,7 +160,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
           afterRan++;
           return {
             ...output,
-            content: [{ type: "text", text: "reshaped-by-after" }],
+            content: [blocks.text("reshaped-by-after")],
           };
         },
       },

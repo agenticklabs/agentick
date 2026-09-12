@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { DispatchInput } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { defineToolExecutor } from "../define-tool-executor.js";
 
@@ -28,7 +29,7 @@ function build() {
       return {
         toolCallId: input.toolCallId,
         name: input.name,
-        content: [{ type: "text" as const, text: `charged#${state.sideEffects}` }],
+        content: [blocks.text(`charged#${state.sideEffects}`)],
       };
     },
   });

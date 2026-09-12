@@ -15,6 +15,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock, ProtocolEvent, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hello");
 
@@ -39,7 +40,7 @@ async function mkExecutor(id: string) {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
           },
         },
@@ -87,7 +88,7 @@ describe("AppHarness — an adopter's standing grants", () => {
           "h.delete-file",
           async () => {
             ran.push("delete-file");
-            return [{ type: "text" as const, text: "gone" }];
+            return [blocks.text("gone")];
           },
         ],
       ]),
@@ -154,7 +155,7 @@ describe("AppHarness — an adopter's standing grants", () => {
           "h.delete-file",
           async () => {
             ran.push("delete-file");
-            return [{ type: "text" as const, text: "gone" }];
+            return [blocks.text("gone")];
           },
         ],
       ]),

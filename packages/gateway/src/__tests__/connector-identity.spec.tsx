@@ -18,6 +18,7 @@ import { waitFor } from "@agentick/utils/testing";
 
 import { defineConnector } from "@agentick/connector";
 import type { ConnectorSpec } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { connectorProbe, type ConnectorProbe } from "@agentick/connector/testing";
 
 function Agent() {
@@ -61,7 +62,7 @@ async function buildStack(probe: ConnectorProbe, spec: Partial<ConnectorSpec>) {
   const app = await gateway.createApp({
     rootElement: React.createElement(Agent),
     options: {
-      modelExecutor: makeExec([{ type: "text", text: "reply" }]),
+      modelExecutor: makeExec([blocks.text("reply")]),
       compiler: reactCompiler(),
     },
   });

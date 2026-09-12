@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HookBridges, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { fakeBridges } from "../testing/fake-bridges.js";
 import { timelineCompiler } from "../testing/timeline-compiler.js";
@@ -51,13 +52,13 @@ describe("timelineCompiler", () => {
         kind: "message",
         id: "m1",
         role: "user",
-        content: [{ type: "text", text: "what is on her schedule?" }],
+        content: [blocks.text("what is on her schedule?")],
       },
       {
         kind: "message",
         id: "m2",
         role: "assistant",
-        content: [{ type: "text", text: "checking" }],
+        content: [blocks.text("checking")],
       },
     ]);
   });

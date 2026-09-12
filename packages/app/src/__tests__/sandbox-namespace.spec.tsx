@@ -19,6 +19,7 @@ import { defineSandbox } from "@agentick/sandbox-local";
 import type { SandboxBridge } from "@agentick/sandbox";
 import type { ContentBlock, SessionExtension, ToolHandler } from "@agentick/spec";
 import { jsonSchema, toRegistration } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement =>
   React.createElement("message", { role: "system" }, "sandbox host");
@@ -63,7 +64,7 @@ describe("createApp({ sandbox }) — the adopter entry point", () => {
           const bridge = (deps as { readonly ctx: { readonly sandbox?: SandboxBridge } }).ctx
             .sandbox;
           seenWorkspace = bridge?.get("primary")?.workspacePath;
-          return [{ type: "text", text: "ok" } satisfies ContentBlock];
+          return [blocks.text("ok") satisfies ContentBlock];
         };
         const handlerRef = `sandbox-ctx-probe:${installer.sessionId}`;
         installer.registerToolHandler(handlerRef, handler);

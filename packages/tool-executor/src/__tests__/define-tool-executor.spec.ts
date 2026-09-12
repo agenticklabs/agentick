@@ -23,6 +23,7 @@ import {
   type ProtocolEvent,
   type ToolRegistration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { defineToolExecutor } from "../define-tool-executor.js";
 
@@ -55,7 +56,7 @@ describe("defineToolExecutor — factory shape", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        content: [{ type: "text", text: "ok" }],
+        content: [blocks.text("ok")],
       }),
     });
     expect(isToolExecutorFactory(factory)).toBe(true);
@@ -66,7 +67,7 @@ describe("defineToolExecutor — factory shape", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        content: [{ type: "text", text: `ran:${input.name}` }],
+        content: [blocks.text(`ran:${input.name}`)],
       }),
     });
     const exec = factory({
@@ -77,7 +78,7 @@ describe("defineToolExecutor — factory shape", () => {
     });
     const result = await exec.dispatch(dispatchOf("calc", { a: 1 }));
     expect(result.isError ?? false).toBe(false);
-    expect(result.content[0]).toMatchObject({ type: "text", text: "ran:calc" });
+    expect(result.content[0]).toMatchObject(blocks.text("ran:calc"));
   });
 });
 
@@ -251,7 +252,7 @@ describe("defineToolExecutor — abort + envelopes", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        content: [{ type: "text", text: `ran:${input.name}` }],
+        content: [blocks.text(`ran:${input.name}`)],
       }),
     });
     const scopeId = "inbox-dispatch-cb";
@@ -276,7 +277,7 @@ describe("defineToolExecutor — abort + envelopes", () => {
       }),
     );
     expect(result.toolCallId).toBe("inbox-cb-1");
-    expect(result.content).toEqual([{ type: "text", text: "ran:calc" }]);
+    expect(result.content).toEqual([blocks.text("ran:calc")]);
   });
 
   it("dispatch emits envelopes on the supplied bus", async () => {
@@ -285,7 +286,7 @@ describe("defineToolExecutor — abort + envelopes", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        content: [{ type: "text", text: "ok" }],
+        content: [blocks.text("ok")],
       }),
     });
     const exec = factory({
@@ -327,12 +328,12 @@ describe("defineToolExecutor — standalone construction (no deps)", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        content: [{ type: "text", text: `ran:${input.name}` }],
+        content: [blocks.text(`ran:${input.name}`)],
       }),
     });
     const exec = factory();
     const result = await exec.dispatch(dispatchOf("calc", { a: 1 }));
-    expect(result.content[0]).toMatchObject({ type: "text", text: "ran:calc" });
+    expect(result.content[0]).toMatchObject(blocks.text("ran:calc"));
   });
 
   it("two dep-less calls mint distinct executors on distinct scopes", async () => {

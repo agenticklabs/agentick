@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createToolCatalog } from "@agentick/tool";
 
 import { inMemoryServerTransport, McpServerHarness, type ToolHandlerResolver } from "../index.js";
@@ -44,7 +45,7 @@ function tool(name: string): ToolDeclaration {
 function trivialResolver(): ToolHandlerResolver {
   return () => async (): Promise<{ kind: "inline"; content: ContentBlock[] }> => ({
     kind: "inline",
-    content: [{ type: "text", text: "ok" }],
+    content: [blocks.text("ok")],
   });
 }
 

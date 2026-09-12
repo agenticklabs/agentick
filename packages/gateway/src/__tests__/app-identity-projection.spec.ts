@@ -21,6 +21,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppInfo, ContentBlock, SessionEntry } from "@agentick/spec";
 import { relation, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
@@ -43,7 +44,7 @@ function mkAppOptions(identity: { title?: string; description?: string } = {}) {
         scripted: {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           },

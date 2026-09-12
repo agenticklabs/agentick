@@ -12,15 +12,16 @@
 import { describe, expect, it } from "vitest";
 
 import { discriminateCallToolResponse } from "../wire/task-codec.js";
+import * as blocks from "@agentick/spec/blocks";
 
 describe("discriminateCallToolResponse", () => {
   it("discriminates a CallToolResult (inline) shape", () => {
     const out = discriminateCallToolResponse({
-      content: [{ type: "text", text: "hi" }],
+      content: [blocks.text("hi")],
     });
     expect(out._tag).toBe("inline");
     if (out._tag === "inline") {
-      expect(out.result.content).toEqual([{ type: "text", text: "hi" }]);
+      expect(out.result.content).toEqual([blocks.text("hi")]);
     }
   });
 
@@ -87,7 +88,7 @@ describe("discriminateCallToolResponse", () => {
         createdAt: "2026-01-01T00:00:00Z",
         lastUpdatedAt: "2026-01-01T00:00:00Z",
       },
-      content: [{ type: "text", text: "also here" }],
+      content: [blocks.text("also here")],
     });
     expect(out._tag).toBe("task");
   });
@@ -101,7 +102,7 @@ describe("discriminateCallToolResponse", () => {
     // task: null + content present → treated as inline.
     const out = discriminateCallToolResponse({
       task: null,
-      content: [{ type: "text", text: "ok" }],
+      content: [blocks.text("ok")],
     });
     expect(out._tag).toBe("inline");
   });

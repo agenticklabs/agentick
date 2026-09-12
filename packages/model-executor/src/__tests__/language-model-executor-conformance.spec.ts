@@ -17,6 +17,7 @@ import { describe } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { AdapterDelta, ExecutionTarget, LanguageModelExecutionResult } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { runExecutorConformance } from "@agentick/spec-conformance";
 
 import { LanguageModelExecutor } from "../language-model-executor.js";
@@ -46,7 +47,7 @@ const DEFAULT_TARGET: ExecutionTarget = {
 
 const DEFAULT_SCRIPTED: LanguageModelExecutionResult = {
   specVersion: "2026-05-08",
-  output: [{ type: "text", text: "default reply" }],
+  output: [blocks.text("default reply")],
   stopReason: "end",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 };
@@ -98,7 +99,7 @@ function adapterFor(
             {
               type: "content",
               blockIndex: chunk.blockIndex,
-              content: { type: "text", text: chunk.text },
+              content: blocks.text(chunk.text),
             },
           ];
         case "toolCall":

@@ -35,6 +35,7 @@ import type {
   StoreCtx,
   ToolHandler,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -79,7 +80,7 @@ const gateScript = [
   {
     result: {
       specVersion: "2026-05-08" as const,
-      output: [{ type: "tool_use" as const, toolUseId: "tc-1", name: "gate", input: {} }],
+      output: [blocks.toolUse("tc-1", "gate", {})],
       stopReason: "tool_use" as const,
       toolCalls: [{ id: "tc-1", name: "gate", input: {} }],
       usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
@@ -88,7 +89,7 @@ const gateScript = [
   {
     result: {
       specVersion: "2026-05-08" as const,
-      output: [{ type: "text" as const, text: "GATE-DONE" }],
+      output: [blocks.text("GATE-DONE")],
       stopReason: "end" as const,
       usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
     },
@@ -113,7 +114,7 @@ function gateHandlers(entered: () => void): Map<string, ToolHandler> {
           }
           ctx.signal.addEventListener("abort", () => resolve(), { once: true });
         });
-        return [{ type: "text", text: "gate released" }];
+        return [blocks.text("gate released")];
       },
     ],
   ]);
@@ -195,7 +196,7 @@ async function residueFor(stores: DurableStores, sessionId: string) {
 async function fillScopes(session: SessionHarnessProtocol, marker: string): Promise<void> {
   await session.timeline.append({
     kind: "message",
-    message: { id: `${marker}-m`, role: "user", content: [{ type: "text", text: marker }], ts: 0 },
+    message: { id: `${marker}-m`, role: "user", content: [blocks.text(marker)], ts: 0 },
   } as never);
   await session.knobs.set({ id: "secret", value: marker });
   await session.state.set({ key: "secret", value: marker });

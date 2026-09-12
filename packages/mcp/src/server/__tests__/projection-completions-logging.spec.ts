@@ -35,6 +35,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { deriveTestContext } from "@agentick/runtime/testing";
 
@@ -109,7 +110,7 @@ const logHandlerResolver: ToolHandlerResolver = (ref) => {
     // bus event the log projection forwards to `notifications/message`.
     ctx.log("info", { msg: "info-line" }, "test-logger");
     ctx.log("debug", { msg: "debug-line" });
-    const content: ContentBlock[] = [{ type: "text", text: "done" }];
+    const content: ContentBlock[] = [blocks.text("done")];
     return { kind: "inline", content };
   };
 };
@@ -141,7 +142,7 @@ const allLevelsHandlerResolver: ToolHandlerResolver = (ref) => {
     ctx.log.warning({ lvl: "warning" });
     ctx.log.error({ lvl: "error" });
     ctx.log.critical({ lvl: "critical" });
-    const content: ContentBlock[] = [{ type: "text", text: "done" }];
+    const content: ContentBlock[] = [blocks.text("done")];
     return { kind: "inline", content };
   };
 };

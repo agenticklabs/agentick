@@ -26,6 +26,7 @@ import type {
   WireParams,
 } from "@agentick/spec";
 import { NOOP_METRICS, OFF_TRACE, createLog, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { TOOL_CALL_CHANNEL_FQN } from "../tool-call-schema.js";
@@ -125,7 +126,7 @@ describe("clientToolCalls.route — correlated relays", () => {
     const unsub = handle.route({
       get_weather: (input, ctx) => {
         seenInput.push({ input, ctx });
-        return [{ type: "text", text: "sunny" }];
+        return [blocks.text("sunny")];
       },
     });
 
@@ -136,7 +137,7 @@ describe("clientToolCalls.route — correlated relays", () => {
     expect(seen[0]!.params).toEqual({
       sessionId: "s1",
       correlationId: "corr:1",
-      result: [{ type: "text", text: "sunny" }],
+      result: [blocks.text("sunny")],
     });
     // The SAME ctx a `createTool` handler gets. It used to be a two-field
     // stub, so a handler moved between `route` and `use` silently lost `log`,
@@ -219,7 +220,7 @@ describe("clientToolCalls.route — fire-and-forget relays", () => {
     handle.route({
       notify_ui: () => {
         ran++;
-        return [{ type: "text", text: "rendered" }];
+        return [blocks.text("rendered")];
       },
     });
 
@@ -246,7 +247,7 @@ describe("clientToolCalls.use — declare and route as one act", () => {
         name: "read_selection",
         description: "What the user has highlighted",
         inputSchema: jsonSchema({ type: "object" }),
-        handler: async () => [{ type: "text", text: "highlighted" }],
+        handler: async () => [blocks.text("highlighted")],
       }),
     ] as never);
 
@@ -267,9 +268,7 @@ describe("clientToolCalls.use — declare and route as one act", () => {
 
     await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));
     const reply = seen.find((r) => r.method === "session/respond_to_tool_call");
-    expect((reply!.params as { result: unknown }).result).toEqual([
-      { type: "text", text: "highlighted" },
-    ]);
+    expect((reply!.params as { result: unknown }).result).toEqual([blocks.text("highlighted")]);
     handle.close();
   });
 

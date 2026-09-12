@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { createTool } from "@agentick/tool";
 
 import { inMemoryServerTransport, spawnStandaloneMcpServer } from "../index.js";
+import * as blocks from "@agentick/spec/blocks";
 
 describe("spawnStandaloneMcpServer", () => {
   it("spawns from a CreatedTool[] sugar shape", async () => {
@@ -25,7 +26,7 @@ describe("spawnStandaloneMcpServer", () => {
         createTool({
           name: "echo",
           description: "echo input",
-          handler: async () => [{ type: "text", text: "echoed" }],
+          handler: async () => [blocks.text("echoed")],
         }),
       ],
     });

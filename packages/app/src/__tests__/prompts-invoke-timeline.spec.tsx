@@ -26,6 +26,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { MessageEntry, MessageSource, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { definePrompts, hydrateFrom, type PromptMessageSource } from "@agentick/prompts";
 import { TimelineHarness, withTimeline } from "@agentick/timeline";
 
@@ -46,7 +47,7 @@ const greeting = {
       {
         kind: "message",
         role: "user",
-        content: [{ type: "text", text: `Hello, ${String(args.name)}.` }],
+        content: [blocks.text(`Hello, ${String(args.name)}.`)],
       },
     ],
   },

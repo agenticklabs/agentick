@@ -26,6 +26,7 @@ import type {
   MessageInbox,
   OperationJournal,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -44,7 +45,7 @@ function mkExecutor(): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "pong" }],
+            output: [blocks.text("pong")],
             stopReason: "end",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           },

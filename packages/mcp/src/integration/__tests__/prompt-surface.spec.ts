@@ -19,6 +19,7 @@ import type {
   McpGetPromptResult,
   McpPromptPage,
 } from "../../client/types.js";
+import * as blocks from "@agentick/spec/blocks";
 
 async function harness(): Promise<PromptsHarness> {
   const h = new PromptsHarness(
@@ -61,7 +62,7 @@ function fakeClient(
       gets.push(name);
       return (
         spec.get?.(name, args) ?? {
-          messages: [{ role: "user", content: [{ type: "text", text: `rendered:${name}` }] }],
+          messages: [{ role: "user", content: [blocks.text(`rendered:${name}`)] }],
         }
       );
     },
@@ -197,7 +198,7 @@ describe("content comes from the remote, on every invoke", () => {
 
     const first = await prompts.invoke({ name: "p", args: {} });
     expect(client.gets).toEqual(["p"]);
-    expect(first.messages[0]?.content).toEqual([{ type: "text", text: "rendered:p" }]);
+    expect(first.messages[0]?.content).toEqual([blocks.text("rendered:p")]);
 
     await prompts.invoke({ name: "p", args: {} });
     expect(client.gets).toEqual(["p", "p"]); // fetched again
@@ -211,7 +212,7 @@ describe("content comes from the remote, on every invoke", () => {
       listPrompts: async () => ({ prompts: [{ name: "p", arguments: [{ name: "jobId" }] }] }),
       getPrompt: async (_name, args) => {
         seen = args;
-        return { messages: [{ role: "user", content: [{ type: "text", text: "ok" }] }] };
+        return { messages: [{ role: "user", content: [blocks.text("ok")] }] };
       },
       completePromptArgument: async () => ({ values: [] }),
     };

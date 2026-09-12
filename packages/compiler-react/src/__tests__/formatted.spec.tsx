@@ -2,15 +2,16 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { Formatted, Markdown, Message, XML, compileTemplate, renderTemplate } from "../index.js";
 
-const toolUse: ContentBlock = { type: "tool_use", toolUseId: "c1", name: "query", input: { a: 1 } };
+const toolUse: ContentBlock = blocks.toolUse("c1", "query", { a: 1 });
 const toolResult: ContentBlock = {
   type: "tool_result",
   toolUseId: "c1",
   name: "query",
-  content: [{ type: "text", text: "3 rows" }],
+  content: [blocks.text("3 rows")],
 };
 
 describe("<Formatted>", () => {

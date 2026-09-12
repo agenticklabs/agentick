@@ -23,6 +23,7 @@ import { KnobsHarness } from "@agentick/knobs";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { useKnob } from "@agentick/knobs/react";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -37,7 +38,7 @@ async function mkExecutor() {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
           },
         },

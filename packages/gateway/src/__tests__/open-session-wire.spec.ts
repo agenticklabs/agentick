@@ -26,6 +26,7 @@ import {
   type SessionHarnessProtocol,
   type WireExtensionContext,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { permissiveAuthorizer } from "../authorizers.js";
 import { createDynamicCommandResolver } from "../dynamic-commands.js";
@@ -63,7 +64,7 @@ async function gatewayRig(appIds: readonly string[] = ["solo"]) {
     scripted: {
       result: {
         specVersion: SPEC_VERSION,
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       },

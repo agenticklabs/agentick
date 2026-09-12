@@ -17,34 +17,35 @@
 import { ContentBlockSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import type { BlockType, ContentBlock } from "@agentick/spec";
+import { audio, image, json, reasoning, source, text, toolUse } from "@agentick/spec/blocks";
 
 import { toWireContent, toWireContentBlock } from "../content.js";
 
 /** One block of every kind in the union — the exhaustiveness fixture. */
 const ONE_OF_EACH: { readonly [K in BlockType]: Extract<ContentBlock, { type: K }> } = {
-  text: { type: "text", text: "hello" },
-  reasoning: { type: "reasoning", text: "thinking" },
-  image: { type: "image", source: { type: "base64", data: "aW1n", mimeType: "image/png" } },
+  text: text("hello"),
+  reasoning: reasoning("thinking"),
+  image: image(source.base64("aW1n", "image/png")),
   document: {
     type: "document",
-    source: { type: "url", url: "https://example.com/docs/report.pdf" },
+    source: source.url("https://example.com/docs/report.pdf"),
     mimeType: "application/pdf",
   },
-  audio: { type: "audio", source: { type: "base64", data: "YXVk", mimeType: "audio/mpeg" } },
+  audio: audio(source.base64("YXVk", "audio/mpeg")),
   video: {
     type: "video",
     source: { type: "reference", fileId: "file_123", fileName: "clip.mp4" },
   },
-  tool_use: { type: "tool_use", toolUseId: "call_1", name: "search", input: { q: "x" } },
+  tool_use: toolUse("call_1", "search", { q: "x" }),
   tool_result: {
     type: "tool_result",
     toolUseId: "call_1",
     name: "search",
-    content: [{ type: "text", text: "found" }],
+    content: [text("found")],
   },
   task_ref: { type: "task_ref", taskId: "task_1", status: "working" },
   resource: { type: "resource", resource: { uri: "file:///a.txt", text: "body" } },
-  json: { type: "json", data: { x: 1 } },
+  json: json({ x: 1 }),
   xml: { type: "xml", text: "<a/>" },
   csv: { type: "csv", text: "a,b\n1,2" },
   html: { type: "html", text: "<p>hi</p>" },
@@ -97,7 +98,7 @@ describe("toWireContent — every block kind reaches the wire", () => {
 
 describe("toWireContentBlock — MCP-native kinds are byte-stable", () => {
   it("text passes through unchanged", () => {
-    expect(toWireContentBlock(ONE_OF_EACH.text)).toEqual({ type: "text", text: "hello" });
+    expect(toWireContentBlock(ONE_OF_EACH.text)).toEqual(text("hello"));
   });
 
   it("base64 image / audio map field-for-field", () => {
@@ -151,7 +152,7 @@ describe("toWireContentBlock — addressable payloads become resource links", ()
   it("an image's own label wins over the uri segment", () => {
     const wire = toWireContentBlock({
       type: "image",
-      source: { type: "url", url: "https://cdn.example.com/a/b.png" },
+      source: source.url("https://cdn.example.com/a/b.png"),
       mimeType: "image/png",
       altText: "The chart",
     });

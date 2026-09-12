@@ -14,6 +14,7 @@ import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { defineEval } from "../index.js";
@@ -45,7 +46,7 @@ function mkExecutor(): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "the answer is 42." }],
+            output: [blocks.text("the answer is 42.")],
             stopReason: "end",
             usage: { inputTokens: 10, outputTokens: 6, totalTokens: 16 },
           },

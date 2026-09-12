@@ -31,6 +31,7 @@ import {
   type ProtocolEvent,
   type StandardSchemaV1,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { SessionHarness } from "../harness.js";
@@ -73,7 +74,7 @@ function summarizingExecutor() {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: SUMMARY }],
+          output: [blocks.text(SUMMARY)],
           stopReason: "end",
           usage: USAGE,
         },
@@ -123,7 +124,7 @@ async function makeSession(
         id: `m${i}`,
         ts: i,
         role: i % 2 === 0 ? "user" : "assistant",
-        content: [{ type: "text", text: `turn ${i}` }],
+        content: [blocks.text(`turn ${i}`)],
       },
     });
   }
@@ -220,7 +221,7 @@ describe("compaction through a real session", () => {
 
 describe("withInstruction", () => {
   const input = {
-    messages: [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }],
+    messages: [{ role: "user" as const, content: [blocks.text("hi")] }],
     tools: [{ name: "search", description: "", inputSchema: { type: "object" as const } }],
   };
 
@@ -230,7 +231,7 @@ describe("withInstruction", () => {
     expect(out.messages[0]).toBe(input.messages[0]);
     expect(out.messages[1]).toMatchObject({
       role: "user",
-      content: [{ type: "text", text: "summarize" }],
+      content: [blocks.text("summarize")],
     });
   });
 
@@ -412,7 +413,7 @@ describe("a reflection asked for a shape", () => {
     const rig = await makeSession(2, {
       executor: scriptedExecutor({
         specVersion: SPEC_VERSION,
-        output: [{ type: "text", text: "the fold so f" }],
+        output: [blocks.text("the fold so f")],
         stopReason: "max_tokens",
         usage: USAGE,
       }),

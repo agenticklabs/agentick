@@ -28,6 +28,7 @@ import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline";
 import { stubStoreCtx } from "@agentick/store";
 import type { ExecutionTarget, TimelineEntry } from "@agentick/spec";
 import { TimelineWriteFailed } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -59,7 +60,7 @@ const replyExec = (text: string) =>
 function entry(id: string): TimelineEntry {
   return {
     kind: "message",
-    message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+    message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
   } as unknown as TimelineEntry;
 }
 
@@ -141,7 +142,7 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
     await session.mountReady;
 
     const handle = await session.send({
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
     await handle.result;
 
@@ -175,7 +176,7 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
     await session.mountReady;
 
     const handle = await session.send({
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
     const exit = await handle.result.then(
       () => "resolved",

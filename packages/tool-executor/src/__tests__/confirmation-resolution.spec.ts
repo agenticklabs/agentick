@@ -24,6 +24,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec";
 import { ToolConfirmationTimeoutError, ToolValidationError, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { fromStandardSchema } from "../validator.js";
 import { createTestHarness } from "../testing/index.js";
@@ -70,7 +71,7 @@ const okHandler = (ran: { count: number }) => ({
   handlerRef: "h.delete-file",
   handler: async () => {
     ran.count++;
-    return [{ type: "text" as const, text: "ok" }];
+    return [blocks.text("ok")];
   },
 });
 

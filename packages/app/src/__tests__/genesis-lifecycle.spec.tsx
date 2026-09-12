@@ -33,6 +33,7 @@ import {
 } from "@agentick/timeline";
 import { TimelineHydrateFailed } from "@agentick/spec";
 import type { TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createApp } from "../react.js";
 
@@ -43,7 +44,7 @@ function MinimalAgent() {
 function userEntry(id: string): TimelineEntry {
   return {
     kind: "message",
-    message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+    message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
   } as unknown as TimelineEntry;
 }
 

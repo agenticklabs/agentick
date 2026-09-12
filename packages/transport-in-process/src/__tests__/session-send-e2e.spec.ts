@@ -27,6 +27,7 @@ import {
   type SessionSendParams,
   SessionNotFoundError,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport";
 
 import { inProcessTransport } from "../index.js";
@@ -40,7 +41,7 @@ async function makeStack(replyText: string) {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: replyText } satisfies ContentBlock],
+          output: [blocks.text(replyText) satisfies ContentBlock],
           stopReason: "end",
         },
       },
@@ -122,7 +123,7 @@ describe("session/send — full client → gateway → executor roundtrip", () =
       .send({ messages: [{ role: "user", content: "ping" }] }).result;
 
     expect(result.output).toHaveLength(1);
-    expect(result.output[0]).toMatchObject({ type: "text", text: "hello back" });
+    expect(result.output[0]).toMatchObject(blocks.text("hello back"));
     expect(result.stopReason).toBe("end");
 
     await cleanup();
@@ -167,7 +168,7 @@ describe("session/send — full client → gateway → executor roundtrip", () =
       .session(sessionId)
       .send({ messages: [{ role: "user", content: "ping" }], onBusy: "queue" }).result;
 
-    expect(result.output[0]).toMatchObject({ type: "text", text: "queued reply" });
+    expect(result.output[0]).toMatchObject(blocks.text("queued reply"));
     expect(result.stopReason).toBe("end");
 
     await cleanup();

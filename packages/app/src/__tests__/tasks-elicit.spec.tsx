@@ -30,6 +30,7 @@ import { describe, expect, it } from "vitest";
 import type { ElicitationHarness, ElicitationSnapshotFrame } from "@agentick/elicitation";
 import type { ContentBlock, SessionHarnessProtocol } from "@agentick/spec";
 import { DetachedTaskCannotElicitError } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { drainRejection, waitFor } from "@agentick/utils/testing";
 
 import { createApp } from "../react.js";
@@ -72,7 +73,7 @@ describe("createApp → task ctx.elicit", () => {
     // The task's own question reached the client, verbatim, and the client's
     // answer threaded back down the escalation ask stack.
     expect(asked).toBe("Approve?");
-    expect(result).toEqual([{ type: "text", text: "approved" }]);
+    expect(result).toEqual([blocks.text("approved")]);
     expect(session.tasks.status(handle.taskId)).toBe("completed");
     // The live sugar, not the stub — the stub's probe reports `false`.
     expect(canDoForm).toBe(true);

@@ -30,6 +30,7 @@
 
 import { describe, expect, it } from "vitest";
 import { AppNotFoundError, ErrorCode, SPEC_VERSION, type ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
@@ -47,7 +48,7 @@ function mkAppOptions() {
       scripted: {
         result: {
           specVersion: SPEC_VERSION,
-          output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+          output: [blocks.text("ok") satisfies ContentBlock],
           stopReason: "end" as const,
           usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         },

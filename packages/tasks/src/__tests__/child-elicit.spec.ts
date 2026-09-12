@@ -44,6 +44,7 @@ import type {
   TaskStatus,
   Unsubscribe,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { drainRejection } from "@agentick/utils/testing";
 import type { LocalEventBus } from "@agentick/runtime";
 
@@ -174,7 +175,7 @@ describe("child elicit bridge — raw IPC wire (ADR 69 T2b)", () => {
       .filter((s): s is TaskStatus => s !== undefined);
     expect(statuses).toEqual(["input_required", "working", "completed"]);
     const completed = transitions.find((t) => t.status === "completed");
-    expect(completed?.result).toEqual([{ type: "text", text: "approved" }]);
+    expect(completed?.result).toEqual([blocks.text("approved")]);
   });
 
   it("reconstructs a typed error from a serialized elicit-error (ElicitationDeclined round-trips)", async () => {
@@ -254,7 +255,7 @@ describe("child elicit bridge — integrated round-trip (ADR 69 T2b)", () => {
       handlerRef: "asks-approval",
     });
     const result = await handle.result;
-    expect(result).toEqual([{ type: "text", text: "approved" }]);
+    expect(result).toEqual([blocks.text("approved")]);
     expect(bundle.harness.status(handle.taskId)).toBe("completed");
 
     // The parent reconstructed the LIVE-schema request (the schema exists

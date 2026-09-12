@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import { createTelemetry } from "@agentick/app";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { spyTelemetrySink } from "@agentick/runtime/testing";
@@ -48,9 +49,7 @@ function mkAppOptions(appName: string) {
         {
           result: {
             specVersion: SPEC_VERSION,
-            output: [
-              { type: "tool_use", toolUseId: `tc-${appName}`, name: "emit", input: {} },
-            ] as ContentBlock[],
+            output: [blocks.toolUse(`tc-${appName}`, "emit", {})] as ContentBlock[],
             stopReason: "tool_use",
             toolCalls: [{ id: `tc-${appName}`, name: "emit", input: {} }],
           },
@@ -58,7 +57,7 @@ function mkAppOptions(appName: string) {
         {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
           },
         },
@@ -83,7 +82,7 @@ function mkAppOptions(appName: string) {
           { ctx }: { ctx: { metrics: { count: (n: string, v: number) => void } } },
         ) => {
           ctx.metrics.count("emitted", 1);
-          return [{ type: "text", text: "ok" }] as ContentBlock[];
+          return [blocks.text("ok")] as ContentBlock[];
         },
       ],
     ]),

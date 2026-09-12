@@ -15,6 +15,7 @@ import type {
   RenderedTree,
   TaskRefBlock,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   buildMessages,
@@ -104,7 +105,7 @@ describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
   it("projects a document block to a document part carrying the MediaSource (no JSON.stringify bomb)", () => {
     const block: ContentBlock = {
       type: "document",
-      source: { type: "base64", data: "JVBERi0=", mimeType: "application/pdf" },
+      source: blocks.source.base64("JVBERi0=", "application/pdf"),
       mimeType: "application/pdf",
     };
     const part = messagePartFromBlock(block);
@@ -121,12 +122,12 @@ describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
   it("projects audio and video blocks to their native parts", () => {
     const audio = messagePartFromBlock({
       type: "audio",
-      source: { type: "base64", data: "AAAA", mimeType: "audio/mpeg" },
+      source: blocks.source.base64("AAAA", "audio/mpeg"),
     } as ContentBlock);
     expect(audio.type).toBe("audio");
     const video = messagePartFromBlock({
       type: "video",
-      source: { type: "url", url: "https://x/y.mp4" },
+      source: blocks.source.url("https://x/y.mp4"),
     } as ContentBlock);
     expect(video.type).toBe("video");
   });
@@ -163,7 +164,7 @@ describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
     } as ContentBlock);
     expect(part.type).toBe("image");
     if (part.type !== "image") return;
-    expect(part.source).toEqual({ type: "base64", data: bigData, mimeType: "image/png" });
+    expect(part.source).toEqual(blocks.source.base64(bigData, "image/png"));
     // Belt-and-suspenders: no text part anywhere carrying the raw base64.
     expect((part as { text?: string }).text).toBeUndefined();
   });
@@ -371,7 +372,7 @@ describe("buildMessages — message-level providerMetadata carry (#173)", () => 
             kind: "message",
             id: "m1",
             role: "assistant",
-            content: [{ type: "text", text: "hi" }],
+            content: [blocks.text("hi")],
             metadata: {
               providerMetadata: { openai: { reasoningEffort: "high" } },
             },
@@ -389,9 +390,7 @@ describe("buildMessages — message-level providerMetadata carry (#173)", () => 
     const messages = buildMessages({
       specVersion: "test",
       context: {
-        entries: [
-          { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "hi" }] },
-        ],
+        entries: [{ kind: "message", id: "m1", role: "user", content: [blocks.text("hi")] }],
       },
     } as RenderedTree);
     expect(messages[0]).not.toHaveProperty("providerOptions");

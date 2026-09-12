@@ -36,6 +36,7 @@ import type {
   LanguageModelInput,
   LanguageModelTarget,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model";
 
 import {
@@ -94,7 +95,7 @@ function stubAdapter(
     }),
     normalize: (raw): LanguageModelExecutionResult => ({
       specVersion: "2026-05-08",
-      output: [{ type: "text", text: raw.text }],
+      output: [blocks.text(raw.text)],
       stopReason: "end",
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
     }),

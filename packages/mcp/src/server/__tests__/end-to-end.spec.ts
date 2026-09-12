@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { prefix as toolPrefix } from "@agentick/tool/transforms";
 
 import {
@@ -114,7 +115,7 @@ async function makeClient(
 describe("end-to-end: initialize + tools/list + tools/call", () => {
   it("advertises tools capability when registry is non-empty", async () => {
     const { harness, transport } = await makeServer([tool("search")], {
-      "handler:search": async () => [{ type: "text", text: "hit" }],
+      "handler:search": async () => [blocks.text("hit")],
     });
     const clientTransport = await transport.connect();
     const client = await makeClient(clientTransport);
@@ -141,8 +142,8 @@ describe("end-to-end: initialize + tools/list + tools/call", () => {
     const { harness, transport } = await makeServer(
       [tool("public_search"), tool("internal_secret")],
       {
-        "handler:public_search": async () => [{ type: "text", text: "hit" }],
-        "handler:internal_secret": async () => [{ type: "text", text: "secret" }],
+        "handler:public_search": async () => [blocks.text("hit")],
+        "handler:internal_secret": async () => [blocks.text("secret")],
       },
       {
         filterPredicate: (decl) => decl.name.startsWith("public_"),
@@ -212,7 +213,7 @@ describe("end-to-end: initialize + tools/list + tools/call", () => {
       CallToolResultSchema,
     );
     expect(result.isError).toBeFalsy();
-    expect(result.content).toEqual([{ type: "text", text: "searched: hello" }]);
+    expect(result.content).toEqual([blocks.text("searched: hello")]);
 
     await client.close();
     await harness.close();
@@ -222,8 +223,8 @@ describe("end-to-end: initialize + tools/list + tools/call", () => {
     const { harness, transport } = await makeServer(
       [tool("public_search"), tool("internal_secret")],
       {
-        "handler:public_search": async () => [{ type: "text", text: "ok" }],
-        "handler:internal_secret": async () => [{ type: "text", text: "secret" }],
+        "handler:public_search": async () => [blocks.text("ok")],
+        "handler:internal_secret": async () => [blocks.text("secret")],
       },
       {
         filterPredicate: (decl) => decl.name.startsWith("public_"),
@@ -299,7 +300,7 @@ describe("end-to-end: multi-connection isolation", () => {
 
   it("connection notifier fires on open + close", async () => {
     const { harness, transport } = await makeServer([tool("x")], {
-      "handler:x": async () => [{ type: "text", text: "ok" }],
+      "handler:x": async () => [blocks.text("ok")],
     });
 
     let notifyCount = 0;

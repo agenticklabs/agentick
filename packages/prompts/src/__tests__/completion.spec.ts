@@ -31,6 +31,7 @@ import {
   defineCompletion,
 } from "@agentick/completions";
 import type { PromptDeclaration } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { definePrompt } from "../define-prompt.js";
 import { promptCompletionRef } from "../completion.js";
@@ -286,7 +287,7 @@ describe("PromptsHarness — the split stays in step", () => {
       args: { job: "Miller Residence", phase: "Framing" },
     });
     expect(result.messages[0].content).toEqual([
-      { type: "text", text: "Miller Residence / Framing / default" },
+      blocks.text("Miller Residence / Framing / default"),
     ]);
   });
 });

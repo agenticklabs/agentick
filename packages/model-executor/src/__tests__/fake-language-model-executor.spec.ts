@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { FakeLanguageModelExecutor } from "../fake-language-model-executor.js";
@@ -19,9 +20,7 @@ function emptyTree(): RenderedTree {
   return {
     specVersion: "2026-05-08",
     context: {
-      entries: [
-        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
-      ],
+      entries: [{ kind: "message", id: "m_1", role: "user", content: [blocks.text("hi")] }],
     },
   };
 }
@@ -58,7 +57,7 @@ describe("FakeLanguageModelExecutor — project", () => {
             kind: "message",
             id: "m_1",
             role: "user",
-            content: [{ type: "text", text: "hi" }],
+            content: [blocks.text("hi")],
           },
         ],
       },
@@ -112,7 +111,7 @@ describe("FakeLanguageModelExecutor — run + streaming", () => {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "abc" }],
+          output: [blocks.text("abc")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 3, totalTokens: 4 },
         },
@@ -154,7 +153,7 @@ describe("FakeLanguageModelExecutor — run + streaming", () => {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "done" }],
+          output: [blocks.text("done")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -177,7 +176,7 @@ describe("FakeLanguageModelExecutor — abort", () => {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "fine" }],
+          output: [blocks.text("fine")],
           stopReason: "end",
         },
       },

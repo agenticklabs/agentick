@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmbeddingModelAdapter, ImageModelAdapter } from "@agentick/spec";
 import { SPEC_VERSION, isExecuteError } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { EmbeddingModelExecutor, ImageModelExecutor } from "../modality-executor.js";
@@ -21,7 +22,7 @@ function imageAdapter(calls: unknown[] = []): ImageModelAdapter {
       calls.push(input);
       return {
         specVersion: SPEC_VERSION,
-        output: [{ type: "image", source: { type: "base64", data: PNG, mimeType: "image/png" } }],
+        output: [blocks.image(blocks.source.base64(PNG, "image/png"))],
         images: [{ data: PNG, mimeType: "image/png" }],
       };
     },

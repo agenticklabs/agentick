@@ -28,6 +28,7 @@ import { InMemoryMcpTransport } from "../../transport/in-memory.js";
 import { McpClientHarness, NoneAuth } from "../../client/index.js";
 import { inMemoryServerTransport, McpServerHarness } from "../../server/index.js";
 import { surfaceRemotePrompts } from "../prompt-surface.js";
+import * as blocks from "@agentick/spec/blocks";
 
 /** Which phases exist depends on the JOB — the whole reason `context` is threaded. */
 const PHASES: Record<string, readonly string[]> = {
@@ -61,7 +62,7 @@ function makeServer(spec: ServerSpec = {}): Server {
     ],
   }));
   server.setRequestHandler(GetPromptRequestSchema, async () => ({
-    messages: [{ role: "user", content: { type: "text", text: "draft it" } }],
+    messages: [{ role: "user", content: blocks.text("draft it") }],
   }));
 
   // A server that did not advertise `completions` cannot register the handler at all —

@@ -23,6 +23,7 @@ import type {
   ProjectInput,
   RenderedTree,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { spyTelemetryProvider } from "@agentick/runtime/testing";
 
@@ -47,7 +48,7 @@ function stubAdapter(): LanguageModelAdapter<StubRaw, never> {
     reconstructRaw: (_accum: StreamAccumulatorView): StubRaw => ({ text: "ok" }),
     normalize: (raw: StubRaw): LanguageModelExecutionResult => ({
       specVersion: "2026-05-08",
-      output: [{ type: "text", text: raw.text }],
+      output: [blocks.text(raw.text)],
       stopReason: "end",
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
     }),

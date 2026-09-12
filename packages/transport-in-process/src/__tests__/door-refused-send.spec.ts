@@ -19,6 +19,7 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { inProcessTransport } from "../index.js";
+import * as blocks from "@agentick/spec/blocks";
 
 const REFUSED_MEDIA = {
   role: "user" as const,
@@ -41,7 +42,7 @@ async function makeStack() {
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
       },
     },

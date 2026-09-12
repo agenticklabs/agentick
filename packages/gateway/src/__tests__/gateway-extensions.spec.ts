@@ -37,6 +37,7 @@ import type {
   SessionExtension,
 } from "@agentick/spec";
 import { SPEC_VERSION, GatewayBridgeSlotOccupied, defineWireExtension } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
@@ -72,7 +73,7 @@ function mkAppOptions() {
         scripted: {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           },

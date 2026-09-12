@@ -31,6 +31,7 @@ import type {
   PromptStoreQuery,
   Store,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { PromptsHarness, type PromptsHarnessOptions } from "../harness.js";
 import { definePrompts } from "../definition.js";
@@ -128,7 +129,7 @@ describe("genesis — the seed law (ADR 93 landmine 3)", () => {
     });
     await h.hydrate();
     const result = await h.render({ name: "dynamic", args: { who: "world" } });
-    expect(result.messages[0]!.content).toEqual([{ type: "text", text: "hi world" }]);
+    expect(result.messages[0]!.content).toEqual([blocks.text("hi world")]);
     await h.close();
   });
 

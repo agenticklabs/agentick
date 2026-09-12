@@ -23,6 +23,7 @@ import {
   type ContentBlock,
   type SessionStatusFrame,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { inProcessTransport } from "../index.js";
@@ -36,7 +37,7 @@ async function makeStack(holdUntil: Promise<void>) {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "done" } satisfies ContentBlock],
+          output: [blocks.text("done") satisfies ContentBlock],
           stopReason: "end",
         },
         holdUntil,

@@ -21,6 +21,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { MessageEntry, MessageSource, TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { PromptsHarness, type TimelineAppendCapability } from "../harness.js";
 import type { PromptMessageSource } from "../message-source.js";
@@ -78,8 +79,8 @@ describe("prompts — materialization provenance", () => {
         render: (_args, ctx): readonly MessageEntry[] => {
           renderOpId = ctx?.opId;
           return [
-            { kind: "message", role: "user", content: [{ type: "text", text: "line one" }] },
-            { kind: "message", role: "user", content: [{ type: "text", text: "line two" }] },
+            { kind: "message", role: "user", content: [blocks.text("line one")] },
+            { kind: "message", role: "user", content: [blocks.text("line two")] },
           ];
         },
       },
@@ -158,7 +159,7 @@ describe("prompts — materialization provenance", () => {
           {
             kind: "message",
             role: "user",
-            content: [{ type: "text", text: "body" }],
+            content: [blocks.text("body")],
             metadata: { cache: { ttl: "1h" }, adopterKey: 7 },
           },
         ],
@@ -188,7 +189,7 @@ describe("prompts — materialization provenance", () => {
           {
             kind: "message",
             role: "user",
-            content: [{ type: "text", text: "quoted" }],
+            content: [blocks.text("quoted")],
             metadata: { source: { telegram: { chatId: 42 } } },
           },
         ],

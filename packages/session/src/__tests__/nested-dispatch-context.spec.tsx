@@ -19,6 +19,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness, System } from "@agentick/compiler-react";
 import type { ExecutionTarget, ToolHandlerCtx } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { SessionHarness } from "../harness.js";
 
 const PRINCIPAL = "8580:32728";
@@ -51,7 +52,7 @@ describe("a tool dispatched by a tool", () => {
           executionId: ctx.executionId,
           tickId: ctx.tickId,
         };
-        return [{ type: "text" as const, text: "ok" }];
+        return [blocks.text("ok")];
       };
 
     const j = new MemoryJournal(),
@@ -65,7 +66,7 @@ describe("a tool dispatched by a tool", () => {
       await record("outer")(_i, { ctx });
       // Exactly what `tool_dispatch` does for a hidden tool.
       await ctx.tools!.dispatch("inner", {}, { via: "model" });
-      return [{ type: "text" as const, text: "ok" }];
+      return [blocks.text("ok")];
     });
 
     const el = new ElicitationHarness("nd-t:e", j, b, i);
@@ -79,7 +80,7 @@ describe("a tool dispatched by a tool", () => {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "c" }],
+            output: [blocks.text("c")],
             toolCalls: [{ id: "t1", name: "outer", input: {} }],
             stopReason: "tool_use",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -88,7 +89,7 @@ describe("a tool dispatched by a tool", () => {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "d" }],
+            output: [blocks.text("d")],
             stopReason: "end",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           },

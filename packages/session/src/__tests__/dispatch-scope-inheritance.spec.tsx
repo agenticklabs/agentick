@@ -68,6 +68,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness, System } from "@agentick/compiler-react";
 import { jsonSchema } from "@agentick/spec";
 import type { ExecutionTarget, ProtocolEvent } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -155,7 +156,7 @@ async function runWithElicitingTool(): Promise<Run> {
     handlerRan = true;
     const ctx = (deps as { ctx?: { elicit?: { text: (m: string) => Promise<unknown> } } })?.ctx;
     await ctx?.elicit?.text("ok?").catch(() => undefined);
-    return [{ type: "text", text: "ok" }];
+    return [blocks.text("ok")];
   });
 
   const executor = new FakeLanguageModelExecutor("dsi-e", journal, bus, inbox, {
@@ -163,7 +164,7 @@ async function runWithElicitingTool(): Promise<Run> {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "calling" }],
+          output: [blocks.text("calling")],
           stopReason: "tool_use",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           toolCalls: [{ id: "c1", name: "probe", input: {} }],
@@ -172,7 +173,7 @@ async function runWithElicitingTool(): Promise<Run> {
       {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "done" }],
+          output: [blocks.text("done")],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },

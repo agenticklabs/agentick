@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ContentBlock } from "@agentick/spec";
+import { image as imageBlock, source, text as textBlock } from "@agentick/spec/blocks";
 
 import { builtInFormatters } from "../index.js";
 import { markdownFormatter } from "../markdown.js";
@@ -25,14 +26,14 @@ import {
 } from "../section-lowering.js";
 import { xmlFormatter } from "../xml.js";
 
-const text = (t: string): ContentBlock => ({ type: "text", text: t });
+const text = (t: string): ContentBlock => textBlock(t);
 
 describe("markdown (the default dialect)", () => {
   it("emits the exact bytes the old sectionText produced", () => {
     // `["# " + title, ...texts].join("\n")`. Pinned because every prompt that
     // ever contained a section re-tokenizes if this drifts.
     const [block] = lowerSection({ id: "s", title: "Identity", content: [text("You are E.")] });
-    expect(block).toMatchObject({ type: "text", text: "# Identity\nYou are E." });
+    expect(block).toMatchObject(textBlock("# Identity\nYou are E."));
   });
 
   it("joins several text blocks with single newlines, as one block", () => {
@@ -105,7 +106,7 @@ describe("what rides the blocks", () => {
     const out = lowerSection({
       id: "sec.1",
       title: "T",
-      content: [text("a"), { type: "image", source: { type: "url", url: "u" } } as ContentBlock],
+      content: [text("a"), imageBlock(source.url("u")) as ContentBlock],
     });
     expect(out.every((b) => b.id === "sec.1")).toBe(true);
     expect(out.every((b) => b.metadata?.[SECTION_STAMP] === "sec.1")).toBe(true);
@@ -135,7 +136,7 @@ describe("what rides the blocks", () => {
 
 describe("no silent drop", () => {
   it("breaks the text run around a non-text block and keeps both", () => {
-    const image = { type: "image", source: { type: "url", url: "u" } } as ContentBlock;
+    const image = imageBlock(source.url("u")) as ContentBlock;
     const out = lowerSection({
       id: "s",
       title: "T",

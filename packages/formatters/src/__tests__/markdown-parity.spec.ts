@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ContentBlock, SemanticContentBlock, SemanticNode } from "@agentick/spec";
+import { json, reasoning, source, text } from "@agentick/spec/blocks";
 
 import { markdownFormatter } from "../markdown.js";
 
@@ -80,9 +81,9 @@ const FIXTURE: SemanticContentBlock[] = [
   ),
   semantic(s("custom", [t("inline *custom*")], { tag: "note-inline", attrs: { kind: 'x "q"' } })),
   semantic(s("custom", [], { tag: "file-ref", attrs: { id: "f1" }, selfClosing: true })),
-  { type: "reasoning", text: "think <hard>" } as SemanticContentBlock,
+  reasoning("think <hard>") as SemanticContentBlock,
   { type: "code", language: "ts", text: "const a = b < c && d;" } as SemanticContentBlock,
-  { type: "json", data: { a: "<b>", c: 'd"e' } } as SemanticContentBlock,
+  json({ a: "<b>", c: 'd"e' }) as SemanticContentBlock,
   { type: "csv", text: 'a,b\n1,"2,3"' } as SemanticContentBlock,
   { type: "xml", text: "<raw>island</raw>" } as SemanticContentBlock,
   {
@@ -116,12 +117,12 @@ const FIXTURE: SemanticContentBlock[] = [
 const TREE_LEVEL: ContentBlock[] = [
   {
     type: "image",
-    source: { type: "url", url: "https://x.test/i.png?a=1&b=2" },
+    source: source.url("https://x.test/i.png?a=1&b=2"),
     altText: 'alt "q"',
   } as ContentBlock,
   {
     type: "document",
-    source: { type: "base64", data: "AAA", mimeType: "application/pdf" },
+    source: source.base64("AAA", "application/pdf"),
   } as ContentBlock,
   {
     type: "tool_use",
@@ -133,7 +134,7 @@ const TREE_LEVEL: ContentBlock[] = [
     type: "tool_result",
     toolUseId: "c1",
     name: "query",
-    content: [{ type: "text", text: "3 rows & <more>" }],
+    content: [text("3 rows & <more>")],
   } as ContentBlock,
 ];
 
@@ -156,7 +157,7 @@ describe("markdown dialect — a stored tool block without an id", () => {
   it("renders the frame without the id", () => {
     const blocks = [
       { type: "tool_use", name: "query", input: {} },
-      { type: "tool_result", name: "query", content: [{ type: "text", text: "ok" }] },
+      { type: "tool_result", name: "query", content: [text("ok")] },
     ] as unknown as ContentBlock[];
     expect(markdownFormatter.blocksToText!(blocks)).toBe(
       "[tool_use query] {}\n\n[tool_result query] ok",

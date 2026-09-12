@@ -28,6 +28,7 @@ import type {
   SessionSetClientToolsParams,
 } from "@agentick/spec";
 import { ErrorCode } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { describe, expect, it } from "vitest";
 
 import { inProcessTransport } from "../index.js";
@@ -112,13 +113,13 @@ describe("client client-tool surface — wire methods", () => {
     await client.connect();
 
     await expect(
-      respondToToolCall(client, "sess-2", "corr:abc", [{ type: "text", text: "sunny, 24C" }]),
+      respondToToolCall(client, "sess-2", "corr:abc", [blocks.text("sunny, 24C")]),
     ).resolves.toBeUndefined();
 
     expect(seen).toHaveLength(1);
     expect(seen[0]!.sessionId).toBe("sess-2");
     expect(seen[0]!.correlationId).toBe("corr:abc");
-    expect(seen[0]!.result).toEqual([{ type: "text", text: "sunny, 24C" }]);
+    expect(seen[0]!.result).toEqual([blocks.text("sunny, 24C")]);
 
     await client.close();
   });

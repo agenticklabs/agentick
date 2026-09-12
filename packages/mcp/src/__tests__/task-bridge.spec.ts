@@ -33,6 +33,7 @@ import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { isTaskRefBlock } from "@agentick/spec";
+import { text } from "@agentick/spec/blocks";
 import { drainRejection } from "@agentick/utils/testing";
 // AppHarness installs a TasksHarness per session by default — no need
 // to install `withTasks()` here. session.tasks (via SessionHarness
@@ -67,7 +68,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text" as const, text: "ok" }],
+            output: [text("ok")],
             stopReason: "end",
           },
         },
@@ -158,7 +159,7 @@ async function mkFakeMcpServer(opts: {
 
     if (taskParam === undefined) {
       // No task hint — run inline.
-      return { content: [{ type: "text", text: `inline:${args.label ?? ""}` }] };
+      return { content: [text(`inline:${args.label ?? ""}`)] };
     }
 
     // Create a task in-memory.
@@ -327,7 +328,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
       type: string;
       text: string;
     }>;
-    expect(blocks).toEqual([{ type: "text", text: "ok" }]);
+    expect(blocks).toEqual([text("ok")]);
   });
 
   it("opt-in Pattern B: `{ task: 'ref' }` returns a session_task_ref; remote payload resolved via tasks.result(...)", async () => {
@@ -374,7 +375,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
       type: string;
       text: string;
     }>;
-    expect(finalBlocks).toEqual([{ type: "text", text: "ok" }]);
+    expect(finalBlocks).toEqual([text("ok")]);
   });
 
   it("cancellation: local cancel propagates as tasks/cancel on the wire", async () => {
@@ -589,6 +590,6 @@ describe("withMCP — taskSupport:'optional' / 'supported' per-call opt-in (#174
       type: string;
       text: string;
     }>;
-    expect(finalBlocks).toEqual([{ type: "text", text: "task-ok" }]);
+    expect(finalBlocks).toEqual([text("task-ok")]);
   });
 });

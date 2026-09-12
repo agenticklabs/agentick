@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { DispatchInput, EventKey, ProtocolEvent, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ElicitationHarness } from "@agentick/elicitation";
 
@@ -83,7 +84,7 @@ describe("ctx.log / ctx.progress fire-and-forget under emit failure (ADR 64)", (
       // Both emits target a bus whose append dies for signals.
       ctx.log("error", { boom: true }, "doomed-logger");
       ctx.progress("job-x", { progress: 1, total: 1, message: "still fine" });
-      return [{ type: "text", text: "handler-return-intact" }];
+      return [blocks.text("handler-return-intact")];
     });
 
     const elicitation = new ElicitationHarness("t:elicitation", journal, bus, inbox);
@@ -100,7 +101,7 @@ describe("ctx.log / ctx.progress fire-and-forget under emit failure (ADR 64)", (
     // The failed signal emit was swallowed — the handler's return value
     // survived intact and the dispatch reports success.
     expect(result.isError ?? false).toBe(false);
-    expect(result.content).toEqual([{ type: "text", text: "handler-return-intact" }]);
+    expect(result.content).toEqual([blocks.text("handler-return-intact")]);
 
     // Both signal appends were actually attempted (probe passed, append
     // reached) — proving the swallow is real, not a no-listener skip.

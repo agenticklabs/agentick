@@ -33,6 +33,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   bearerTokenAuth,
@@ -176,7 +177,7 @@ async function rig(
         options.resolveHandler ??
         (() => async () => ({
           kind: "inline",
-          content: [{ type: "text", text: "ok" }] as ContentBlock[],
+          content: [blocks.text("ok")] as ContentBlock[],
         })),
     },
     auth: options.auth ?? tokenAuth(),
@@ -382,7 +383,7 @@ describe("the full record still reaches the tool handler", () => {
     const r = (active = await rig({
       resolveHandler: () => async (_input, ctx) => {
         seen = ctx;
-        return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
       },
     }));
     const client = await r.connect();
@@ -432,7 +433,7 @@ describe("in-process identity — connect({ authenticatedUser })", () => {
         registry: [toolDecl("echo")],
         resolveHandler: () => async (_input, ctx) => {
           seen = ctx;
-          return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+          return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
         },
       },
       // No auth stage at all — the point is that a trusted transport can state the
@@ -538,7 +539,7 @@ describe("in-process identity — connect({ authenticatedUser })", () => {
         registry: [toolDecl("echo")],
         resolveHandler: () => async (_input, ctx) => {
           seen = ctx;
-          return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+          return { kind: "inline", content: [blocks.text("ok")] as ContentBlock[] };
         },
       },
     });

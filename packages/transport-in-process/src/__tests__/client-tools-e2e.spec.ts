@@ -40,6 +40,7 @@ import {
   type ToolDeclaration,
   type ToolExecutorProtocol,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport";
 import { waitFor } from "@agentick/utils/testing";
 
@@ -323,7 +324,7 @@ describe("several sessions open on one client", () => {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "done" } satisfies ContentBlock],
+            output: [blocks.text("done") satisfies ContentBlock],
             stopReason: "end",
           },
         },

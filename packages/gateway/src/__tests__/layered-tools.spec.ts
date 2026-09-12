@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolDeclaration, ToolExecutorProtocol } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
@@ -31,7 +32,7 @@ function mkAppOptions() {
         scripted: {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           },

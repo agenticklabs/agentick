@@ -50,6 +50,7 @@ import {
   type ToolHandler,
   type ToolRegistration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport";
 import { waitFor } from "@agentick/utils/testing";
 
@@ -176,7 +177,7 @@ function mkTools(
       "handlers/report",
       (_input, { ctx }) => {
         emit(ctx as never);
-        return [{ type: "text", text: "reported" }] as ContentBlock[];
+        return [blocks.text("reported")] as ContentBlock[];
       },
     ],
     [
@@ -184,7 +185,7 @@ function mkTools(
       async (_input, { ctx }) => {
         await gate();
         emit(ctx as never);
-        return [{ type: "text", text: "reported late" }] as ContentBlock[];
+        return [blocks.text("reported late")] as ContentBlock[];
       },
     ],
     [
@@ -209,7 +210,7 @@ function mkTools(
         })) as SessionExecutionHandle;
         if (wait === true) await handle.result;
         else void handle.result.catch(() => undefined);
-        return [{ type: "text", text: childId }] as ContentBlock[];
+        return [blocks.text(childId)] as ContentBlock[];
       },
     ],
     [
@@ -220,7 +221,7 @@ function mkTools(
         // "did NOT arrive" assertions are about filtering, not about timing.
         await waitFor(() => fixture.emitted.length > 0, { description: "parked emitter fired" });
         void ctx;
-        return [{ type: "text", text: "released" }] as ContentBlock[];
+        return [blocks.text("released")] as ContentBlock[];
       },
     ],
   ]);

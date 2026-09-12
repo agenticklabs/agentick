@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock, ToolHandlerCtx } from "@agentick/spec";
+import { text } from "@agentick/spec/blocks";
 import { drainRejection } from "@agentick/utils/testing";
 
 import { TasksHarness } from "../harness.js";
@@ -97,8 +98,8 @@ describe("task_list", () => {
   it("lists every active and recently-terminal task in the session", async () => {
     const fx = await fixture();
     try {
-      const a = fx.tasks.submit(async () => [{ type: "text", text: "a" } as ContentBlock]);
-      const b = fx.tasks.submit(async () => [{ type: "text", text: "b" } as ContentBlock]);
+      const a = fx.tasks.submit(async () => [text("a") as ContentBlock]);
+      const b = fx.tasks.submit(async () => [text("b") as ContentBlock]);
       const blocks = await fx.handlerOf(TASK_LIST)({});
       const payload = parseJsonBlock(blocks) as { tasks: { taskId: string }[] };
       const ids = payload.tasks.map((t) => t.taskId).sort();
@@ -141,7 +142,7 @@ describe("task_list", () => {
     };
     const fx = await fixture("test-merge", { getNamespace });
     try {
-      const local = fx.tasks.submit(async () => [{ type: "text", text: "L" } as ContentBlock]);
+      const local = fx.tasks.submit(async () => [text("L") as ContentBlock]);
       const blocks = await fx.handlerOf(TASK_LIST)({});
       const payload = parseJsonBlock(blocks) as {
         tasks: { taskId: string }[];
@@ -235,7 +236,7 @@ describe("task_get", () => {
   it("returns the TaskInfo for a known taskId", async () => {
     const fx = await fixture();
     try {
-      const handle = fx.tasks.submit(async () => [{ type: "text", text: "ok" } as ContentBlock], {
+      const handle = fx.tasks.submit(async () => [text("ok") as ContentBlock], {
         statusMessage: "running",
       });
       const blocks = await fx.handlerOf(TASK_GET)({ taskId: handle.taskId });
@@ -303,9 +304,7 @@ describe("task_await", () => {
   it("resolves with the task's content blocks on `completed`", async () => {
     const fx = await fixture();
     try {
-      const handle = fx.tasks.submit(async () => [
-        { type: "text", text: "finished" } as ContentBlock,
-      ]);
+      const handle = fx.tasks.submit(async () => [text("finished") as ContentBlock]);
       const blocks = await fx.handlerOf(TASK_AWAIT)({ taskId: handle.taskId });
       expect((blocks[0] as { text: string }).text).toBe("finished");
     } finally {

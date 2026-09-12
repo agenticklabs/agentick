@@ -17,12 +17,13 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { LanguageModelExecutionResult, LoopToolResult, StateApplicator } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { NoopStateApplicator } from "../noop-state-applicator.js";
 
 const result = (): LanguageModelExecutionResult => ({
   specVersion: "2026-05-08",
-  output: [{ type: "text", text: "hi" }],
+  output: [blocks.text("hi")],
   stopReason: "end",
 });
 

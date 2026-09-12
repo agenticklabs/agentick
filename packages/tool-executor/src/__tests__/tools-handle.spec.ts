@@ -10,6 +10,7 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { ContentBlock, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { InMemoryToolRegistry } from "../registry.js";
 import { createToolsHandle } from "../tools-handle.js";
 
@@ -34,9 +35,7 @@ function reg(
 
 function harnessOverRegistry(registry: InMemoryToolRegistry) {
   const dispatch = vi.fn(
-    async (_name: string, _input: unknown): Promise<readonly ContentBlock[]> => [
-      { type: "text", text: "ok" },
-    ],
+    async (_name: string, _input: unknown): Promise<readonly ContentBlock[]> => [blocks.text("ok")],
   );
   const handle = createToolsHandle({
     compileSync: (filter) => registry.compileForTick(filter),
@@ -103,7 +102,7 @@ describe("createToolsHandle (server session.tools)", () => {
     r.add(reg("echo"));
     const { handle, dispatch } = harnessOverRegistry(r);
     const out = await handle.dispatch("echo", { x: 1 }, { task: "ref" });
-    expect(out).toEqual([{ type: "text", text: "ok" }]);
+    expect(out).toEqual([blocks.text("ok")]);
     expect(dispatch).toHaveBeenCalledWith("echo", { x: 1 }, { task: "ref" });
   });
 

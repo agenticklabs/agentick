@@ -37,6 +37,7 @@ import {
 } from "@agentick/compiler-react";
 import type { ExecutionTarget, LifecycleToolEnd, ProtocolEvent } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -61,7 +62,7 @@ function toolThenReplyExec(): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "calling echo" }],
+            output: [blocks.text("calling echo")],
             toolCalls: [{ id: "tc1", name: "echo", input: {} }],
             stopReason: "tool_use",
             usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
@@ -70,7 +71,7 @@ function toolThenReplyExec(): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "done" }],
+            output: [blocks.text("done")],
             stopReason: "end",
             usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
           },
@@ -126,7 +127,7 @@ async function mkSession(
   const resolver = new InMemoryHandlerResolver();
   resolver.register("h.echo", async () => {
     echoRuns++;
-    return [{ type: "text", text: "ok" }];
+    return [blocks.text("ok")];
   });
   const elicitation = new ElicitationHarness(`${sessionId}-t:elicitation`, journal, bus, inbox);
   const tools = new ToolExecutorHarness(`${sessionId}:tools`, journal, bus, inbox, {
@@ -312,7 +313,7 @@ describe("tree-side guard/transform interceptors — end to end (ADR 89 §4)", (
           targetInput: {
             ...input.targetInput,
             messages: [
-              { role: "system", content: [{ type: "text", text: SENTINEL }] },
+              { role: "system", content: [blocks.text(SENTINEL)] },
               ...input.targetInput.messages,
             ],
           },
@@ -331,7 +332,7 @@ describe("tree-side guard/transform interceptors — end to end (ADR 89 §4)", (
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "done" }],
+              output: [blocks.text("done")],
               stopReason: "end",
               usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
             },
@@ -432,7 +433,7 @@ describe("tree-side guard/transform interceptors — end to end (ADR 89 §4)", (
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "call A" }],
+              output: [blocks.text("call A")],
               toolCalls: [{ id: "tcA", name: "echo", input: {} }],
               stopReason: "tool_use",
               usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
@@ -441,7 +442,7 @@ describe("tree-side guard/transform interceptors — end to end (ADR 89 §4)", (
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "done A" }],
+              output: [blocks.text("done A")],
               stopReason: "end",
               usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
             },
@@ -449,7 +450,7 @@ describe("tree-side guard/transform interceptors — end to end (ADR 89 §4)", (
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "call B" }],
+              output: [blocks.text("call B")],
               toolCalls: [{ id: "tcB", name: "echo", input: {} }],
               stopReason: "tool_use",
               usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
@@ -458,7 +459,7 @@ describe("tree-side guard/transform interceptors — end to end (ADR 89 §4)", (
           {
             result: {
               specVersion: "2026-05-08",
-              output: [{ type: "text", text: "done B" }],
+              output: [blocks.text("done B")],
               stopReason: "end",
               usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
             },

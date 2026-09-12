@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ToolInfo, WireMethod, WireParams, WireResult } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor, waitForStable } from "@agentick/utils/testing";
 
 import { toolsHandle } from "../tools-handle.js";
@@ -36,8 +37,7 @@ function fakeCommandClient(captured: Captured[]) {
       ): Promise<WireResult<M>> {
         captured.push({ method, params });
         if (method === "session/list_tools") return { tools: TOOLS } as WireResult<M>;
-        if (method === "session/dispatch")
-          return { content: [{ type: "text", text: "ok" }] } as WireResult<M>;
+        if (method === "session/dispatch") return { content: [blocks.text("ok")] } as WireResult<M>;
         return null as WireResult<M>;
       },
     },
@@ -135,7 +135,7 @@ describe("toolsHandle", () => {
 
     const out = await handle.dispatch("echo", { x: 1 });
 
-    expect(out).toEqual([{ type: "text", text: "ok" }]);
+    expect(out).toEqual([blocks.text("ok")]);
     expect(captured[0]).toEqual({
       method: "session/dispatch",
       params: { sessionId: "s1", tool: "echo", input: { x: 1 } },

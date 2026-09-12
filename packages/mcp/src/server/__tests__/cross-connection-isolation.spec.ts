@@ -29,6 +29,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { inMemoryServerTransport, McpServerHarness, type ToolHandlerResolver } from "../index.js";
 
@@ -48,7 +49,7 @@ const signalResolver: ToolHandlerResolver = (ref) => {
   return async (_input, ctx) => {
     ctx.log("warning", { msg: "secret-for-A" }, "tenant-A");
     ctx.progress("A-token", { progress: 1, total: 1, message: "A-only" });
-    const content: ContentBlock[] = [{ type: "text", text: "done" }];
+    const content: ContentBlock[] = [blocks.text("done")];
     return { kind: "inline", content };
   };
 };

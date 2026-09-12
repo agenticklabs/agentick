@@ -22,6 +22,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 
 import { LoopExecutorHarness } from "../harness.js";
@@ -31,7 +32,7 @@ const EMPTY_TREE: RenderedTree = { specVersion: SPEC_VERSION, context: { entries
 
 const okResult: LanguageModelExecutionResult = {
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "hi" }],
+  output: [blocks.text("hi")],
   stopReason: "end",
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 };

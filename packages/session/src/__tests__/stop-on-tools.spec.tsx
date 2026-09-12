@@ -25,6 +25,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -47,7 +48,7 @@ const callsTools = (...toolCalls: ToolCall[]): LanguageModelExecutionResult => (
 
 const finalReply: LanguageModelExecutionResult = {
   specVersion: SPEC_VERSION,
-  output: [{ type: "text", text: "finished" }],
+  output: [blocks.text("finished")],
   stopReason: "end",
   usage,
 };
@@ -96,7 +97,7 @@ async function mkSession(scripts: readonly LanguageModelExecutionResult[]): Prom
   for (const name of ["search", "done", "write"]) {
     resolver.register(`h.${name}`, async () => {
       ran.push(name);
-      return [{ type: "text", text: `${name} ok` }];
+      return [blocks.text(`${name} ok`)];
     });
   }
 

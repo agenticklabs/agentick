@@ -43,6 +43,7 @@ import {
   jsonSchema,
   toClientToolRegistration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -125,9 +126,7 @@ describe("ToolExecutorHarness — async requiresConfirmation predicate", () => {
   it("predicate returns true → gate elicits, then handler runs on approval", async () => {
     const { harness, bus, elicitation } = await createTestHarness({
       tools: [guardedTool("guard_true", () => true)],
-      handlers: [
-        { handlerRef: "h.guard_true", handler: async () => [{ type: "text", text: "ran" }] },
-      ],
+      handlers: [{ handlerRef: "h.guard_true", handler: async () => [blocks.text("ran")] }],
     });
 
     const idP = nextEnvelope(bus, "session:channel:elicitation");
@@ -148,7 +147,7 @@ describe("ToolExecutorHarness — async requiresConfirmation predicate", () => {
           handlerRef: "h.guard_false",
           handler: async () => {
             ran++;
-            return [{ type: "text", text: "ran" }];
+            return [blocks.text("ran")];
           },
         },
       ],
@@ -170,9 +169,7 @@ describe("ToolExecutorHarness — async requiresConfirmation predicate", () => {
           return true;
         }),
       ],
-      handlers: [
-        { handlerRef: "h.guard_async", handler: async () => [{ type: "text", text: "ran" }] },
-      ],
+      handlers: [{ handlerRef: "h.guard_async", handler: async () => [blocks.text("ran")] }],
     });
 
     const idP = nextEnvelope(bus, "session:channel:elicitation");
@@ -202,7 +199,7 @@ describe("ToolExecutorHarness — client-handled tools (requiresResponse:true)",
     expect((reqEnv.payload as { input: unknown }).input).toEqual({ q: "hi" });
 
     await relayToolResult(inbox, harness.address, reqEnv.metadata!.correlationId as string, [
-      { type: "text", text: "from client" },
+      blocks.text("from client"),
     ]);
 
     const result = await dispatchP;
@@ -221,7 +218,7 @@ describe("ToolExecutorHarness — client-handled tools (requiresResponse:true)",
     await relayToolResult(inbox, harness.address, reqEnv.metadata!.correlationId as string, "hi");
 
     const result = await dispatchP;
-    expect(result.content).toEqual([{ type: "text", text: "hi" }]);
+    expect(result.content).toEqual([blocks.text("hi")]);
   });
 
   it("timeout WITH defaultResult falls back to it", async () => {
@@ -230,7 +227,7 @@ describe("ToolExecutorHarness — client-handled tools (requiresResponse:true)",
         clientTool("client_slow", {
           requiresResponse: true,
           responseTimeoutMs: 30,
-          defaultResult: [{ type: "text", text: "defaulted" }],
+          defaultResult: [blocks.text("defaulted")],
         }),
       ],
     });
@@ -264,7 +261,7 @@ describe("ToolExecutorHarness — client-handled tools (requiresResponse:true)",
 describe("ToolExecutorHarness — client-handled tools (fire-and-forget)", () => {
   it("resolves immediately with defaultResult and emits a notify on the tool-call channel", async () => {
     const { harness, bus } = await createTestHarness({
-      tools: [clientTool("client_fire", { defaultResult: [{ type: "text", text: "ack" }] })],
+      tools: [clientTool("client_fire", { defaultResult: [blocks.text("ack")] })],
     });
 
     const notifyP = nextEnvelope(bus, "session:channel:tool_call");
@@ -287,7 +284,7 @@ describe("ToolExecutorHarness — client-handled tools (fire-and-forget)", () =>
     });
 
     const result = await harness.dispatch(dispatchOf("client_fire2", "tc-5"));
-    expect(result.content).toEqual([{ type: "text", text: "executed successfully" }]);
+    expect(result.content).toEqual([blocks.text("executed successfully")]);
     expect(result.executedBy).toBe("client");
   });
 });
@@ -308,7 +305,7 @@ describe("ToolExecutorHarness — respondToToolCall (stage 2 wire seam)", () => 
     // BaseHarness.dispatchMessage's request-response auto-intercept.
     await harness.respondToToolCall({
       correlationId,
-      result: [{ type: "text", text: "relayed via respondToToolCall" }],
+      result: [blocks.text("relayed via respondToToolCall")],
     });
 
     const result = await dispatchP;
@@ -336,7 +333,7 @@ describe("ToolExecutorHarness — respondToToolCall (stage 2 wire seam)", () => 
     const correlationId = (await reqP).metadata!.correlationId as string;
     await harness.respondToToolCall({
       correlationId,
-      result: [{ type: "text", text: "ok" }],
+      result: [blocks.text("ok")],
     });
 
     const result = await dispatchP;
@@ -355,7 +352,7 @@ describe("ToolExecutorHarness — respondToToolCall (stage 2 wire seam)", () => 
     await harness.respondToToolCall({ correlationId, result: "plain" });
 
     const result = await dispatchP;
-    expect(result.content).toEqual([{ type: "text", text: "plain" }]);
+    expect(result.content).toEqual([blocks.text("plain")]);
   });
 
   it("an unknown correlationId is a silent no-op (first-write-wins)", async () => {
@@ -394,7 +391,7 @@ describe("ToolExecutorHarness — respondToToolCall (stage 2 wire seam)", () => 
     expect((reqEnv.payload as { name: string }).name).toBe("wire_registered");
     await harness.respondToToolCall({
       correlationId: reqEnv.metadata!.correlationId as string,
-      result: [{ type: "text", text: "ok" }],
+      result: [blocks.text("ok")],
     });
 
     const result = await dispatchP;
@@ -469,7 +466,7 @@ describe("client targeting — the relay addresses the client that asked", () =>
 
   it("stamps it on a fire-and-forget notify too — a toast is still addressed", async () => {
     const { harness, bus } = await createTestHarness({
-      tools: [clientTool("client_toast", { defaultResult: [{ type: "text", text: "ack" }] })],
+      tools: [clientTool("client_toast", { defaultResult: [blocks.text("ack")] })],
     });
 
     const notifyP = nextEnvelope(bus, "session:channel:tool_call");
@@ -508,7 +505,7 @@ describe("a broadcast tool is addressed to nobody, so every client runs it", () 
       tools: [
         clientTool("client_toast", {
           broadcast: true,
-          defaultResult: [{ type: "text", text: "ack" }],
+          defaultResult: [blocks.text("ack")],
         }),
       ],
     });

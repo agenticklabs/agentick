@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SemanticContentBlock, SemanticNode } from "@agentick/spec";
+import { json, source, text } from "@agentick/spec/blocks";
 import { createFormatter, markdownFormatter, textFormatter, xmlFormatter } from "../index.js";
 
 function textBlock(text: string): SemanticContentBlock {
@@ -43,7 +44,7 @@ describe("createFormatter", () => {
 describe("markdownFormatter", () => {
   it("passes plain TextBlocks through unchanged", () => {
     const out = markdownFormatter([textBlock("hello")]);
-    expect(out).toEqual([{ type: "text", text: "hello" }]);
+    expect(out).toEqual([text("hello")]);
   });
 
   it("fences code blocks", () => {
@@ -58,9 +59,7 @@ describe("markdownFormatter", () => {
   });
 
   it("compact-stringifies json blocks", () => {
-    const blocks: SemanticContentBlock[] = [
-      { type: "json", data: { ok: true } } as SemanticContentBlock,
-    ];
+    const blocks: SemanticContentBlock[] = [json({ ok: true }) as SemanticContentBlock];
     const out = markdownFormatter(blocks);
     expect((out[0] as { text: string }).text).toBe("```json\n" + '{"ok":true}' + "\n```");
   });
@@ -111,7 +110,7 @@ describe("markdownFormatter", () => {
   it("passes native blocks through (image)", () => {
     const img: SemanticContentBlock = {
       type: "image",
-      source: { type: "url", url: "x" },
+      source: source.url("x"),
     } as SemanticContentBlock;
     const out = markdownFormatter([img]);
     expect(out[0]).toBe(img);

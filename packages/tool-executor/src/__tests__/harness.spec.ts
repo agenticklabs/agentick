@@ -15,6 +15,7 @@ import {
   ToolTimeoutError,
   jsonSchema,
 } from "@agentick/spec";
+import { text } from "@agentick/spec/blocks";
 import { createTestHarness } from "../testing/index.js";
 import { permissiveValidator } from "../validator.js";
 
@@ -60,7 +61,7 @@ describe("ToolExecutorHarness — dispatch idempotency (ADR 51)", () => {
           handlerRef: "h.echo",
           handler: async () => {
             runs += 1;
-            return [{ type: "text", text: `run-${runs}` }];
+            return [text(`run-${runs}`)];
           },
         },
       ],
@@ -83,13 +84,13 @@ describe("ToolExecutorHarness — host door via override (DispatchOptions.via)",
       handlers: [
         {
           handlerRef: "h.model_only",
-          handler: async () => [{ type: "text", text: "ran" }],
+          handler: async () => [text("ran")],
         },
       ],
     });
     await expect(harness.tools.dispatch("model_only", {})).rejects.toThrow(/not exposed/);
     const blocks = await harness.tools.dispatch("model_only", {}, { via: "model" });
-    expect(blocks).toEqual([{ type: "text", text: "ran" }]);
+    expect(blocks).toEqual([text("ran")]);
   });
 
   it("{ envelope: true } resolves with the full DispatchResult — typed output and error flag intact", async () => {
@@ -99,7 +100,7 @@ describe("ToolExecutorHarness — host door via override (DispatchOptions.via)",
         {
           handlerRef: "h.typed",
           handler: async () => ({
-            content: [{ type: "text", text: "4102" }],
+            content: [text("4102")],
             structuredContent: { total: 4102 },
             isError: false,
           }),
@@ -108,7 +109,7 @@ describe("ToolExecutorHarness — host door via override (DispatchOptions.via)",
     });
     const result = await harness.tools.dispatch("typed", {}, { envelope: true });
     expect(result.structuredContent).toEqual({ total: 4102 });
-    expect(result.content).toEqual([{ type: "text", text: "4102" }]);
+    expect(result.content).toEqual([text("4102")]);
     expect(result.name).toBe("typed");
   });
 });
@@ -123,7 +124,7 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
           handlerRef: "h.echo",
           handler: async (input, deps) => {
             seen.push({ input, useDeps: deps.use });
-            return [{ type: "text", text: JSON.stringify(input) }];
+            return [text(JSON.stringify(input))];
           },
         },
       ],
@@ -139,7 +140,7 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
     );
 
     expect(result.isError ?? false).toBe(false);
-    expect(result.content).toEqual([{ type: "text", text: '{"a":1}' }]);
+    expect(result.content).toEqual([text('{"a":1}')]);
     expect(result.executedBy).toBe("agentick");
     expect(typeof result.durationMs).toBe("number");
     expect(seen).toEqual([{ input: { a: 1 }, useDeps: { sandbox: "s1" } }]);
@@ -163,7 +164,7 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
     };
     const { harness } = await createTestHarness({
       tools: [reg],
-      handlers: [{ handlerRef: "h.search", handler: async () => [{ type: "text", text: "hit" }] }],
+      handlers: [{ handlerRef: "h.search", handler: async () => [text("hit")] }],
     });
     const result = await harness.dispatch(dispatchOf("search", "dispatch", {}));
     expect(result.executedBy).toBe("mcp:linear");
@@ -172,7 +173,7 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
   it("defaults executedBy to agentick when the declaration carries no provenance", async () => {
     const { harness } = await createTestHarness({
       tools: [echoReg()],
-      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [text("ok")] }],
     });
     const result = await harness.dispatch(dispatchOf("echo", "dispatch", {}));
     expect(result.executedBy).toBe("agentick");
@@ -181,7 +182,7 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
   it("preserves toolCallId across the round-trip", async () => {
     const { harness } = await createTestHarness({
       tools: [echoReg()],
-      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [text("ok")] }],
     });
     const result = await harness.dispatch(
       dispatchOf("echo", "dispatch", {}, { toolCallId: "stable-123" }),
@@ -224,7 +225,7 @@ describe("ToolExecutorHarness — error paths", () => {
       handlers: [
         {
           handlerRef: "h.strict",
-          handler: async () => [{ type: "text", text: "should not run" }],
+          handler: async () => [text("should not run")],
           validator: {
             validate: (v: unknown) => {
               const obj = v as Record<string, unknown> | null;
@@ -281,7 +282,7 @@ describe("ToolExecutorHarness — abort", () => {
                 reject(deps.ctx.signal.reason);
               });
             });
-            return [{ type: "text", text: "should not return" }];
+            return [text("should not return")];
           },
         },
       ],
@@ -318,7 +319,7 @@ describe("ToolExecutorHarness — abort", () => {
                 reject(deps.ctx.signal.reason);
               });
             });
-            return [{ type: "text", text: "should not return" }];
+            return [text("should not return")];
           },
         },
       ],
@@ -353,7 +354,7 @@ describe("ToolExecutorHarness — abort", () => {
                 reject(deps.ctx.signal.reason);
               });
             });
-            return [{ type: "text", text: "x" }];
+            return [text("x")];
           },
         },
       ],
@@ -382,7 +383,7 @@ describe("ToolExecutorHarness — abort", () => {
                 reject(deps.ctx.signal.reason);
               });
             });
-            return [{ type: "text", text: "x" }];
+            return [text("x")];
           },
         },
       ],
@@ -407,7 +408,7 @@ describe("ToolExecutorHarness — registry surface", () => {
   it("unregister removes; subsequent dispatch rejects with ToolNotFoundError", async () => {
     const { harness } = await createTestHarness({
       tools: [echoReg()],
-      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "x" }] }],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [text("x")] }],
     });
     await harness.unregister({ name: "echo" });
     await expect(harness.dispatch(dispatchOf("echo", "dispatch", {}))).rejects.toMatchObject({
@@ -433,7 +434,7 @@ describe("ToolExecutorHarness — state store", () => {
           handlerRef: "h.setter",
           handler: async (input, deps) => {
             deps.ctx.setState("seen", input);
-            return [{ type: "text", text: "ok" }];
+            return [text("ok")];
           },
         },
       ],
@@ -471,7 +472,7 @@ describe("ToolExecutorHarness — dispatch command provenance (ADR 51 §5/§6)",
   it("a model-driven dispatch stamps origin 'model' on the journaled envelope", async () => {
     const { harness, bus } = await createTestHarness({
       tools: [echoReg()],
-      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [text("ok")] }],
     });
     const { events, done } = collectEvents(bus, 3); // requested → before → terminal
 
@@ -487,7 +488,7 @@ describe("ToolExecutorHarness — dispatch command provenance (ADR 51 §5/§6)",
   it("a host/session dispatch stamps origin 'host'", async () => {
     const { harness, bus } = await createTestHarness({
       tools: [echoReg()],
-      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [text("ok")] }],
     });
     const { events, done } = collectEvents(bus, 3);
 
@@ -508,7 +509,7 @@ describe("ToolExecutorHarness — inbox dispatch-by-name (declared command)", ()
       handlers: [
         {
           handlerRef: "h.echo",
-          handler: async (input) => [{ type: "text", text: JSON.stringify(input) }],
+          handler: async (input) => [text(JSON.stringify(input))],
         },
       ],
     });
@@ -532,7 +533,7 @@ describe("ToolExecutorHarness — inbox dispatch-by-name (declared command)", ()
 
     expect(result.toolCallId).toBe("inbox-dispatch-1");
     expect(result.isError ?? false).toBe(false);
-    expect(result.content).toEqual([{ type: "text", text: '{"hello":"world"}' }]);
+    expect(result.content).toEqual([text('{"hello":"world"}')]);
   });
 });
 

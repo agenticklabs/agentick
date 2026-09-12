@@ -10,6 +10,7 @@
 
 import { runClientHandleConformance, spyClientTransport } from "@agentick/client-core/testing";
 import type { ToolResultInput } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   clientToolCallsHandle,
@@ -35,7 +36,7 @@ function repliesOf(spy: ReturnType<typeof spyClientTransport>) {
       .map((r) => ({ id: (r.params as { correlationId: string }).correlationId }));
 }
 
-const sampleResult: ToolResultInput = [{ type: "text", text: "ok" }];
+const sampleResult: ToolResultInput = [blocks.text("ok")];
 
 runClientHandleConformance<ClientToolCallsHandle, ClientToolCallHandle, string, ToolResultInput>({
   label: "clientToolCallsHandle",

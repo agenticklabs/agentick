@@ -30,6 +30,7 @@ import {
   withPrompts,
   type PromptRenderer,
 } from "../index.js";
+import * as blocks from "@agentick/spec/blocks";
 
 const fixtures = [{ declaration: { name: "fixture", description: "f", template: "t" } }] as const;
 
@@ -122,7 +123,7 @@ const myRenderer: PromptRenderer = {
   name: "my-format",
   handles: (content) => typeof content === "number",
   async render(content) {
-    return [{ kind: "message", role: "user", content: [{ type: "text", text: String(content) }] }];
+    return [{ kind: "message", role: "user", content: [blocks.text(String(content))] }];
   },
 };
 withPrompts({ renderers: [myRenderer] });

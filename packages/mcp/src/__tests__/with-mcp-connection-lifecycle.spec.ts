@@ -16,6 +16,7 @@ import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { withMCP } from "../index.js";
 import { NoneAuth } from "../client/index.js";
@@ -37,7 +38,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text" as const, text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
           },
         },

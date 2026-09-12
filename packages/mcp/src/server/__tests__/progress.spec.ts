@@ -27,6 +27,7 @@ import { Effect } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ProgressToken, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema, progressEventName } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   inMemoryServerTransport,
@@ -89,7 +90,7 @@ function makeResolver(seen: { token: ProgressToken | undefined }): ToolHandlerRe
       const token = ctx.mcp!.progressToken!;
       ctx.progress(token, { progress: 1, total: 3, message: "step 1" });
       ctx.progress(token, { progress: 3, total: 3 });
-      const content: ContentBlock[] = [{ type: "text", text: "done" }];
+      const content: ContentBlock[] = [blocks.text("done")];
       return { kind: "inline", content };
     };
   };

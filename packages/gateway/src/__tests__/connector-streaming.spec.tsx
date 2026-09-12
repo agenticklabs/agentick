@@ -17,6 +17,7 @@ import { waitFor } from "@agentick/utils/testing";
 
 import { defineConnector } from "@agentick/connector";
 import type { ConnectorContext, StreamingTurn } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 function Agent() {
   return React.createElement("message" as never, { role: "user" }, "ping");
@@ -82,7 +83,7 @@ describe("connector — streaming", () => {
     await gateway.createApp({
       rootElement: React.createElement(Agent),
       options: {
-        modelExecutor: makeExec([{ type: "text", text: "the answer is 42" }]),
+        modelExecutor: makeExec([blocks.text("the answer is 42")]),
         compiler: reactCompiler(),
       },
     });
@@ -129,7 +130,7 @@ describe("connector — streaming", () => {
     await gateway.createApp({
       rootElement: React.createElement(Agent),
       options: {
-        modelExecutor: makeExec([{ type: "text", text: "ack" }]),
+        modelExecutor: makeExec([blocks.text("ack")]),
         compiler: reactCompiler(),
       },
     });

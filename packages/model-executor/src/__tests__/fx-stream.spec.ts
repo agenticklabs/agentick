@@ -22,6 +22,7 @@ import type {
   LanguageModelInput,
   RenderedTree,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { LanguageModelExecutor } from "../language-model-executor.js";
@@ -68,7 +69,7 @@ function streamingAdapter(chunks: readonly StubChunk[]): LanguageModelAdapter<St
     normalize(raw: StubRaw): LanguageModelExecutionResult {
       return {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: raw.text }],
+        output: [blocks.text(raw.text)],
         stopReason: "end",
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       };
@@ -143,6 +144,6 @@ describe("LanguageModelExecutor — .fx.executeStream (streaming edge twin)", ()
     );
 
     expect(forwarded.some((d) => d.type === "content-delta")).toBe(true);
-    expect(normalized.output).toEqual([{ type: "text", text: "Hi there" }]);
+    expect(normalized.output).toEqual([blocks.text("Hi there")]);
   });
 });

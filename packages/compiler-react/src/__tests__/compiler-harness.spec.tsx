@@ -3,6 +3,7 @@ import React from "react";
 import { Chunk, Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ProtocolEvent } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { CompilerHarness } from "../harness/compiler-harness.js";
 import { fakeBridges } from "@agentick/compiler";
 
@@ -130,7 +131,7 @@ describe("CompilerHarness — end-to-end", () => {
     const r1 = await harness.renderTree({ mountId: "m_3", sessionId: "s_3" });
     const m1 = r1.tree.context.entries[0]!;
     if (m1.kind !== "message") throw new Error("expected message");
-    expect(m1.content).toEqual([{ type: "text", text: "first" }]);
+    expect(m1.content).toEqual([blocks.text("first")]);
 
     await harness.rerender({
       mountId: "m_3",
@@ -139,7 +140,7 @@ describe("CompilerHarness — end-to-end", () => {
     const r2 = await harness.renderTree({ mountId: "m_3", sessionId: "s_3" });
     const m2 = r2.tree.context.entries[0]!;
     if (m2.kind !== "message") throw new Error("expected message");
-    expect(m2.content).toEqual([{ type: "text", text: "second" }]);
+    expect(m2.content).toEqual([blocks.text("second")]);
   });
 
   it("renderTree on an unmounted mountId rejects with NotMounted", async () => {

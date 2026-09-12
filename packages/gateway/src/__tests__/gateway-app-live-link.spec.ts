@@ -22,6 +22,7 @@
 import { describe, expect, it } from "vitest";
 import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
@@ -48,7 +49,7 @@ function makeEchoHandler(seen: { value?: unknown }): ToolHandler {
   return async (input) => {
     const value = (input as { value?: unknown }).value;
     seen.value = value;
-    return [{ type: "text", text: String(value) } satisfies ContentBlock];
+    return [blocks.text(String(value)) satisfies ContentBlock];
   };
 }
 
@@ -64,7 +65,7 @@ function mkAppOptions(seen: { value?: unknown }) {
         scripted: {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           },

@@ -19,6 +19,7 @@ import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-exe
 import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import type { ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -119,7 +120,7 @@ describe("SessionHarness — verb hooks (ADR 83)", () => {
 
     await session.appendEntry({
       sessionId: session.id,
-      entry: { role: "user", content: [{ type: "text", text: "manual" }] },
+      entry: { role: "user", content: [blocks.text("manual")] },
     });
 
     expect(fired).toBe(1);

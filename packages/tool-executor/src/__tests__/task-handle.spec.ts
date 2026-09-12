@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { isTaskRefBlock, jsonSchema } from "@agentick/spec";
 import type { ContentBlock, TaskHandle, ToolDeclaration, ToolRegistration } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { drainRejection } from "@agentick/utils/testing";
 
 import { createTestHarness } from "../testing/index.js";
@@ -65,7 +66,7 @@ describe("ToolExecutor ctx — substrate primitives (#156)", () => {
           handlerRef: "h.probe",
           handler: async (_input, { ctx }) => {
             capturedCtx = { tasks: ctx.tasks, elicitation: ctx.elicitation };
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -85,7 +86,7 @@ describe("ToolExecutor ctx — substrate primitives (#156)", () => {
             // No `taskSupport` annotation → Pattern A: executor awaits
             // the handle's result transparently.
             const handle = ctx.tasks!.submit(async () => [
-              { type: "text", text: "computed-via-task" } satisfies ContentBlock,
+              blocks.text("computed-via-task") satisfies ContentBlock,
             ]);
             return handle;
           },
@@ -110,9 +111,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
         {
           handlerRef: "h.wait",
           handler: async (_input, { ctx }) => {
-            return ctx.tasks!.submit(async () => [
-              { type: "text", text: "done" } satisfies ContentBlock,
-            ]);
+            return ctx.tasks!.submit(async () => [blocks.text("done") satisfies ContentBlock]);
           },
         },
       ],
@@ -143,7 +142,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
                   signal.addEventListener("abort", () => reject(new Error("aborted")));
                   setTimeout(resolve, 200);
                 });
-                return [{ type: "text", text: "deployed" } satisfies ContentBlock];
+                return [blocks.text("deployed") satisfies ContentBlock];
               },
               { statusMessage: "deploying" },
             );
@@ -186,7 +185,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
                 }
                 setTimeout(resolve, 30);
               });
-              return [{ type: "text", text: "finished" } satisfies ContentBlock];
+              return [blocks.text("finished") satisfies ContentBlock];
             });
           },
         },
@@ -223,7 +222,7 @@ describe("ToolExecutor — Pattern A dispatch abort cancels the task (#156)", ()
                 }
                 signal.addEventListener("abort", () => reject(new Error("aborted")));
               });
-              return [{ type: "text", text: "x" } satisfies ContentBlock];
+              return [blocks.text("x") satisfies ContentBlock];
             });
             savedHandle = handle;
             return handle;

@@ -40,13 +40,14 @@ import { createGateway } from "@agentick/gateway";
 import { fakeCompiler } from "@agentick/compiler/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { TIMELINE_APPEND_EVENT_NAME, type TimelineEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { inProcessTransport } from "../index.js";
 
 const entry = (id: string): TimelineEntry => ({
   kind: "message",
-  message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+  message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
 });
 
 async function mkSession(sessionId: string) {

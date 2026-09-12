@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SemanticContentBlock, SemanticNode } from "@agentick/spec";
+import { json as jsonBlock, text as textBlock } from "@agentick/spec/blocks";
 
 import {
   createMarkdownFormatter,
@@ -48,9 +49,7 @@ describe("createXmlFormatter", () => {
     const f = createXmlFormatter({
       builder: { processEntities: true, ignoreAttributes: true } as never,
     });
-    expect(textOf(f, { type: "text", text: 'a < b & "c"' } as SemanticContentBlock)).toBe(
-      'a &lt; b &amp; "c"',
-    );
+    expect(textOf(f, textBlock('a < b & "c"') as SemanticContentBlock)).toBe('a &lt; b &amp; "c"');
     expect(textOf(f, tree)).toContain('seq="3"');
   });
 
@@ -63,9 +62,7 @@ describe("createXmlFormatter", () => {
         }),
       },
     });
-    expect(textOf(f, { type: "json", data: { a: 1 } } as SemanticContentBlock)).toBe(
-      '<data>{"a":1}</data>',
-    );
+    expect(textOf(f, jsonBlock({ a: 1 }) as SemanticContentBlock)).toBe('<data>{"a":1}</data>');
     expect(textOf(f, { type: "code", text: "x" } as SemanticContentBlock)).toBe("<code>x</code>");
     const fallsBack = createXmlFormatter({ blocks: { code: () => undefined } });
     expect(textOf(fallsBack, { type: "code", text: "x" } as SemanticContentBlock)).toBe(
@@ -106,7 +103,7 @@ describe("createMarkdownFormatter", () => {
         json: (b) => ({ type: "text", text: JSON.stringify((b as { data: unknown }).data) }),
       },
     });
-    expect(textOf(f, { type: "json", data: { a: 1 } } as SemanticContentBlock)).toBe('{"a":1}');
+    expect(textOf(f, jsonBlock({ a: 1 }) as SemanticContentBlock)).toBe('{"a":1}');
   });
 });
 

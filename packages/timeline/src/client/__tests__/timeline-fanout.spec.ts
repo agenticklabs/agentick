@@ -22,6 +22,7 @@ import type {
   WireParams,
 } from "@agentick/spec";
 import { TIMELINE_APPEND_EVENT_NAME } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { timelineHandle } from "../timeline-handle.js";
@@ -29,7 +30,7 @@ import { timelineHandle } from "../timeline-handle.js";
 function entry(id: string, visibility?: TimelineEntry["visibility"]): TimelineEntry {
   return {
     kind: "message",
-    message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+    message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
     ...(visibility ? { visibility } : {}),
   };
 }

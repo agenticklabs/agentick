@@ -44,6 +44,7 @@ import type {
   ToolHandler,
 } from "@agentick/spec";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 const target: ExecutionTarget = {
   kind: "language-model",
@@ -68,7 +69,7 @@ const answerSchema: StandardSchemaV1<unknown, { answer: string }> = jsonSchema<{
 const terminalCall = (input: Record<string, unknown>): LanguageModelExecutionResult => ({
   specVersion: SPEC_VERSION,
   output: [
-    { type: "text", text: "here is your result" },
+    blocks.text("here is your result"),
     { type: "tool_use", toolUseId: "tc-term", name: "submit_result", input },
   ],
   stopReason: "tool_use",
@@ -104,7 +105,7 @@ const echoTool: ToolDeclaration = {
   exposure: ["model"],
   handlerRef: "h.echo",
 };
-const echoHandler: ToolHandler = async () => [{ type: "text", text: "echoed" }];
+const echoHandler: ToolHandler = async () => [blocks.text("echoed")];
 
 const Agent = (): React.ReactElement =>
   React.createElement("message", { role: "system" }, "You are a skill runner.");

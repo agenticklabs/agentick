@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 
 import { ToolTaskModeConflictError, isTaskRefBlock, jsonSchema } from "@agentick/spec";
 import type { ContentBlock, ToolDeclaration, ToolRegistration } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 import { omitUndefined } from "@agentick/utils";
@@ -82,7 +83,7 @@ function longRunningHandler() {
         signal.addEventListener("abort", () => reject(new Error("aborted")));
         setTimeout(resolve, 5_000);
       });
-      return [{ type: "text", text: "long-done" } satisfies ContentBlock];
+      return [blocks.text("long-done") satisfies ContentBlock];
     });
   };
 }
@@ -96,9 +97,7 @@ function quickTaskHandler() {
     _input: unknown,
     { ctx }: { ctx: { tasks?: import("@agentick/spec").TasksHarnessProtocol } },
   ) => {
-    return ctx.tasks!.submit(async () => [
-      { type: "text", text: "quick-done" } satisfies ContentBlock,
-    ]);
+    return ctx.tasks!.submit(async () => [blocks.text("quick-done") satisfies ContentBlock]);
   };
 }
 
@@ -113,7 +112,7 @@ describe("dispatch task mode matrix — task: 'ref'", () => {
       handlers: [
         {
           handlerRef: "h.u",
-          handler: async () => [{ type: "text", text: "x" }],
+          handler: async () => [blocks.text("x")],
         },
       ],
     });
@@ -171,7 +170,7 @@ describe("dispatch task mode matrix — task: 'inline'", () => {
       handlers: [
         {
           handlerRef: "h.u",
-          handler: async () => [{ type: "text", text: "inline-direct" } satisfies ContentBlock],
+          handler: async () => [blocks.text("inline-direct") satisfies ContentBlock],
         },
       ],
     });
@@ -216,7 +215,7 @@ describe("dispatch task mode matrix — task: 'auto' (host-side default)", () =>
       handlers: [
         {
           handlerRef: "h.u",
-          handler: async () => [{ type: "text", text: "auto-host" } satisfies ContentBlock],
+          handler: async () => [blocks.text("auto-host") satisfies ContentBlock],
         },
       ],
     });
@@ -260,7 +259,7 @@ describe("dispatch task mode matrix — task: 'auto' (model-tick path)", () => {
       handlers: [
         {
           handlerRef: "h.u",
-          handler: async () => [{ type: "text", text: "auto-model-u" } satisfies ContentBlock],
+          handler: async () => [blocks.text("auto-model-u") satisfies ContentBlock],
         },
       ],
     });

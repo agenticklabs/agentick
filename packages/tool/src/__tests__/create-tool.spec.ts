@@ -9,13 +9,14 @@ import { z } from "zod";
 import { fakeToolHandlerCtx } from "@agentick/spec-conformance";
 
 import { createTool, isCreatedTool } from "../create-tool.js";
+import * as blocks from "@agentick/spec/blocks";
 
 describe("createTool — bundle shape", () => {
   it("produces { declaration, handlerRef, handler, validator }", () => {
     const tool = createTool({
       name: "calculator",
       description: "Evaluate arithmetic",
-      handler: async () => [{ type: "text", text: "ok" }],
+      handler: async () => [blocks.text("ok")],
     });
     expect(tool.declaration.name).toBe("calculator");
     expect(tool.declaration.description).toBe("Evaluate arithmetic");
@@ -79,7 +80,7 @@ describe("createTool — bundle shape", () => {
   });
 
   it("callable defaultResult on a client-handled tool lands on annotations", () => {
-    const fn = () => [{ type: "text" as const, text: "ack" }];
+    const fn = () => [blocks.text("ack")];
     const t = createTool({
       name: "client_default",
       description: "client",
@@ -107,7 +108,7 @@ describe("createTool — Standard Schema runtime validation", () => {
       name: "add",
       description: "sum two numbers",
       inputSchema: z.object({ a: z.number(), b: z.number() }),
-      handler: async ({ a, b }) => [{ type: "text", text: String(a + b) }],
+      handler: async ({ a, b }) => [blocks.text(String(a + b))],
     });
     const ok = await t.validator!.validate({ a: 1, b: 2 });
     expect(ok.value).toEqual({ a: 1, b: 2 });
@@ -126,7 +127,7 @@ describe("createTool — handler invocation contract", () => {
       handler: async (input, { ctx }) => {
         receivedInput = input;
         receivedCtx = ctx;
-        return [{ type: "text", text: "ok" }];
+        return [blocks.text("ok")];
       },
     });
     const fakeCtx = fakeToolHandlerCtx({ toolCallId: "tc-1" });

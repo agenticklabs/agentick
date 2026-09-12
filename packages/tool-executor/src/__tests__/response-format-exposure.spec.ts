@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import type { ResponseFormat, ToolHandlerCtx, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createTestHarness } from "../testing/index.js";
 
 const format: ResponseFormat = {
@@ -46,7 +47,7 @@ async function dispatchCapturingCtx(
         handlerRef: "h.done",
         handler: async (_input, { ctx }) => {
           seen = ctx;
-          return [{ type: "text", text: "ok" }];
+          return [blocks.text("ok")];
         },
       },
     ],
@@ -82,7 +83,7 @@ describe("dispatchBody — ctx.responseFormat", () => {
           handlerRef: "h.done",
           handler: async (input) => {
             received = input;
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],

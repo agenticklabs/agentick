@@ -23,6 +23,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -60,7 +61,7 @@ const okHandler = (ran: { count: number }) => ({
   handlerRef: undefined as unknown as string,
   handler: async () => {
     ran.count++;
-    return [{ type: "text" as const, text: "ok" }];
+    return [blocks.text("ok")];
   },
 });
 

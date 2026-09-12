@@ -32,6 +32,7 @@ import type {
   ProtocolEvent,
   RenderedTree,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
@@ -110,7 +111,7 @@ function stubAdapter(opts: { blockAfterFirst?: boolean } = {}): StubHandle {
     reconstructRaw: (accum: StreamAccumulatorView): RawResp => ({ text: accum.totalText() }),
     normalize: (raw: RawResp): LanguageModelExecutionResult => ({
       specVersion: "2026-05-08",
-      output: [{ type: "text", text: raw.text }],
+      output: [blocks.text(raw.text)],
       stopReason: "end",
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
     }),
@@ -132,11 +133,11 @@ async function makeExecutor(handle: StubHandle) {
 const emptyTree = (): RenderedTree => ({
   specVersion: "2026-05-08",
   context: {
-    entries: [{ kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "hi" }] }],
+    entries: [{ kind: "message", id: "m1", role: "user", content: [blocks.text("hi")] }],
   },
 });
 const execInput = (): ExecuteInput<LanguageModelInput> => ({
-  targetInput: { messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] },
+  targetInput: { messages: [{ role: "user", content: [blocks.text("hi")] }] },
   target: TARGET,
 });
 
@@ -314,7 +315,7 @@ describe("model:provider-request — BYO adapter (no factory)", () => {
       reconstructRaw: () => ({ text: "byo-ok" }),
       normalize: (raw) => ({
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: raw.text }],
+        output: [blocks.text(raw.text)],
         stopReason: "end",
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       }),
@@ -338,7 +339,7 @@ describe("model:provider-request — BYO adapter (no factory)", () => {
 
     expect(terminal.outcome).toBe("succeeded");
     if (terminal.outcome === "succeeded") {
-      expect(terminal.result.output[0]).toMatchObject({ type: "text", text: "byo-ok" });
+      expect(terminal.result.output[0]).toMatchObject(blocks.text("byo-ok"));
     }
     expect(sawNativeRequest).toBe(true);
 

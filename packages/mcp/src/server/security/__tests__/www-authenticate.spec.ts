@@ -16,6 +16,7 @@ import {
   wwwAuthenticateMeta,
   WWW_AUTHENTICATE_META_KEY,
 } from "../www-authenticate.js";
+import * as blocks from "@agentick/spec/blocks";
 
 describe("buildWwwAuthenticate", () => {
   it("emits a bare `Bearer` when given no params (RFC 6750 §3 MUST)", () => {
@@ -64,7 +65,7 @@ describe("wwwAuthenticateMeta", () => {
 
   it("is mergeable into a CallToolResult._meta as an opt-in step-up signal", () => {
     const result = {
-      content: [{ type: "text" as const, text: "Re-auth required." }],
+      content: [blocks.text("Re-auth required.")],
       isError: true,
       _meta: wwwAuthenticateMeta({
         resourceMetadataUrl: "https://api.example.com/.well-known/oauth-protected-resource",

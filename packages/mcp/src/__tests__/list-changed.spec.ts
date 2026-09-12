@@ -24,6 +24,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 import { InMemoryMcpTransport, NoneAuth, withMCP } from "../index.js";
+import * as blocks from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hello");
 
@@ -38,7 +39,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text" as const, text: "ok" }],
+            output: [blocks.text("ok")],
             stopReason: "end",
           },
         },
@@ -76,12 +77,12 @@ async function mkMutableServer(): Promise<{
     const tool = currentTools.find((t) => t.name === req.params.name);
     if (!tool) {
       return {
-        content: [{ type: "text", text: `unknown tool ${req.params.name}` }],
+        content: [blocks.text(`unknown tool ${req.params.name}`)],
         isError: true,
       };
     }
     return {
-      content: [{ type: "text", text: `${tool.name} ok` }],
+      content: [blocks.text(`${tool.name} ok`)],
     };
   });
 
@@ -138,7 +139,7 @@ describe("withMCP — notifications/tools/list_changed reactivity", () => {
 
     // Baseline — initial tool is dispatchable.
     const before = await session.tools.dispatch("srv__before", {});
-    expect(before).toEqual([{ type: "text", text: "before ok" }]);
+    expect(before).toEqual([blocks.text("before ok")]);
 
     // Swap the server's tool catalog + push the notification. The
     // client's onListChanged handler tears down the old registration

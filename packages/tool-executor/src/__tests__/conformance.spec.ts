@@ -12,6 +12,7 @@ import {
   runToolExecutorConformance,
 } from "@agentick/spec-conformance";
 import type { ContentBlock, ToolExecutorProtocol } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import type { ToolHandler, Validator } from "../types.js";
 import { createTestHarness } from "../testing/index.js";
 import { permissiveValidator } from "../validator.js";
@@ -23,9 +24,7 @@ function makeHandlerForBehavior(fixture: FixtureToolSpec): {
   switch (fixture.behavior.kind) {
     case "echo":
       return {
-        handler: async (input) => [
-          { type: "text", text: JSON.stringify(input) } satisfies ContentBlock,
-        ],
+        handler: async (input) => [blocks.text(JSON.stringify(input)) satisfies ContentBlock],
         validator: permissiveValidator,
       };
     case "throw": {
@@ -56,7 +55,7 @@ function makeHandlerForBehavior(fixture: FixtureToolSpec): {
     }
     case "deny-validation":
       return {
-        handler: async () => [{ type: "text", text: "should never run" }],
+        handler: async () => [blocks.text("should never run")],
         validator: {
           validate: (value: unknown) => {
             // The fixture's strict tool has inputSchema requiring `q: string`.

@@ -20,6 +20,7 @@ import {
 
 import { createCompiler } from "../react/compiler.js";
 import { Audio, Code, Image, Text, Video } from "../index.js";
+import * as blocks from "@agentick/spec/blocks";
 
 function renderAndCollect(element: React.ReactNode) {
   const container = createContainer({
@@ -35,7 +36,7 @@ function renderAndCollect(element: React.ReactNode) {
 const inMessage = (child: React.ReactElement) =>
   React.createElement("message", { role: "user" }, child);
 
-const png = { type: "url", url: "https://x.test/a.png" } as const;
+const png = blocks.source.url("https://x.test/a.png");
 
 describe("content-block wrappers — byte-identity with the intrinsics", () => {
   const cases: ReadonlyArray<[React.ReactElement, string, Record<string, unknown>]> = [

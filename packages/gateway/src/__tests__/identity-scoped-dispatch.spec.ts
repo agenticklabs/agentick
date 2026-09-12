@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import type { ContentBlock, IngressIdentity } from "@agentick/spec";
 import { SPEC_VERSION, WireRpcError } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { CompilerHarness } from "@agentick/compiler-react";
@@ -36,7 +37,7 @@ function mkAppOptions() {
         scripted: {
           result: {
             specVersion: SPEC_VERSION,
-            output: [{ type: "text", text: "ok" } satisfies ContentBlock],
+            output: [blocks.text("ok") satisfies ContentBlock],
             stopReason: "end",
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           },
@@ -165,7 +166,7 @@ describe("gateway.as(identity) — the wire mechanism without the framing", () =
     const { result, sessionId } = await gateway
       .as(IDENTITY)
       .app("classifier")!
-      .runOnce({ send: { messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] } });
+      .runOnce({ send: { messages: [{ role: "user", content: [blocks.text("go")] }] } });
 
     expect(stamped.principal).toBe("tenant-1:user-9");
     expect(result.response).toBe("ok");
@@ -189,7 +190,7 @@ describe("app.as(identity) — attribution without gateway policy", () => {
     expect(session.principal).toBe("tenant-1:user-9");
 
     const { result } = await app.as(IDENTITY).runOnce({
-      send: { messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] },
+      send: { messages: [{ role: "user", content: [blocks.text("go")] }] },
     });
     expect(result.response).toBe("ok");
 

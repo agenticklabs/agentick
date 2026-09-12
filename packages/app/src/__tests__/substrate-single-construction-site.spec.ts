@@ -44,6 +44,7 @@ import { withElicitation } from "@agentick/elicitation";
 import { withTasks } from "@agentick/tasks";
 import { withResources } from "@agentick/resources";
 import type { ContentBlock, SessionExtension, SessionInstaller } from "@agentick/spec";
+import { text as textBlock } from "@agentick/spec/blocks";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hello");
 
@@ -57,7 +58,7 @@ async function mkExecutor(): Promise<FakeLanguageModelExecutor> {
       scripted: Array.from({ length: 10 }, () => ({
         result: {
           specVersion: "2026-05-08" as const,
-          output: [{ type: "text" as const, text: "ok" } satisfies ContentBlock],
+          output: [textBlock("ok") satisfies ContentBlock],
           stopReason: "end" as const,
         },
       })),

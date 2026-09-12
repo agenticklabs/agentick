@@ -9,13 +9,14 @@
 
 import { describe, expect, it } from "vitest";
 import type { ExecutionTarget, LanguageModelInput, LanguageModelMessagePart } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { detectDroppedInputs, type ProjectingAdapter } from "../dropped-inputs.js";
 import { buildMessageProvenance, buildMessages } from "../index.js";
 
 const TARGET: ExecutionTarget = { kind: "language-model", provider: "stub", modelId: "stub-v1" };
 
-const text = (t: string): LanguageModelMessagePart => ({ type: "text", text: t });
+const text = (t: string): LanguageModelMessagePart => blocks.text(t);
 const image = (url: string): LanguageModelMessagePart =>
   ({ type: "image", source: { type: "url", url } }) as LanguageModelMessagePart;
 const audio = (data: string): LanguageModelMessagePart =>
@@ -202,13 +203,13 @@ describe("joining a drop to the timeline entry that produced it", () => {
       specVersion: "2026-05-08",
       context: {
         entries: [
-          { kind: "message", role: "user", id: "m_1", content: [{ type: "text", text: "look" }] },
+          { kind: "message", role: "user", id: "m_1", content: [blocks.text("look")] },
           {
             kind: "message",
             role: "user",
             id: "m_9",
             content: [
-              { type: "text", text: "and this" },
+              blocks.text("and this"),
               { type: "audio", source: { type: "base64", data: "AAAA" } },
             ],
           },

@@ -20,6 +20,7 @@ import { PromptListChangedNotificationSchema } from "@modelcontextprotocol/sdk/t
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { MessageEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { PromptsHarness } from "@agentick/prompts";
 
 import { inMemoryServerTransport, McpServerHarness, mcpPromptExtensions } from "../index.js";
@@ -215,9 +216,7 @@ describe("prompts projection — list + get", () => {
     const client = await makeClient(clientTransport);
 
     const result = await client.getPrompt({ name: "greet", arguments: { name: "Ada" } });
-    expect(result.messages).toEqual([
-      { role: "user", content: { type: "text", text: "Hello, Ada!" } },
-    ]);
+    expect(result.messages).toEqual([{ role: "user", content: blocks.text("Hello, Ada!") }]);
 
     await client.close();
     await harness.close();
@@ -274,7 +273,7 @@ describe("prompts projection — list + get", () => {
         // ADR 94: a free-floating `<Section>` in a JSX prompt body compiles to
         // a `grounding` entry — instruction context MCP has no role for.
         template: [
-          { kind: "message", role: "grounding", content: [{ type: "text", text: "# Ctx\nnotes" }] },
+          { kind: "message", role: "grounding", content: [blocks.text("# Ctx\nnotes")] },
         ] satisfies readonly MessageEntry[],
       },
     });
@@ -284,9 +283,7 @@ describe("prompts projection — list + get", () => {
     const client = await makeClient(clientTransport);
 
     const result = await client.getPrompt({ name: "grounded" });
-    expect(result.messages).toEqual([
-      { role: "user", content: { type: "text", text: "# Ctx\nnotes" } },
-    ]);
+    expect(result.messages).toEqual([{ role: "user", content: blocks.text("# Ctx\nnotes") }]);
 
     await client.close();
     await harness.close();
@@ -300,7 +297,7 @@ describe("prompts projection — list + get", () => {
         name: "sys",
         description: "system-role prompt",
         template: [
-          { kind: "message", role: "system", content: [{ type: "text", text: "be brief" }] },
+          { kind: "message", role: "system", content: [blocks.text("be brief")] },
         ] satisfies readonly MessageEntry[],
       },
     });
@@ -310,9 +307,7 @@ describe("prompts projection — list + get", () => {
     const client = await makeClient(clientTransport);
 
     const result = await client.getPrompt({ name: "sys" });
-    expect(result.messages).toEqual([
-      { role: "user", content: { type: "text", text: "be brief" } },
-    ]);
+    expect(result.messages).toEqual([{ role: "user", content: blocks.text("be brief") }]);
 
     await client.close();
     await harness.close();

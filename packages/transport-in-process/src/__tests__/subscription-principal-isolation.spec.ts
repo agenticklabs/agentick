@@ -37,6 +37,7 @@ import {
   type SessionStatusFrame,
   type SubscriptionScope,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { dispatchRequest, type DispatchHost, type DispatchSink } from "@agentick/transport";
 import { omitUndefined } from "@agentick/utils";
 import { waitFor } from "@agentick/utils/testing";
@@ -159,7 +160,7 @@ async function scriptedExecutor(bus: LocalEventBus) {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "hello" }],
+            output: [blocks.text("hello")],
             stopReason: "end",
           },
         },

@@ -15,6 +15,7 @@ import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { describe, expect, it } from "vitest";
 
 import { defineEval } from "../index.js";
@@ -46,7 +47,7 @@ function mkOkExecutor(label: string): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: `ok-${label}` }],
+            output: [blocks.text(`ok-${label}`)],
             stopReason: "end",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           },

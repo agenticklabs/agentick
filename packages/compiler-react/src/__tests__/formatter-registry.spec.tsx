@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { createFormatter, type DefinedFormatter } from "@agentick/formatters";
 import type { ReconcileDiagnostic } from "@agentick/spec";
+import { text } from "@agentick/spec/blocks";
 
 import { CompilerHarness } from "../harness/compiler-harness.js";
 import { FormatScope } from "../react/components/format-scope.js";
@@ -37,8 +38,7 @@ describe("CompilerHarness — formatter registry slot", () => {
     const shoutFormatter: DefinedFormatter = createFormatter({
       id: "shout",
       format: "markdown",
-      render: (blocks) =>
-        blocks.map((b) => (b.type === "text" ? { type: "text", text: b.text.toUpperCase() } : b)),
+      render: (blocks) => blocks.map((b) => (b.type === "text" ? text(b.text.toUpperCase()) : b)),
     });
 
     const harness = await makeHarness({

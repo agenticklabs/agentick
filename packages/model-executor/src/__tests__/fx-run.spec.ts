@@ -25,6 +25,7 @@ import type {
   RenderedTree,
   RunInput,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 import { LanguageModelExecutor } from "../language-model-executor.js";
@@ -57,7 +58,7 @@ function stubAdapter(): LanguageModelAdapter<StubRaw, never> {
     normalize(raw: StubRaw): LanguageModelExecutionResult {
       return {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: raw.text }],
+        output: [blocks.text(raw.text)],
         stopReason: "end",
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       };
@@ -183,7 +184,7 @@ describe("LanguageModelExecutor — .fx.project / .fx.normalize twins", () => {
     const fromFx = await Effect.runPromise(eff);
     const fromFacade = await exec.normalize(mkNormalizeInput({ text: "hi" }));
     expect(fromFx.output).toEqual(fromFacade.output);
-    expect(fromFx.output).toEqual([{ type: "text", text: "hi" }]);
+    expect(fromFx.output).toEqual([blocks.text("hi")]);
   });
 
   it("project + normalize nest in one Effect.gen (the streaming-path bookends, single fiber)", async () => {
@@ -197,6 +198,6 @@ describe("LanguageModelExecutor — .fx.project / .fx.normalize twins", () => {
       }),
     );
 
-    expect(result.output).toEqual([{ type: "text", text: "composed" }]);
+    expect(result.output).toEqual([blocks.text("composed")]);
   });
 });

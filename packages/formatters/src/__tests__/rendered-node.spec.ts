@@ -14,6 +14,7 @@ import type {
   SemanticContentBlock,
   SemanticNode,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { markdownFormatter, xmlFormatter } from "../index.js";
 
@@ -40,7 +41,7 @@ const resolve: FormatterResolver = (ref) =>
 describe("rendered node — xml", () => {
   it("frames the subtree's entries inside the element that holds it", () => {
     const [out] = xmlFormatter([
-      semantic(frame([rendered(tree([message("user", [{ type: "text", text: "hi & <bye>" }])]))])),
+      semantic(frame([rendered(tree([message("user", [blocks.text("hi & <bye>")])]))])),
     ]);
     expect((out as { text: string }).text).toBe(
       '<past-conversation session="s1">\n<message role="user">\nhi &amp; &lt;bye&gt;\n</message>\n</past-conversation>',
@@ -63,15 +64,13 @@ describe("rendered node — xml", () => {
 
   it("writes tool calls and their results in the subtree", () => {
     const entries = [
-      message("assistant", [
-        { type: "tool_use", toolUseId: "c1", name: "query", input: { a: 1 } } as ContentBlock,
-      ]),
+      message("assistant", [blocks.toolUse("c1", "query", { a: 1 }) as ContentBlock]),
       message("user", [
         {
           type: "tool_result",
           toolUseId: "c1",
           name: "query",
-          content: [{ type: "text", text: "3 rows" }],
+          content: [blocks.text("3 rows")],
         } as ContentBlock,
       ]),
     ];
@@ -94,9 +93,7 @@ describe("rendered node — xml", () => {
       type: "tool_result",
       toolUseId: "c1",
       name: "fetch_history",
-      content: [
-        semantic(frame([rendered(tree([message("user", [{ type: "text", text: "hi" }])]))])),
-      ],
+      content: [semantic(frame([rendered(tree([message("user", [blocks.text("hi")])]))]))],
     };
     const [out] = xmlFormatter([result as SemanticContentBlock]);
     expect(out.type).toBe("tool_result");
@@ -114,7 +111,7 @@ describe("rendered node — xml", () => {
 describe("rendered node — markdown", () => {
   it("embeds the framed subtree verbatim", () => {
     const [out] = markdownFormatter([
-      semantic(frame([rendered(tree([message("user", [{ type: "text", text: "hi *there*" }])]))])),
+      semantic(frame([rendered(tree([message("user", [blocks.text("hi *there*")])]))])),
     ]);
     const text = (out as { text: string }).text;
     expect(text).toContain('<past-conversation session="s1">');
@@ -127,7 +124,7 @@ describe("rendered node — markdown", () => {
       type: "tool_result",
       toolUseId: "c1",
       name: "fetch_history",
-      content: [semantic(rendered(tree([message("user", [{ type: "text", text: "hi" }])])))],
+      content: [semantic(rendered(tree([message("user", [blocks.text("hi")])])))],
     };
     const [out] = markdownFormatter([result as SemanticContentBlock]);
     const inner = (out as unknown as { content: ContentBlock[] }).content[0] as {

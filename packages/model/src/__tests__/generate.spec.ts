@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { generate, generateStream } from "../generate.js";
 import { scriptedAdapter } from "../testing/index.js";
 import type { LanguageModelAdapter } from "../language-model-adapter.js";
+import * as blocks from "@agentick/spec/blocks";
 
 interface ScriptedRaw {
   readonly text: string;
@@ -18,9 +19,9 @@ describe("generate()", () => {
   it("runs buildParams → call → normalize and returns the result", async () => {
     const result = await generate({
       model: scriptedAdapter(["hello ", "world"].join(""), { chunks: ["hello ", "world"] }),
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
-    expect(result.output[0]).toMatchObject({ type: "text", text: "hello world" });
+    expect(result.output[0]).toMatchObject(blocks.text("hello world"));
     expect(result.stopReason).toBe("end");
   });
 
@@ -32,9 +33,9 @@ describe("generate()", () => {
     };
     const result = await generate({
       model: withPost,
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
-    expect(result.output[0]).toMatchObject({ type: "text", text: "RAW" });
+    expect(result.output[0]).toMatchObject(blocks.text("RAW"));
   });
 });
 
@@ -42,7 +43,7 @@ describe("generateStream()", () => {
   it("yields the canonical delta vocabulary and resolves the result", async () => {
     const handle = generateStream({
       model: scriptedAdapter(["hel", "lo"].join(""), { chunks: ["hel", "lo"] }),
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
     const types: string[] = [];
     let text = "";
@@ -60,7 +61,7 @@ describe("generateStream()", () => {
     expect(text).toBe("hello");
 
     const result = await handle.result;
-    expect(result.output[0]).toMatchObject({ type: "text", text: "hello" });
+    expect(result.output[0]).toMatchObject(blocks.text("hello"));
   });
 
   it("runs the adapter's transform pipeline (think tags → reasoning)", async () => {
@@ -69,7 +70,7 @@ describe("generateStream()", () => {
         chunks: ["<think>plan</think>", "answer"],
         thinkTags: true,
       }),
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
     let reasoning = "";
     let text = "";
@@ -91,7 +92,7 @@ describe("generateStream()", () => {
     };
     const handle = generateStream({
       model: failing,
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: [blocks.text("hi")] }],
     });
     await expect(async () => {
       for await (const _ of handle.stream) void _;

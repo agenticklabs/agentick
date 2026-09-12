@@ -34,6 +34,7 @@ import {
   type WireExtensionContext,
   type WireExtensionRegistry,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createWireExtensionRegistry } from "@agentick/gateway";
 import { stubTimelineHarness } from "@agentick/timeline/testing";
 import { fakeGatewayHarness } from "@agentick/spec-conformance";
@@ -58,7 +59,7 @@ function markerOf(block: unknown): BoundedContentMarker | undefined {
     | undefined;
 }
 
-const bigTextBlock = (): ContentBlock => ({ type: "text", text: big() });
+const bigTextBlock = (): ContentBlock => blocks.text(big());
 const bigToolResult = (): ContentBlock => ({
   type: "tool_result",
   toolUseId: "t1",
@@ -106,7 +107,7 @@ describe("projectClientResult — RPC result paths", () => {
 
   it("does not mutate the input — the store's copy stays full", () => {
     const original = big();
-    const result = { content: [{ type: "text", text: original }] as ContentBlock[] };
+    const result = { content: [blocks.text(original)] as ContentBlock[] };
     projectClientResult("session/dispatch", result, bounder);
     expect((result.content[0] as { text: string }).text).toBe(original);
     expect(result.content[0]!.metadata).toBeUndefined();
@@ -517,7 +518,7 @@ describe("two-tier — oversized tool result is FULL in store + model, BOUNDED a
             type: "tool_result",
             toolUseId: "t1",
             name: "read_file",
-            content: [{ type: "text", text: full }],
+            content: [blocks.text(full)],
           },
         ],
       },

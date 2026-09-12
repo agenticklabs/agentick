@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import type { DispatchInput, ProtocolEvent, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import type { CommandHooks } from "@agentick/runtime";
 
 import { createTestHarness } from "../testing/index.js";
@@ -75,7 +76,7 @@ describe("ctx.run — ad-hoc operation through real dispatch", () => {
           handlerRef: "h.runner-tool",
           handler: async (_input, { ctx }) => {
             seen = await ctx.run("step", () => 42);
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -106,7 +107,7 @@ describe("ctx.run — ad-hoc operation through real dispatch", () => {
           handlerRef: "h.runner-tool",
           handler: async (_input, { ctx }) => {
             await ctx.run("charge", { input: { amount: 5 } }, () => "done");
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -130,7 +131,7 @@ describe("ctx.run — ad-hoc operation through real dispatch", () => {
           handlerRef: "h.runner-tool",
           handler: async (_input, { ctx }) => {
             await ctx.run("step", () => 1);
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -162,7 +163,7 @@ describe("ctx.run — ad-hoc operation through real dispatch", () => {
             } catch {
               rejected = true;
             }
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],
@@ -189,7 +190,7 @@ describe("ctx.run — ad-hoc operation through real dispatch", () => {
               hasMakeEvent: "makeEvent" in ctx.runner,
               hasPublish: "publish" in ctx.runner,
             };
-            return [{ type: "text", text: "ok" }];
+            return [blocks.text("ok")];
           },
         },
       ],

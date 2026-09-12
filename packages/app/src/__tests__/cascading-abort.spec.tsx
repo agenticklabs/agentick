@@ -37,6 +37,7 @@ import type {
   ToolHandler,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { createApp } from "../react.js";
@@ -90,7 +91,7 @@ function callTick(tool: string, callId: string) {
   return {
     result: {
       specVersion: "2026-05-08" as const,
-      output: [{ type: "tool_use" as const, toolUseId: callId, name: tool, input: {} }],
+      output: [blocks.toolUse(callId, tool, {})],
       stopReason: "tool_use" as const,
       toolCalls: [{ id: callId, name: tool, input: {} }],
       usage,
@@ -176,7 +177,7 @@ async function mkApp() {
           ctx.signal.addEventListener("abort", () => resolve(), { once: true });
         });
         fixture.releases.push(ctx.sessionId ?? "?");
-        return [{ type: "text", text: "gate released" }];
+        return [blocks.text("gate released")];
       },
     ],
     [
@@ -193,7 +194,7 @@ async function mkApp() {
             modelExecutor: await mkExec(`hold-${childId}`, holdScript(`tc-${childId}-gate`)),
           },
         });
-        return [{ type: "text", text: `spawned ${childId}` }];
+        return [blocks.text(`spawned ${childId}`)];
       },
     ],
   ]);

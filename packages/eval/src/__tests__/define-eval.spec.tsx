@@ -17,6 +17,7 @@ import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { ContentBlock, ExecutionTarget } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { describe, expect, it } from "vitest";
 
 import { defineEval } from "../index.js";
@@ -91,7 +92,7 @@ function mkCalculatorExecutor(): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "47 × 23 = 1081." }],
+            output: [blocks.text("47 × 23 = 1081.")],
             stopReason: "end",
             usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
           },
@@ -112,7 +113,7 @@ function mkNoToolExecutor(): FakeLanguageModelExecutor {
         {
           result: {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "I don't know." }],
+            output: [blocks.text("I don't know.")],
             stopReason: "end",
             usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
           },
@@ -128,7 +129,7 @@ const calculatorHandlers = new Map<string, (input: unknown) => Promise<ContentBl
     async (input) => {
       const { expression } = input as { expression: string };
       const value = Function(`"use strict"; return (${expression});`)();
-      return [{ type: "text", text: String(value) }];
+      return [blocks.text(String(value))];
     },
   ],
 ]);

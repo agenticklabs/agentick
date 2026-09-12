@@ -31,6 +31,7 @@ import type {
   LoopToolResult,
   TimelineEntry,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 import { InMemorySessionStore } from "../session-store.js";
@@ -53,7 +54,7 @@ function scriptedLoop(opts: { readonly toolResults?: readonly LoopToolResult[] }
         tickId: "tick-0",
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           stopReason: "end",
           usage,
         },
@@ -73,7 +74,7 @@ function scriptedLoop(opts: { readonly toolResults?: readonly LoopToolResult[] }
           ticks: 1,
           usage,
           stopReason: "end",
-          output: [{ type: "text", text: "ok" }],
+          output: [blocks.text("ok")],
           toolResults: opts.toolResults ?? [],
         },
       };
@@ -104,7 +105,7 @@ async function mkSession(
     scripted: {
       result: {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "ok" }],
+        output: [blocks.text("ok")],
         stopReason: "end",
         usage,
       },
@@ -153,7 +154,7 @@ const toolResult = (internal?: boolean): LoopToolResult => ({
   toolCallId: "call-1",
   toolName: "some_tool",
   succeeded: true,
-  content: [{ type: "text", text: "tool ok" }],
+  content: [blocks.text("tool ok")],
   durationMs: 1,
   ...(internal !== undefined ? { internal } : {}),
 });

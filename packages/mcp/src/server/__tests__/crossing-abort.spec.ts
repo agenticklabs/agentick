@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { McpRequestContext, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { waitFor } from "@agentick/utils/testing";
 
 import { inMemoryServerTransport, McpServerHarness } from "../index.js";
@@ -73,7 +74,7 @@ async function rig(): Promise<Rig> {
             }
             ctx.signal.addEventListener("abort", () => resolve(), { once: true });
           });
-          return { kind: "inline" as const, content: [{ type: "text" as const, text: "done" }] };
+          return { kind: "inline" as const, content: [blocks.text("done")] };
         },
       },
     },
