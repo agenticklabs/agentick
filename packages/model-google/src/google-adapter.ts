@@ -78,6 +78,7 @@ import {
 import type { AdapterDelta } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 import { MalformedModelOutput, ProviderRejected, type ExecuteErrorChannel } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Google escape hatch (G5)
@@ -1318,10 +1319,10 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       const isThought = (part as { thought?: boolean }).thought === true;
       if (typeof part.text === "string" && part.text.length > 0) {
         if (isThought) {
-          output.push({ type: "reasoning", text: part.text });
+          output.push(blocks.reasoning(part.text));
         } else {
           partIndexToOutputIndex.set(pi, output.length);
-          output.push({ type: "text", text: part.text });
+          output.push(blocks.text(part.text));
         }
         continue;
       }
@@ -1333,13 +1334,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
         const signature = (part as { thoughtSignature?: string }).thoughtSignature;
         const providerMetadata =
           signature !== undefined ? { google: { thoughtSignature: signature } } : undefined;
-        output.push({
-          type: "tool_use",
-          toolUseId: id,
-          name,
-          input: args,
-          ...(providerMetadata !== undefined ? { providerMetadata } : {}),
-        });
+        output.push(blocks.toolUse(id, name, args, { providerMetadata }));
         toolCalls.push({
           id,
           name,

@@ -10,8 +10,8 @@ import type {
   MessageEntry,
   SemanticContentBlock,
   SemanticNode,
-  TextBlock,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createFormatter } from "./create-formatter.js";
 import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
@@ -81,7 +81,7 @@ function formatNode(node: SemanticNode): string {
 
 function formatBlock(block: SemanticContentBlock): ContentBlock {
   if (block.semanticNode) {
-    return { type: "text", text: formatNode(block.semanticNode) } satisfies TextBlock;
+    return blocks.text(formatNode(block.semanticNode));
   }
   switch (block.type) {
     case "text":
@@ -90,16 +90,15 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
     case "csv":
     case "html":
     case "code":
-      return { type: "text", text: block.text ?? "" } satisfies TextBlock;
+      return blocks.text(block.text ?? "");
     case "json":
-      return {
-        type: "text",
-        text: block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : ""),
-      } satisfies TextBlock;
+      return blocks.text(
+        block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : ""),
+      );
     case "user_action":
     case "system_event":
     case "state_change":
-      return { type: "text", text: renderEventPlain(block) } satisfies TextBlock;
+      return blocks.text(renderEventPlain(block));
     default:
       return block;
   }

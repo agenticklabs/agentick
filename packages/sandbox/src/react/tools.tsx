@@ -22,6 +22,7 @@
 import { z } from "zod";
 import { createTool } from "@agentick/compiler-react";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import "../augment.js";
 import { activeSandbox } from "../bridge.js";
@@ -41,7 +42,7 @@ export const Bash = createTool({
   async handler({ command, cwd, timeoutMs }, { ctx }): Promise<readonly ContentBlock[]> {
     const sandbox = activeSandbox(ctx.sandbox);
     if (!sandbox) {
-      return [{ type: "text", text: "Error: no sandbox available in scope" }];
+      return [blocks.text("Error: no sandbox available in scope")];
     }
     const result = await sandbox.exec({
       command,
@@ -49,14 +50,9 @@ export const Bash = createTool({
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
     if (result.exitCode === 0) {
-      return [{ type: "text", text: result.stdout || "(no output)" }];
+      return [blocks.text(result.stdout || "(no output)")];
     }
-    return [
-      {
-        type: "text",
-        text: `(exit ${result.exitCode})\n${result.stderr || result.stdout || ""}`,
-      },
-    ];
+    return [blocks.text(`(exit ${result.exitCode})\n${result.stderr || result.stdout || ""}`)];
   },
 });
 
@@ -72,10 +68,10 @@ export const ReadFile = createTool({
   async handler({ path }, { ctx }): Promise<readonly ContentBlock[]> {
     const sandbox = activeSandbox(ctx.sandbox);
     if (!sandbox) {
-      return [{ type: "text", text: "Error: no sandbox available in scope" }];
+      return [blocks.text("Error: no sandbox available in scope")];
     }
     const content = await sandbox.readFile({ path });
-    return [{ type: "text", text: content }];
+    return [blocks.text(content)];
   },
 });
 
@@ -92,10 +88,10 @@ export const WriteFile = createTool({
   async handler({ path, content }, { ctx }): Promise<readonly ContentBlock[]> {
     const sandbox = activeSandbox(ctx.sandbox);
     if (!sandbox) {
-      return [{ type: "text", text: "Error: no sandbox available in scope" }];
+      return [blocks.text("Error: no sandbox available in scope")];
     }
     await sandbox.writeFile({ path, content });
-    return [{ type: "text", text: `Wrote ${content.length} bytes to ${path}` }];
+    return [blocks.text(`Wrote ${content.length} bytes to ${path}`)];
   },
 });
 
@@ -169,17 +165,16 @@ MATCHING:
   async handler({ path, edits }, { ctx }): Promise<readonly ContentBlock[]> {
     const sandbox = activeSandbox(ctx.sandbox);
     if (!sandbox) {
-      return [{ type: "text", text: "Error: no sandbox available in scope" }];
+      return [blocks.text("Error: no sandbox available in scope")];
     }
     const result = await sandbox.editFile({ path, edits });
     const summary = result.changes
       .map((c) => `line ${c.line}: -${c.removed}/+${c.added}`)
       .join(", ");
     return [
-      {
-        type: "text",
-        text: `Applied ${result.applied} edit(s) to ${path}.${summary ? ` Changes: ${summary}` : ""}`,
-      },
+      blocks.text(
+        `Applied ${result.applied} edit(s) to ${path}.${summary ? ` Changes: ${summary}` : ""}`,
+      ),
     ];
   },
 });

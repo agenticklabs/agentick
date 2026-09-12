@@ -15,6 +15,7 @@
 
 import type { CallToolResult, ResourceContents } from "@modelcontextprotocol/sdk/types.js";
 import type { ContentBlock, ResourceContents as SpecResourceContents } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { omitUndefined } from "@agentick/utils";
 
 import { mcpResultExtensions } from "../server/wire-extensions.js";
@@ -97,45 +98,27 @@ export function mapResourceContents(
 function mapBlock(block: CallToolResult["content"][number]): ContentBlock {
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text };
+      return blocks.text(block.text);
     case "image":
-      return {
-        type: "image",
-        source: {
-          type: "base64",
-          data: block.data,
-          mimeType: block.mimeType,
-        },
+      return blocks.image(blocks.source.base64(block.data, block.mimeType), {
         mimeType: block.mimeType,
-      };
+      });
     case "audio":
-      return {
-        type: "audio",
-        source: {
-          type: "base64",
-          data: block.data,
-          mimeType: block.mimeType,
-        },
+      return blocks.audio(blocks.source.base64(block.data, block.mimeType), {
         mimeType: block.mimeType,
-      };
+      });
     case "resource":
       // MCP embedded resource — `.resource: { uri, mimeType?, text | blob }`.
       // Maps to the agentick `resource` content block (ADR 62) so the
       // content round-trips structurally instead of being flattened to
       // a text JSON blob.
-      return {
-        type: "resource",
-        resource: mapOneResourceContents(block.resource),
-      };
+      return blocks.resource(mapOneResourceContents(block.resource));
     case "resource_link":
-      return {
-        type: "text",
-        text: JSON.stringify({ kind: "mcp.resource_link", link: block }),
-      };
+      return blocks.text(JSON.stringify({ kind: "mcp.resource_link", link: block }));
     default:
       // Forwards-compat — MCP may add new content variants. Fall
       // through as text JSON so callers see *something*.
-      return { type: "text", text: JSON.stringify(block) };
+      return blocks.text(JSON.stringify(block));
   }
 }
 

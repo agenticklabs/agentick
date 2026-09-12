@@ -26,6 +26,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { stubHarnessFx } from "./harness.js";
 
@@ -54,7 +55,7 @@ function mkRenderedTree(tools: readonly ToolDeclaration[] = []): RenderedTree {
           kind: "message",
           id: "m_user",
           role: "user",
-          content: [{ type: "text", text: "hello" }],
+          content: [blocks.text("hello")],
         },
       ],
     },
@@ -123,7 +124,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
       toolCallId: input.toolCallId,
       name: input.name,
       succeeded: true,
-      content: [{ type: "text" as const, text: `echoed: ${JSON.stringify(input.input)}` }],
+      content: [blocks.text(`echoed: ${JSON.stringify(input.input)}`)],
       executedBy: "agentick",
       durationMs: 1,
     });
@@ -202,7 +203,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
         modelExecutor: stubExecutor([
           {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "hi" }],
+            output: [blocks.text("hi")],
             stopReason: "end",
             usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           },
@@ -231,7 +232,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
         modelExecutor: stubExecutor([
           {
             specVersion: "2026-05-08",
-            output: [{ type: "text", text: "done" }],
+            output: [blocks.text("done")],
             stopReason: "end",
           },
         ]),
@@ -262,20 +263,13 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
 
       const firstRun: LanguageModelExecutionResult = {
         specVersion: "2026-05-08",
-        output: [
-          {
-            type: "tool_use",
-            toolUseId: "tc-1",
-            name: "calculator",
-            input: { expression: "1 + 1" },
-          },
-        ],
+        output: [blocks.toolUse("tc-1", "calculator", { expression: "1 + 1" })],
         stopReason: "tool_use",
         toolCalls: [{ id: "tc-1", name: "calculator", input: { expression: "1 + 1" } }],
       };
       const secondRun: LanguageModelExecutionResult = {
         specVersion: "2026-05-08",
-        output: [{ type: "text", text: "= 2" }],
+        output: [blocks.text("= 2")],
         stopReason: "end",
       };
 
@@ -309,14 +303,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
       const loop = await factory({ harnessId: "loop-maxticks-1" });
       const looping: LanguageModelExecutionResult = {
         specVersion: "2026-05-08",
-        output: [
-          {
-            type: "tool_use",
-            toolUseId: "tc-x",
-            name: "calculator",
-            input: {},
-          },
-        ],
+        output: [blocks.toolUse("tc-x", "calculator", {})],
         stopReason: "tool_use",
         toolCalls: [{ id: "tc-x", name: "calculator", input: {} }],
       };

@@ -57,6 +57,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { SPEC_VERSION, SessionClosedError } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { stubHarnessFx } from "./harness.js";
 
@@ -146,7 +147,7 @@ function mkTree(): RenderedTree {
           kind: "message",
           id: "m_user",
           role: "user",
-          content: [{ type: "text", text: "hello" }],
+          content: [blocks.text("hello")],
         },
       ],
     },
@@ -184,7 +185,7 @@ function stubLoop(text: string): LoopExecutorProtocol {
     input: Parameters<LoopExecutorProtocol["runExecution"]>[0],
   ): Promise<ExecutionTerminal> => {
     const tickId = "tick-1";
-    const output: readonly ContentBlock[] = [{ type: "text", text }];
+    const output: readonly ContentBlock[] = [blocks.text(text)];
     const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
     // Apply via state applicator — exercises the session's
     // applyExecutorResult path. The loop's StateApplicator takes the
@@ -223,7 +224,7 @@ function stubLoop(text: string): LoopExecutorProtocol {
 function stubExecutor(): ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult> {
   const result: LanguageModelExecutionResult = {
     specVersion: "2026-05-08",
-    output: [{ type: "text", text: "stub" }],
+    output: [blocks.text("stub")],
     stopReason: "end",
   };
   const runFx = (): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
@@ -251,7 +252,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
       toolCallId: input.toolCallId,
       name: input.name,
       succeeded: true,
-      content: [{ type: "text" as const, text: "stub" }],
+      content: [blocks.text("stub")],
       executedBy: "agentick",
       durationMs: 0,
     });
@@ -463,7 +464,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         harnessId: "session-conf-apply-1",
         deps: defaultSessionConformanceDeps(),
       });
-      const content: ContentBlock[] = [{ type: "text", text: "marker" }];
+      const content: ContentBlock[] = [blocks.text("marker")];
       const res = await session.appendEntry({
         sessionId: "session-conf-apply-1",
         entry: { role: "user", content },
@@ -483,7 +484,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         tickId: "tick-x",
         result: {
           specVersion: SPEC_VERSION,
-          output: [{ type: "text", text: "from-applicator" }],
+          output: [blocks.text("from-applicator")],
           stopReason: "end",
         },
       });
@@ -505,14 +506,14 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
             toolCallId: "tc-1",
             toolName: "calc",
             succeeded: true,
-            content: [{ type: "text", text: "42" }],
+            content: [blocks.text("42")],
             durationMs: 1,
           },
           {
             toolCallId: "tc-2",
             toolName: "calc",
             succeeded: true,
-            content: [{ type: "text", text: "84" }],
+            content: [blocks.text("84")],
             durationMs: 1,
           },
         ],

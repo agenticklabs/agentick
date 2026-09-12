@@ -29,6 +29,7 @@ import {
   type LanguageModelStopReason,
   type UsageStats,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 /**
  * Per-tool-call accumulating state. JSON arguments arrive as deltas
@@ -302,24 +303,26 @@ export class StreamAccumulator {
     const byIndex = new Map<number, ContentBlock>();
 
     for (const [blockIndex, text] of this.textByBlock) {
-      if (text.length > 0) byIndex.set(blockIndex, { type: "text", text });
+      if (text.length > 0) byIndex.set(blockIndex, blocks.text(text));
     }
 
     // `ReasoningBlock.text`, not `.reasoning` — the DELTA channel is named
     // `reasoning`, the BLOCK field is `text` (same as a text block, so a renderer
     // reads any prose block the same way and only the `type` decides treatment).
     for (const [blockIndex, text] of this.reasoningByBlock) {
-      if (text.length > 0) byIndex.set(blockIndex, { type: "reasoning", text });
+      if (text.length > 0) byIndex.set(blockIndex, blocks.reasoning(text));
     }
 
     for (const entry of this.toolCalls.values()) {
-      byIndex.set(entry.blockIndex, {
-        type: "tool_use",
-        toolUseId: entry.callId,
-        name: entry.name,
-        input: this.toolCallInput(entry.callId),
-        ...(entry.providerMetadata ? { providerMetadata: entry.providerMetadata } : {}),
-      });
+      byIndex.set(
+        entry.blockIndex,
+        blocks.toolUse(
+          entry.callId,
+          entry.name,
+          this.toolCallInput(entry.callId),
+          entry.providerMetadata ? { providerMetadata: entry.providerMetadata } : {},
+        ),
+      );
     }
 
     return [...byIndex.keys()].sort((a, b) => a - b).map((i) => byIndex.get(i)!);

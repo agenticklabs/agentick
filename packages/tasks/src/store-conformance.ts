@@ -28,6 +28,7 @@
 import { expect, it } from "vitest";
 
 import type { TaskRecord, TaskStore } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { stubStoreCtx } from "@agentick/store";
 import { runStoreConformance } from "@agentick/store/testing";
 
@@ -86,7 +87,7 @@ export function runTaskStoreConformance(opts: TaskStoreConformanceOptions): void
         const store = await setup();
         await store.put(record("task:a", { status: "working" }), stubStoreCtx());
         await store.put(
-          record("task:a", { status: "completed", result: [{ type: "text", text: "ok" }] }),
+          record("task:a", { status: "completed", result: [blocks.text("ok")] }),
           stubStoreCtx(),
         );
         const got = await store.get("task:a", stubStoreCtx());

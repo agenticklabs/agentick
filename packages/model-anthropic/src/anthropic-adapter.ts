@@ -78,6 +78,7 @@ import type {
   UsageStats,
 } from "@agentick/spec";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { omitUndefined } from "@agentick/utils";
 
 // ============================================================================
@@ -1269,14 +1270,12 @@ function anthropicWebSearchResultBlock(
   // discriminate explicitly and cast the error branch.
   if (!Array.isArray(content)) {
     const err = content as AnthropicWebSearchToolResultErrorWire;
-    return {
-      type: "tool_result",
-      toolUseId: block.tool_use_id,
-      name: toolName,
-      isError: true,
-      content: [{ type: "text", text: `web search error: ${err.error_code}` }],
-      executedBy: PROVIDER_ANTHROPIC,
-    };
+    return blocks.toolResult(
+      block.tool_use_id,
+      toolName,
+      [blocks.text(`web search error: ${err.error_code}`)],
+      { isError: true, executedBy: PROVIDER_ANTHROPIC },
+    );
   }
   const inner: ContentBlock[] = [];
   const blockSources = new Map<string, Source>();
@@ -1286,22 +1285,18 @@ function anthropicWebSearchResultBlock(
       ...(hit.title ? { title: hit.title } : {}),
     });
     blockSources.set(source.id, source);
-    inner.push({
-      type: "text",
-      text: hit.title ?? hit.url,
-      sources: [source],
-      citations: [{ sourceId: source.id }],
-    });
+    inner.push(
+      blocks.text(hit.title ?? hit.url, {
+        sources: [source],
+        citations: [{ sourceId: source.id }],
+      }),
+    );
   }
   const sources = [...blockSources.values()];
-  return {
-    type: "tool_result",
-    toolUseId: block.tool_use_id,
-    name: toolName,
-    content: inner,
+  return blocks.toolResult(block.tool_use_id, toolName, inner, {
     executedBy: PROVIDER_ANTHROPIC,
     ...(sources.length > 0 ? { sources } : {}),
-  };
+  });
 }
 
 // ============================================================================
@@ -1397,22 +1392,13 @@ function anthropicContentToContentBlocks(
         const tb = block as AnthropicTextBlock;
         if (tb.text.length > 0) {
           const { citations, sources } = anthropicCitationsToCitations(tb.citations, interner);
-          output.push({
-            type: "text",
-            text: tb.text,
-            ...(citations.length > 0 ? { citations, sources } : {}),
-          });
+          output.push(blocks.text(tb.text, citations.length > 0 ? { citations, sources } : {}));
         }
         break;
       }
       case "tool_use": {
         const t = block as AnthropicToolUseBlock;
-        output.push({
-          type: "tool_use",
-          toolUseId: t.id,
-          name: t.name,
-          input: (t.input ?? {}) as Record<string, unknown>,
-        });
+        output.push(blocks.toolUse(t.id, t.name, (t.input ?? {}) as Record<string, unknown>));
         break;
       }
       case "thinking": {
@@ -1420,11 +1406,12 @@ function anthropicContentToContentBlocks(
         // the signed thinking block replays verbatim on the next turn
         // (Anthropic requires this for extended-thinking + tool use).
         const t = block as AnthropicThinkingBlock;
-        output.push({
-          type: "reasoning",
-          text: t.thinking,
-          ...(t.signature ? { providerMetadata: { anthropic: { signature: t.signature } } } : {}),
-        });
+        output.push(
+          blocks.reasoning(
+            t.thinking,
+            t.signature ? { providerMetadata: { anthropic: { signature: t.signature } } } : {},
+          ),
+        );
         break;
       }
       case "redacted_thinking": {
@@ -1435,14 +1422,14 @@ function anthropicContentToContentBlocks(
         // rides back to `providerOptions.anthropic.redactedData` at
         // re-projection (`reasoningRedactedData`).
         const r = block as RedactedThinkingBlock;
-        output.push({
-          type: "reasoning",
-          text: "[redacted]",
-          isRedacted: true,
-          ...(r.data !== undefined
-            ? { providerMetadata: { anthropic: { redactedData: r.data } } }
-            : {}),
-        });
+        output.push(
+          blocks.reasoning("[redacted]", {
+            isRedacted: true,
+            ...(r.data !== undefined
+              ? { providerMetadata: { anthropic: { redactedData: r.data } } }
+              : {}),
+          }),
+        );
         break;
       }
     }

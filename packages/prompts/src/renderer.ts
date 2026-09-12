@@ -17,6 +17,7 @@
  */
 
 import type { MessageEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 export interface PromptRenderer {
   /**
@@ -67,6 +68,6 @@ export function stringToSystemMessage(text: string): MessageEntry {
   return {
     kind: "message",
     role: "system",
-    content: [{ type: "text", text }],
+    content: [blocks.text(text)],
   };
 }

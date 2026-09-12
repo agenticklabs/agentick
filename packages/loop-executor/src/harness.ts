@@ -135,6 +135,7 @@ import {
   toRegistration,
   validateStructuredOutput,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { mergeAbortSignals, omitUndefined, reasonOf } from "@agentick/utils";
 
 // ADR 80/83 — light up the execution-lifecycle verb. `loop:run-execution`
@@ -1600,7 +1601,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // The paired `tool_result` IS the model's feedback loop (ADR 99 slice
           // 4b) — persisted with `is_error` and an EMPTY body, it told the model
           // only that something went wrong, and it could not self-correct.
-          const content: readonly ContentBlock[] = [{ type: "text", text: reasonOf(err) }];
+          const content: readonly ContentBlock[] = [blocks.text(reasonOf(err))];
           yield* input.emit({
             kind: "tool-dispatch-end",
             tick: tickIndex,
@@ -1789,9 +1790,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
  * the completion event; there is no handler to run, so the result is a fixed
  * acknowledgement that pairs the tool_use in the persisted timeline.
  */
-const TERMINAL_RESULT_CONTENT: readonly ContentBlock[] = [
-  { type: "text", text: "Result recorded." },
-];
+const TERMINAL_RESULT_CONTENT: readonly ContentBlock[] = [blocks.text("Result recorded.")];
 
 /**
  * Derive an {@link OutputSpec} from the tree-level `<Output>` declaration

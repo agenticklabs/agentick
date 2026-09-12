@@ -27,9 +27,9 @@ import type {
   FormatterResolver,
   SectionNode,
   SemanticContentBlock,
-  TextBlock,
 } from "@agentick/spec";
 import { isSectionContent } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 /**
  * Block-metadata key naming which section a block came from.
@@ -127,12 +127,12 @@ export function lowerSection(
 
   const flush = (): void => {
     if (run.length === 0) return;
-    out.push({
-      type: "text",
-      text: run.join("\n"),
-      id: section.id,
-      metadata: { ...section.metadata, [SECTION_STAMP]: section.id },
-    } satisfies TextBlock);
+    out.push(
+      blocks.text(run.join("\n"), {
+        id: section.id,
+        metadata: { ...section.metadata, [SECTION_STAMP]: section.id },
+      }),
+    );
     run = [];
   };
 

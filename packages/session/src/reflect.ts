@@ -38,6 +38,7 @@ import {
   terminalToolDeclaration,
   validateStructuredOutput,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { estimateTokens } from "@agentick/model";
 import { omitUndefined } from "@agentick/utils";
 
@@ -75,7 +76,7 @@ export interface ReflectResult<T = unknown> {
 }
 
 const asBlocks = (instructions: string | readonly ContentBlock[]): readonly ContentBlock[] =>
-  typeof instructions === "string" ? [{ type: "text", text: instructions }] : instructions;
+  typeof instructions === "string" ? [blocks.text(instructions)] : instructions;
 
 /**
  * Append the instruction as a final user turn, overlaying the pass's generation

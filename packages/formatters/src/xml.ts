@@ -21,8 +21,8 @@ import type {
   RenderedTree,
   SemanticContentBlock,
   SemanticNode,
-  TextBlock,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createFormatter, type DefinedFormatter } from "./create-formatter.js";
 import { eventParts } from "./event-block.js";
@@ -280,7 +280,7 @@ export function createXmlFormatter(options: XmlFormatterOptions = {}): DefinedFo
       const rendered = isElementTree(block.semanticNode)
         ? serializePretty(nodes)
         : serialize(nodes);
-      return { type: "text", text: rendered } satisfies TextBlock;
+      return blocks.text(rendered);
     }
     if (block.type === "tool_result") {
       const content = block.content.map((b) =>
@@ -292,46 +292,35 @@ export function createXmlFormatter(options: XmlFormatterOptions = {}): DefinedFo
     }
     switch (block.type) {
       case "text":
-        return { type: "text", text: escapeText(block.text) } satisfies TextBlock;
+        return blocks.text(escapeText(block.text));
       case "reasoning":
-        return {
-          type: "text",
-          text: serialize([element("reasoning", [text(block.text)])]),
-        } satisfies TextBlock;
+        return blocks.text(serialize([element("reasoning", [text(block.text)])]));
       case "code": {
         const c = block as CodeBlock;
-        return {
-          type: "text",
-          text: serialize([
+        return blocks.text(
+          serialize([
             element("code", [text(c.text)], c.language ? { language: c.language } : undefined),
           ]),
-        } satisfies TextBlock;
+        );
       }
       case "json": {
         const j = block as JsonBlock;
         const body = j.text ?? (j.data !== undefined ? JSON.stringify(j.data) : "");
-        return {
-          type: "text",
-          text: serialize([element("json", [text(body)])]),
-        } satisfies TextBlock;
+        return blocks.text(serialize([element("json", [text(body)])]));
       }
       case "xml":
       case "html":
-        return { type: "text", text: block.text ?? "" } satisfies TextBlock;
+        return blocks.text(block.text ?? "");
       case "csv":
-        return {
-          type: "text",
-          text: serialize([element("csv", [text(block.text ?? "")])]),
-        } satisfies TextBlock;
+        return blocks.text(serialize([element("csv", [text(block.text ?? "")])]));
       case "user_action":
       case "system_event":
       case "state_change":
-        return { type: "text", text: eventText(block) } satisfies TextBlock;
+        return blocks.text(eventText(block));
       case "custom":
-        return {
-          type: "text",
-          text: customText(block.tag, block.attrs, block.content, block.selfClosing === true),
-        } satisfies TextBlock;
+        return blocks.text(
+          customText(block.tag, block.attrs, block.content, block.selfClosing === true),
+        );
       default:
         return block;
     }

@@ -35,6 +35,7 @@ import type {
   UsageStats,
 } from "@agentick/spec";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { omitUndefined } from "@agentick/utils";
 
 import { splitStatsTrailer, StatsTrailerSplitter, type StatsTrailer } from "./stats-trailer.js";
@@ -332,7 +333,7 @@ function statsOf(accum: StreamAccumulatorView): ChatJimmyStats | undefined {
 function normalizeResponse(raw: ChatJimmyResponse): LanguageModelExecutionResult {
   return {
     specVersion: SPEC_VERSION,
-    output: raw.text.length > 0 ? [{ type: "text", text: raw.text }] : [],
+    output: raw.text.length > 0 ? [blocks.text(raw.text)] : [],
     stopReason: stopReasonOf(raw.stats),
     usage: usageOf(raw.stats),
     raw,

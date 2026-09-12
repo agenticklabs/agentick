@@ -9,6 +9,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { ContentBlock } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { toWireContent } from "./content.js";
 
@@ -65,7 +66,7 @@ export function sanitizeErrorMessage(message: string, fallback = "Internal serve
  */
 export function toolError(message: string): CallToolResult {
   return {
-    content: [{ type: "text", text: sanitizeErrorMessage(message) }],
+    content: [blocks.text(sanitizeErrorMessage(message))],
     isError: true,
   };
 }
@@ -73,7 +74,7 @@ export function toolError(message: string): CallToolResult {
 /** Construct a successful text `CallToolResult`. */
 export function toolResult(text: string): CallToolResult {
   return {
-    content: [{ type: "text", text }],
+    content: [blocks.text(text)],
   };
 }
 

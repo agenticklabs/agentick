@@ -40,6 +40,7 @@ import type {
   RenderedTree,
   MediaSource,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 // ============================================================================
 // Factory contract
@@ -107,16 +108,14 @@ function mkRenderedTree(
     kind: "message",
     role: "system",
     id: "system",
-    content: [{ type: "text", text: "You are a helpful assistant.", id: "system" }],
+    content: [blocks.text("You are a helpful assistant.", { id: "system" })],
   };
   const media = opts.mediaBlock ?? opts.imageBlock;
   const userContent: RenderedTree["context"]["entries"][number] = {
     kind: "message",
     id: "m_1",
     role: "user",
-    content: media
-      ? [{ type: "text", text: "Describe this image." }, media]
-      : [{ type: "text", text: "Say hi." }],
+    content: media ? [blocks.text("Describe this image."), media] : [blocks.text("Say hi.")],
   };
   return {
     specVersion: "2026-05-08",
@@ -144,7 +143,7 @@ function mkTarget(): LanguageModelTarget {
 function mkScripted(text = "hi"): LanguageModelExecutionResult {
   return {
     specVersion: "2026-05-08",
-    output: [{ type: "text", text }],
+    output: [blocks.text(text)],
     stopReason: "end",
     usage: { inputTokens: 8, outputTokens: 1, totalTokens: 9 },
   };
@@ -266,15 +265,10 @@ export function runExecutorConformance(
   describe("ExecutorProtocol parity — base64 image source (G4)", () => {
     it("carries a Base64Source image through structurally", async () => {
       const { executor } = await factory({ harnessId: "ex-img-1" });
-      const imageBlock: ImageBlock = {
-        type: "image",
-        source: {
-          type: "base64",
-          data: "iVBORw0KGgo=", // dummy PNG header
-          mimeType: "image/png",
-        },
+      // dummy PNG header
+      const imageBlock = blocks.image(blocks.source.base64("iVBORw0KGgo=", "image/png"), {
         mimeType: "image/png",
-      };
+      });
       const projected = (await executor.project({
         compiled: mkRenderedTree({ imageBlock }),
         target: mkTarget(),
@@ -300,11 +294,9 @@ export function runExecutorConformance(
 
     it("projects UrlSource image blocks without flattening the source", async () => {
       const { executor } = await factory({ harnessId: "ex-img-2" });
-      const imageBlock: ImageBlock = {
-        type: "image",
-        source: { type: "url", url: "https://example.com/img.png" },
+      const imageBlock = blocks.image(blocks.source.url("https://example.com/img.png"), {
         mimeType: "image/png",
-      };
+      });
       const projected = (await executor.project({
         compiled: mkRenderedTree({ imageBlock }),
         target: mkTarget(),
@@ -329,11 +321,10 @@ export function runExecutorConformance(
       // permanently unusable. The source reaching the adapter INTACT is what lets an
       // app resolve it (at the `onModelGenerate` seam) or an adapter decline it.
       const { executor } = await factory({ harnessId: "ex-img-3" });
-      const imageBlock: ImageBlock = {
-        type: "image",
-        source: { type: "reference", fileId: "019faa2c-5506-7000-b8ea-3c63628e4c89" },
-        mimeType: "image/png",
-      };
+      const imageBlock = blocks.image(
+        blocks.source.reference("019faa2c-5506-7000-b8ea-3c63628e4c89"),
+        { mimeType: "image/png" },
+      );
       const projected = (await executor.project({
         compiled: mkRenderedTree({ imageBlock }),
         target: mkTarget(),

@@ -22,8 +22,8 @@ import type {
   RenderedTree,
   SemanticContentBlock,
   SemanticNode,
-  TextBlock,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { createFormatter, type DefinedFormatter } from "./create-formatter.js";
 import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
@@ -265,7 +265,7 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
   function dialectBlock(block: SemanticContentBlock, resolve?: FormatterResolver): ContentBlock {
     if (block.semanticNode) {
       const nodes = formatNode(block.semanticNode, (tree) => renderTree(tree, self, resolve));
-      return { type: "text", text: render(nodes) } satisfies TextBlock;
+      return blocks.text(render(nodes));
     }
     if (block.type === "tool_result") {
       const content = block.content.map((b) =>
@@ -281,32 +281,23 @@ export function createMarkdownFormatter(options: MarkdownFormatterOptions = {}):
         return block;
       case "code": {
         const c = block as CodeBlock;
-        return {
-          type: "text",
-          text: render([{ type: "code", lang: c.language ?? null, value: c.text }]),
-        } satisfies TextBlock;
+        return blocks.text(render([{ type: "code", lang: c.language ?? null, value: c.text }]));
       }
       case "json": {
         const j = block as JsonBlock;
         const value = j.text ?? (j.data !== undefined ? JSON.stringify(j.data) : "");
-        return {
-          type: "text",
-          text: render([{ type: "code", lang: "json", value }]),
-        } satisfies TextBlock;
+        return blocks.text(render([{ type: "code", lang: "json", value }]));
       }
       case "xml":
       case "csv":
       case "html":
-        return { type: "text", text: block.text ?? "" } satisfies TextBlock;
+        return blocks.text(block.text ?? "");
       case "user_action":
       case "system_event":
       case "state_change":
-        return { type: "text", text: renderEventTag(block, markdownEscapers) } satisfies TextBlock;
+        return blocks.text(renderEventTag(block, markdownEscapers));
       case "custom":
-        return {
-          type: "text",
-          text: renderCustomBlock(block, markdownEscapers),
-        } satisfies TextBlock;
+        return blocks.text(renderCustomBlock(block, markdownEscapers));
       default:
         return block;
     }

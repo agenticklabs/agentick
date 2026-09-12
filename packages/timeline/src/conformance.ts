@@ -26,6 +26,7 @@ import type {
   TimelineStore,
 } from "@agentick/spec";
 import { isCheckpointCapable, TimelineHydrateFailed, TimelineWriteFailed } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { stubStoreCtx } from "@agentick/store";
 import type { TimelineDefinition } from "./definition.js";
 import { MemoryTimelineStore } from "./store.js";
@@ -71,7 +72,7 @@ function messageEntry(id: string, text: string): TimelineEntry {
     message: {
       id,
       role: "user",
-      content: [{ type: "text", text }],
+      content: [blocks.text(text)],
       ts: Date.now(),
     },
   };
@@ -461,11 +462,11 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
   describe("TimelineHarness — turn boundaries + trailing-input fold (ADR 53)", () => {
     const userEntry = (id: string): TimelineEntry => ({
       kind: "message",
-      message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
+      message: { id, role: "user", content: [blocks.text(id)], ts: 0 },
     });
     const assistantEntry = (id: string): TimelineEntry => ({
       kind: "message",
-      message: { id, role: "assistant", content: [{ type: "text", text: id }], ts: 0 },
+      message: { id, role: "assistant", content: [blocks.text(id)], ts: 0 },
     });
     /** The boundary `endTurn` just appended — narrowed, so a claim can read it. */
     const lastBoundary = (h: TimelineHarnessProtocol): TurnBoundaryEntry["boundary"] => {
@@ -572,7 +573,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       message: {
         id,
         role: "assistant",
-        content: [{ type: "text", text: id }],
+        content: [blocks.text(id)],
         ts: 0,
         metadata: { executionId, tickId: `t-${id}`, tickIndex },
       },

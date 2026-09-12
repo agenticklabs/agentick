@@ -151,6 +151,7 @@ import {
   SpawnDepthExceededError,
   TimelineWriteFailed,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
 import { buildSessionElicit, ELICITATION_ELICIT_COMMAND } from "@agentick/elicitation";
 import { withScope, TOOL_CLIENT_CALL_COMMAND } from "@agentick/tool-executor";
@@ -4258,13 +4259,12 @@ export class SessionHarness<P = unknown>
     return Effect.gen(this, function* () {
       const ids: string[] = [];
       for (const tr of input.results) {
-        const block: ContentBlock = {
-          type: "tool_result",
-          toolUseId: tr.toolCallId,
-          name: tr.toolName,
-          content: tr.content,
-          ...(tr.succeeded === false ? { isError: true } : {}),
-        };
+        const block: ContentBlock = blocks.toolResult(
+          tr.toolCallId,
+          tr.toolName,
+          tr.content,
+          tr.succeeded === false ? { isError: true } : {},
+        );
         const id = yield* this.appendMessageEntryFx({
           role: "tool",
           content: [block],
@@ -4323,8 +4323,7 @@ export class SessionHarness<P = unknown>
     m: SendMessageInput,
     executionId?: string,
   ): Effect.Effect<void, TimelineWriteFailed | SubstrateError | InvalidMediaSource, never> {
-    const content =
-      typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
+    const content = typeof m.content === "string" ? [blocks.text(m.content)] : m.content;
     // Rejected AT THE DOOR: past it the block is durable and replays into a
     // provider rejection on every later turn of the session.
     for (const [index, block] of content.entries()) {

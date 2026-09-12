@@ -65,6 +65,7 @@ import type {
   ToolCall,
 } from "@agentick/spec";
 import { MalformedModelOutput, mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { omitUndefined } from "@agentick/utils";
 
 // ============================================================================
@@ -822,17 +823,17 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   if (Array.isArray(reasoningParts) && reasoningParts.length > 0) {
     for (const rp of reasoningParts) {
       if (typeof rp.text === "string" && rp.text.length > 0) {
-        output.push({ type: "reasoning", text: rp.text });
+        output.push(blocks.reasoning(rp.text));
       }
     }
   } else {
     const reasoningText = (raw as { reasoningText?: unknown }).reasoningText;
     if (typeof reasoningText === "string" && reasoningText.length > 0) {
-      output.push({ type: "reasoning", text: reasoningText });
+      output.push(blocks.reasoning(reasoningText));
     }
   }
   if (typeof raw.text === "string" && raw.text.length > 0) {
-    output.push({ type: "text", text: raw.text });
+    output.push(blocks.text(raw.text));
   }
 
   // Attach provider web sources as whole-block citations on the text block.
@@ -863,12 +864,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       name: tcAny.toolName,
       input: inputObj,
     });
-    output.push({
-      type: "tool_use",
-      toolUseId: tcAny.toolCallId,
-      name: tcAny.toolName,
-      input: inputObj,
-    });
+    output.push(blocks.toolUse(tcAny.toolCallId, tcAny.toolName, inputObj));
   }
 
   const rawUsage = raw.usage as

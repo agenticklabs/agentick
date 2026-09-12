@@ -93,6 +93,7 @@ import {
   ToolTimeoutError,
   ToolValidationError,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import {
   TOOL_CONFIRMATION_KIND,
@@ -1167,12 +1168,11 @@ export class ToolExecutorHarness
             // model sees the denial text and can adapt. HARD failures reject.
             isError: true,
             content: [
-              {
-                type: "text",
-                text: denyReason
+              blocks.text(
+                denyReason
                   ? `Tool "${input.name}" denied: ${denyReason}`
                   : `Tool "${input.name}" denied by user.`,
-              },
+              ),
             ],
             // A DENIAL is produced by the agentick confirmation gate — the
             // tool never ran, so declaration provenance (`mcp:<serverId>`)
@@ -1367,7 +1367,7 @@ export class ToolExecutorHarness
               ? yield* Effect.promise(() => Promise.resolve(dr(validated, ctx)))
               : dr;
           normalized = normalizeToolResult(
-            resolvedDefault ?? [{ type: "text", text: "executed successfully" }],
+            resolvedDefault ?? [blocks.text("executed successfully")],
           );
         }
 
@@ -1698,14 +1698,11 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 function serializeTaskRef(handle: TaskHandle<readonly ContentBlock[]>): readonly ContentBlock[] {
   const info = handle.info();
   return [
-    {
-      type: "task_ref",
-      taskId: info.taskId,
-      status: info.status,
-      ...omitUndefined({ statusMessage: info.statusMessage }),
-      ...(info.ttl !== null && info.ttl !== undefined ? { ttl: info.ttl } : {}),
-      ...omitUndefined({ pollInterval: info.pollInterval }),
-    } satisfies ContentBlock,
+    blocks.taskRef(info.taskId, info.status, {
+      statusMessage: info.statusMessage,
+      ttl: info.ttl ?? undefined,
+      pollInterval: info.pollInterval,
+    }),
   ];
 }
 

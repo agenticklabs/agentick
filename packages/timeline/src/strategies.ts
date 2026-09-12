@@ -26,6 +26,7 @@ import type {
   TimelineEntry,
 } from "@agentick/spec";
 import { toolSpanEnd } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { omitUndefined, generateId } from "@agentick/utils";
 import { estimateBlocks } from "@agentick/model";
 
@@ -366,11 +367,7 @@ function joinInstructions(
     (p): p is string => p !== undefined,
   );
   if (perCall === undefined || typeof perCall === "string") return parts.join("\n\n");
-  return [
-    { type: "text", text: standing } as ContentBlock,
-    ...perCall,
-    ...(trailing ? [{ type: "text", text: trailing } as ContentBlock] : []),
-  ];
+  return [blocks.text(standing), ...perCall, ...(trailing ? [blocks.text(trailing)] : [])];
 }
 
 /**

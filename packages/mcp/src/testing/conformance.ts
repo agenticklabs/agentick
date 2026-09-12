@@ -55,7 +55,6 @@ import {
 
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
-  ContentBlock,
   ElicitationHarnessProtocol,
   EventBus,
   McpRequestContext,
@@ -68,6 +67,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { createTool, createToolCatalog, type MutableToolCatalog } from "@agentick/tool";
 import { ELICITATION_CHANNEL_FQN } from "@agentick/elicitation";
 
@@ -182,7 +182,7 @@ function decl(name: string, description: string, inputSchema = emptySchema): Too
 }
 
 function textEntries(text: string): readonly MessageEntry[] {
-  return [{ kind: "message", role: "user", content: [{ type: "text", text }] }];
+  return [{ kind: "message", role: "user", content: [blocks.text(text)] }];
 }
 
 /** Resource-contents literal for the ResourcesHarness resolvers. */
@@ -254,23 +254,23 @@ async function makeCanonicalServer(
       case "handler:echo":
         return async (input) => ({
           kind: "inline",
-          content: [{ type: "text", text: `echo: ${(input as { q: string }).q}` }],
+          content: [blocks.text(`echo: ${(input as { q: string }).q}`)],
         });
       case "handler:ask_name":
         return async (_input, ctx: McpRequestContext) => {
           const name = await ctx.elicit!.text("What is your name?");
-          return { kind: "inline", content: [{ type: "text", text: name }] };
+          return { kind: "inline", content: [blocks.text(name)] };
         };
       case "handler:ask_consent":
         return async (_input, ctx: McpRequestContext) => {
           await ctx.elicit!.url({ message: "Approve", url: "https://example.com/approve" });
-          return { kind: "inline", content: [{ type: "text", text: "consented" }] };
+          return { kind: "inline", content: [blocks.text("consented")] };
         };
       case "handler:emit_logs":
         return async (_input, ctx: McpRequestContext) => {
           ctx.log?.("info", { msg: "info-line" }, "conf-logger");
           ctx.log?.("debug", { msg: "debug-line" });
-          return { kind: "inline", content: [{ type: "text", text: "logged" }] };
+          return { kind: "inline", content: [blocks.text("logged")] };
         };
       default:
         return null;
@@ -635,7 +635,7 @@ const lintRepoTool = createTool({
         if (signal.aborted) throw new DOMException("aborted", "AbortError");
         await new Promise((r) => setTimeout(r, 20));
       }
-      return [{ type: "text", text: "lint complete — 0 errors" } as ContentBlock];
+      return [blocks.text("lint complete — 0 errors")];
     }),
 });
 

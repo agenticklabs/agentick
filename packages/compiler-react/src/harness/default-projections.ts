@@ -34,6 +34,7 @@
  */
 
 import type { ContentBlock, HookBridges, MessageEntry } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { sectionBlock } from "@agentick/formatters";
 import type { DefaultProjection } from "@agentick/compiler";
 
@@ -184,7 +185,7 @@ export function resourcesDefaultProjection(bridges: HookBridges): DefaultProject
     project: () => {
       const text = resourcesCatalogText(bridges);
       if (text === undefined) return {};
-      const content: readonly ContentBlock[] = [{ type: "text", text } as ContentBlock];
+      const content: readonly ContentBlock[] = [blocks.text(text)];
       const entry: MessageEntry = {
         kind: "message",
         role: "grounding",
@@ -329,7 +330,7 @@ export function mcpServerInfoDefaultProjection(bridges: HookBridges): DefaultPro
     project: () => {
       const text = mcpServersText(bridges);
       if (text === undefined) return {};
-      const content: readonly ContentBlock[] = [{ type: "text", text } as ContentBlock];
+      const content: readonly ContentBlock[] = [blocks.text(text)];
       const entry: MessageEntry = {
         kind: "message",
         role: "grounding",

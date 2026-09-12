@@ -73,6 +73,7 @@ import type {
   ToolCall,
 } from "@agentick/spec";
 import { MalformedModelOutput, mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import { omitUndefined } from "@agentick/utils";
 
 // ============================================================================
@@ -942,17 +943,17 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     const r = m.reasoning;
     const reasoning = typeof rc === "string" ? rc : typeof r === "string" ? r : undefined;
     if (reasoning !== undefined && reasoning.length > 0) {
-      output.push({ type: "reasoning", text: reasoning });
+      output.push(blocks.reasoning(reasoning));
     }
   }
   if (typeof message.content === "string" && message.content.length > 0) {
-    output.push({ type: "text", text: message.content });
+    output.push(blocks.text(message.content));
   } else if (Array.isArray(message.content)) {
     for (const part of message.content) {
       if (part && typeof part === "object" && part.type === "text") {
         const text = (part as { text?: unknown }).text;
         if (typeof text === "string" && text.length > 0) {
-          output.push({ type: "text", text });
+          output.push(blocks.text(text));
         }
       }
     }
@@ -1000,12 +1001,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
           ? (parsed as Record<string, unknown>)
           : { value: parsed };
       toolCalls.push({ id, name, input: inputObj });
-      output.push({
-        type: "tool_use",
-        toolUseId: id,
-        name,
-        input: inputObj,
-      });
+      output.push(blocks.toolUse(id, name, inputObj));
     }
   }
 

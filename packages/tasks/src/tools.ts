@@ -43,6 +43,7 @@ import type {
   ToolRegistration,
   UnknownTaskError,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { EXTENSION_NAME } from "./extension-name.js";
 import { omitUndefined } from "@agentick/utils";
@@ -177,7 +178,7 @@ function awaitDeclaration(localName: string, handlerRef: string): ToolDeclaratio
 // ============================================================================
 
 function jsonBlock(payload: unknown): readonly ContentBlock[] {
-  return [{ type: "text", text: JSON.stringify(payload) } as ContentBlock];
+  return [blocks.text(JSON.stringify(payload))];
 }
 
 function isUnknownTaskError(value: unknown): value is UnknownTaskError {

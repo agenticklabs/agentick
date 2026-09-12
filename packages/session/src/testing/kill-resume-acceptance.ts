@@ -58,6 +58,7 @@ import type {
   RunInput,
   TimelineEntry,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { SessionHarness } from "../harness.js";
 
@@ -129,7 +130,7 @@ function replyExec(text: string): FakeLanguageModelExecutor {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text }],
+          output: [blocks.text(text)],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -220,7 +221,7 @@ function spyReplyExec(text: string): SpyLanguageModelExecutor {
       scripted: {
         result: {
           specVersion: "2026-05-08",
-          output: [{ type: "text", text }],
+          output: [blocks.text(text)],
           stopReason: "end",
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         },
@@ -329,7 +330,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       const store1 = await opts.makeStore();
       const p1 = await mkSession({ sessionId, store: store1, executor: replyExec("noted") });
       const h1 = await p1.session.send({
-        messages: [{ role: "user", content: [{ type: "text", text: "remember: PLUM" }] }],
+        messages: [{ role: "user", content: [blocks.text("remember: PLUM")] }],
       });
       await h1.result;
       await p1.close(); // kill — drop every reference to process 1.
@@ -358,7 +359,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       const p1 = await mkSession({ sessionId, store: store1, executor: replyExec("noted") });
       await (
         await p1.session.send({
-          messages: [{ role: "user", content: [{ type: "text", text: "remember: PLUM" }] }],
+          messages: [{ role: "user", content: [blocks.text("remember: PLUM")] }],
         })
       ).result;
       await p1.close();
@@ -370,7 +371,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
 
       await (
         await p2.session.send({
-          messages: [{ role: "user", content: [{ type: "text", text: "what did I say?" }] }],
+          messages: [{ role: "user", content: [blocks.text("what did I say?")] }],
         })
       ).result;
 
@@ -389,7 +390,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       const rig = await mkSession({ sessionId, store, executor: replyExec("noted") });
 
       const handle = await rig.session.send({
-        messages: [{ role: "user", content: [{ type: "text", text: "barrier check" }] }],
+        messages: [{ role: "user", content: [blocks.text("barrier check")] }],
       });
       await handle.result;
 
@@ -410,7 +411,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       const p1 = await mkSession({ sessionId, store: store1, executor: replyExec("noted") });
       await (
         await p1.session.send({
-          messages: [{ role: "user", content: [{ type: "text", text: "ephemeral" }] }],
+          messages: [{ role: "user", content: [blocks.text("ephemeral")] }],
         })
       ).result;
       await p1.close();
@@ -442,7 +443,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       const src = await mkSession({ sessionId, store: storeA, executor: replyExec("noted") });
       await (
         await src.session.send({
-          messages: [{ role: "user", content: [{ type: "text", text: "remember: PLUM" }] }],
+          messages: [{ role: "user", content: [blocks.text("remember: PLUM")] }],
         })
       ).result;
       await expect(src.session.snapshot()).resolves.toBeUndefined();
@@ -465,7 +466,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       });
       await (
         await later.session.send({
-          messages: [{ role: "user", content: [{ type: "text", text: "remember: QUINCE" }] }],
+          messages: [{ role: "user", content: [blocks.text("remember: QUINCE")] }],
         })
       ).result;
       await later.session.snapshot();

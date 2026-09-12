@@ -85,6 +85,7 @@ import { changeKind, type ChangeEvent } from "@agentick/pubsub";
 import { generateId, type JsonPatchOp } from "@agentick/utils";
 import { View } from "@agentick/store";
 import type { ChannelSnapshotProvider } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 import {
   KNOBS_STATE_CHANNEL,
   KNOBS_STATE_CHANNEL_FQN,
@@ -613,7 +614,7 @@ export class KnobsHarness
       const reason = validateValue(knob, input.value);
       if (reason) return err(reason);
       this.applySet({ id: knob.id, value: input.value }, ctx);
-      return [{ type: "text", text: `Set ${knob.id} to ${fmt(input.value)}.` }];
+      return [blocks.text(`Set ${knob.id} to ${fmt(input.value)}.`)];
     }
 
     // Group dispatch: read-only knobs are excluded from group writes;
@@ -642,10 +643,9 @@ export class KnobsHarness
     for (const t of targets) this.applySet({ id: t.id, value: input.value }, ctx);
     const names = targets.map((t) => t.id).join(", ");
     return [
-      {
-        type: "text",
-        text: `Set ${targets.length} knobs in group "${input.group}" to ${fmt(input.value)}: ${names}.`,
-      },
+      blocks.text(
+        `Set ${targets.length} knobs in group "${input.group}" to ${fmt(input.value)}: ${names}.`,
+      ),
     ];
   }
 }
@@ -668,7 +668,7 @@ function toValueChange<T, V>(c: ChangeEvent<T>, valueOf: (t: T) => V): ChangeEve
 }
 
 function err(text: string): readonly ContentBlock[] {
-  return [{ type: "text", text }];
+  return [blocks.text(text)];
 }
 
 function fmt(value: unknown): string {

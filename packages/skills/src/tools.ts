@@ -40,6 +40,7 @@ import type {
   ToolHandlerCtx,
   ToolRegistration,
 } from "@agentick/spec";
+import * as blocks from "@agentick/spec/blocks";
 
 import { EXTENSION_NAME } from "./extension-name.js";
 
@@ -109,7 +110,7 @@ function readDeclaration(handlerRef: string): ToolDeclaration {
 // ============================================================================
 
 function jsonBlock(payload: unknown): readonly ContentBlock[] {
-  return [{ type: "text", text: JSON.stringify(payload) } as ContentBlock];
+  return [blocks.text(JSON.stringify(payload))];
 }
 
 /** Trim a skill record to the model-facing summary shape (no content). */
