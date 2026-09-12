@@ -43,6 +43,11 @@
       "types": "./src/guards/index.ts",
       "import": "./src/guards/index.ts",
       "default": "./src/guards/index.ts"
+    },
+    "./blocks": {
+      "types": "./src/blocks/index.ts",
+      "import": "./src/blocks/index.ts",
+      "default": "./src/blocks/index.ts"
     }
   },
   "publishConfig": {
@@ -67,6 +72,11 @@
         "types": "./dist/guards/index.d.ts",
         "import": "./dist/guards/index.js",
         "default": "./dist/guards/index.js"
+      },
+      "./blocks": {
+        "types": "./dist/blocks/index.d.ts",
+        "import": "./dist/blocks/index.js",
+        "default": "./dist/blocks/index.js"
       }
     },
     "main": "./dist/index.js",
@@ -81,6 +91,9 @@
         ],
         "guards": [
           "./dist/guards/index.d.ts"
+        ],
+        "blocks": [
+          "./dist/blocks/index.d.ts"
         ]
       }
     }

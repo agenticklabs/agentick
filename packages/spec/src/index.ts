@@ -61,4 +61,5 @@ export * from "./wire/index.js";
 export * from "./client/index.js";
 export * from "./server/index.js";
 export * from "./guards/index.js";
+export * as blocks from "./blocks/index.js";
 export * from "./hooks/derivation.js";
