@@ -99,6 +99,7 @@ import type {
   Cost,
   CostRollup,
   ExecutionTarget,
+  IngressIdentity,
   ModelKey,
   ModelUsage,
   SessionFrom,
@@ -203,6 +204,7 @@ type SessionRecordPatch = Partial<
     | "byModel"
     | "cost"
     | "currentExecutionId"
+    | "currentExecutionPrincipal"
     | "interruptedExecutionId"
     | "resumeAttempts"
     | "title"
@@ -248,6 +250,8 @@ export class SessionRuntime {
    * rung is the durable `record.internal`; this is its per-execution fold.
    */
   private _currentExecutionInternal = false;
+  /** Who the in-flight execution acts AS (`send.identity`), for a spawn to inherit; null between turns. */
+  private _currentExecutionIdentity: IngressIdentity | null = null;
 
   /** The record {@link hydrate} adopted, until {@link takeAdoptedRecord} claims it. */
   private adopted: SessionRecord | undefined;
@@ -474,6 +478,17 @@ export class SessionRuntime {
   setCurrentExecutionId(id: string | null): void {
     this.commit({ currentExecutionId: id ?? undefined }, { persist: false });
   }
+  /**
+   * The initiator's principal for the in-flight execution, when it is not the
+   * owner. Rides the same execution-start write-through as the id; survives
+   * the hydrate merge so a crash resume can read it.
+   */
+  currentExecutionPrincipal(): string | null {
+    return this.record().currentExecutionPrincipal ?? null;
+  }
+  setCurrentExecutionPrincipal(principal: string | null): void {
+    this.commit({ currentExecutionPrincipal: principal ?? undefined }, { persist: false });
+  }
 
   /** Whether the SESSION is internal (durable, backlog F) — the spine's top rung. */
   isInternal(): boolean {
@@ -486,6 +501,14 @@ export class SessionRuntime {
   /** Set at execution start (`record.internal || send.internal`); cleared at end. */
   setCurrentExecutionInternal(value: boolean): void {
     this._currentExecutionInternal = value;
+  }
+  /** The in-flight execution's initiator, or null when it acts as the owner / between turns. */
+  currentExecutionIdentity(): IngressIdentity | null {
+    return this._currentExecutionIdentity;
+  }
+  /** Set at execution start from `send.identity`; cleared at end. */
+  setCurrentExecutionIdentity(value: IngressIdentity | null): void {
+    this._currentExecutionIdentity = value;
   }
 
   /**

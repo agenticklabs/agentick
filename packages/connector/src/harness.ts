@@ -575,7 +575,7 @@ export class ConnectorsHarness
 
     if (spec.ephemeral) {
       const { result, sessionId } = await door.runOnce({
-        send: { ...plan.send, messages },
+        send: { ...plan.send, ...pick(msg, ["identity"]), messages },
         ...(plan.sessionInit.metadata !== undefined ? { metadata: plan.sessionInit.metadata } : {}),
       });
       // No held session to watch on the bus — hand the result off inside

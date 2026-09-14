@@ -32,3 +32,18 @@ else nothing changes; the conformance test asserts it.
 
 `@agentick/utils` gains `pick(obj, keys)` — the pass-through half of
 `omitUndefined`, so forwarding optional fields reads as one line.
+
+Three neighbors follow the same rule so the initiator is never silently
+dropped:
+
+- A `spawn({ send })` from inside a turn defaults the child's first send to
+  the parent turn's identity; an explicit `send.identity` still wins.
+- The ephemeral connector path (`runOnce`) stamps the inbound's identity on
+  its send, as the held-session path does.
+- `SessionRecord.currentExecutionPrincipal` — written with
+  `currentExecutionId` in the execution-start delta when the initiator is
+  not the owner, cleared at the settle, and deliberately NOT wiped by the
+  hydrate merge or the interruption mark — so `resumeExecution` re-drives a
+  crashed turn as the person who started it. Store adapters must persist
+  and round-trip it beside `currentExecutionId`; one that drops it resumes
+  every interrupted turn as the owner.

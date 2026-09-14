@@ -1983,10 +1983,15 @@ export class SessionHarness<P = unknown>
     }
     // SYNCHRONOUS-ENTRY contract: no await between the admission checks above
     // and the core's reservation.
-    return this.runExecutionCore({}, undefined, undefined, {
-      executionId,
-      seedTickIndex: cursor?.lastTickIndex ?? 0,
-    });
+    // Re-drive as whoever started the turn. The principal survived the
+    // hydrate merge and the interruption mark precisely so this read works.
+    const principal = this.runtime.currentExecutionPrincipal();
+    return this.runExecutionCore(
+      principal !== null ? { identity: { principal } } : {},
+      undefined,
+      undefined,
+      { executionId, seedTickIndex: cursor?.lastTickIndex ?? 0 },
+    );
   }
 
   async dropScopes(): Promise<void> {
@@ -2519,7 +2524,14 @@ export class SessionHarness<P = unknown>
     // precisely what ruling 5 removed.
     if (internal) this._children.add(child.id);
     if (input.send === undefined) return child;
-    const childHandle = await child.send(input.send);
+    // The child's first turn acts as whoever initiated THIS one, unless the
+    // caller names someone: a sub-agent spawned on a staff member's turn must
+    // not act with the owner's grants.
+    const inherited = this.runtime.currentExecutionIdentity();
+    const childHandle = await child.send({
+      ...(inherited !== null ? { identity: inherited } : {}),
+      ...input.send,
+    });
     // Spawn boundary events (parent stream). ONLY the spawn-and-run form is
     // bracketed: it is the only form with a child execution the parent can
     // name. An unbound spawn hands the child back and the caller drives it —
@@ -3451,6 +3463,7 @@ export class SessionHarness<P = unknown>
     // runs, so a `spawn()` from inside a tool handler fans it into the child.
     const executionAbort = new AbortController();
     this._currentExecutionAbort = executionAbort;
+    this.runtime.setCurrentExecutionIdentity(input.identity ?? null);
     const resultDeferred = {} as { resolve: (r: SendResult) => void; reject: (e: unknown) => void };
     // How this run ENDED, captured at the settle so the running→idle transition
     // can carry it. An abort RESOLVES with `stopReason: "aborted"` rather than
@@ -3472,7 +3485,9 @@ export class SessionHarness<P = unknown>
       this._currentExecutionAbort = null;
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
+      this.runtime.setCurrentExecutionPrincipal(null);
       this.runtime.setCurrentExecutionInternal(false); // execution rung cleared (backlog F)
+      this.runtime.setCurrentExecutionIdentity(null);
       // Completion resolves the interruption (execution-resume.md §3.3) —
       // keyed to THIS executionId, so an unrelated fresh turn settling never
       // erases a different (dropped) interruption's history. Runs in the
@@ -3542,6 +3557,12 @@ export class SessionHarness<P = unknown>
       // running) — the upsert-on-transition contract.
       if (resume === undefined) this.runtime.bumpExecutionCount(); // same execution, not a new turn
       this.runtime.setCurrentExecutionId(executionId);
+      // Only a non-owner initiator is worth a durable slot: the owner is the
+      // record's own principal, and a resume defaults to it.
+      const initiator = input.identity?.principal;
+      this.runtime.setCurrentExecutionPrincipal(
+        initiator !== undefined && initiator !== this.principal ? initiator : null,
+      );
       // Execution is the intent moment — the first turn earns the durable
       // record via the `session:persist` command (un-awaited: the write is
       // off the critical path, and the status write below rides into the

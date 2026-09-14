@@ -160,6 +160,16 @@ was interrupted and act on it — clear-on-drop forecloses that at exactly the m
 the policy declined to act. And since the callback gate is the transition, not field
 presence, no re-fire guard is needed; the field stands as honest history.
 
+- **`currentExecutionPrincipal?`** (added 2026-09-13 with `SendInput.identity`) —
+  who the in-flight execution acts AS when that is not the owner. Written with
+  `currentExecutionId` in the execution-start delta, cleared at the settle, and
+  deliberately **not** wiped by the hydrate merge or `markInterruptedRecord`, so the
+  re-drive below can read it. Without it a resumed staff-initiated turn would run as
+  the owner — a privilege change hidden inside a crash. Adapters persist and
+  round-trip it beside `currentExecutionId`; `KnowifySessionStore` needs the column
+  (`sessions.current_execution_principal`) — until it lands, a resume on Knowify
+  runs as the owner, which is today's behavior, not a regression.
+
 Nothing else about resume is stored — the timeline and the E11 record already carry
 the coordinates, and the session `status` is untouched (§3.1).
 
@@ -180,6 +190,8 @@ mint and the input-append —
 2. seed the runtime: `currentExecutionId = executionId` (from the record),
    **`currentTick = lastCommittedTick + 1`**, seq continuing — the one live gap
    today (`currentTick` resets to 0; `session-state.ts` `TODO(store-phase-N)`);
+   and `identity = { principal: record.currentExecutionPrincipal }` when set, so
+   the re-driven execution's `ctx.principal` is the initiator's, not the owner's;
 3. re-invoke the loop's `run-execution` with the _same_ id and **no new messages**.
    The loop is a fold over the timeline: with history rehydrated to tick N it renders
    tick N+1 and continues to completion, where `setStatus("idle")` cleans the record.
