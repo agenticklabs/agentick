@@ -73,7 +73,6 @@ describe("a tool dispatched by a tool", () => {
     const tools = new ToolExecutorHarness("nd-t", j, b, i, {
       handlerResolver: resolver,
       elicitation: el,
-      principal: PRINCIPAL,
     });
     const ex = new FakeLanguageModelExecutor("nd-e", j, b, i, {
       scripted: [
