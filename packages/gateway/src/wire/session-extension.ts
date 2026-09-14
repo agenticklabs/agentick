@@ -25,7 +25,7 @@ import {
   type ToolExecutorProtocol,
   type WireExtension,
 } from "@agentick/spec";
-import { omitUndefined, paginate } from "@agentick/utils";
+import { omitUndefined, paginate, pick } from "@agentick/utils";
 
 import { fanOutProgressSignals } from "./progress-fanout.js";
 import { toSessionEntry, visibleTo } from "./session-list.js";
@@ -121,8 +121,11 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       const handle = await sess.send({
         // The asking connection, straight off the wire ctx — the one fact a
         // session cannot derive and the tool relay later needs.
-        ...(ctx.connectionId !== undefined ? { connectionId: ctx.connectionId } : {}),
-        ...(ctx.clientId !== undefined ? { clientId: ctx.clientId } : {}),
+        ...pick(ctx, ["connectionId", "clientId"]),
+        // Who the turn acts AS — the authenticated caller. Same string as the
+        // owner under the default target rule; the initiator when an
+        // authorizer admits someone else.
+        ...pick(ctx, ["identity"]),
         messages: params.messages,
         props: params.props,
         metadata: params.metadata,

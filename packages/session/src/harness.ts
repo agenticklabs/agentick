@@ -152,7 +152,7 @@ import {
   TimelineWriteFailed,
 } from "@agentick/spec";
 import * as blocks from "@agentick/spec/blocks";
-import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
+import { mergeAbortSignals, mergeLayered, omitUndefined, pick } from "@agentick/utils";
 import { buildSessionElicit, ELICITATION_ELICIT_COMMAND } from "@agentick/elicitation";
 import { withScope, TOOL_CLIENT_CALL_COMMAND } from "@agentick/tool-executor";
 import {
@@ -3660,10 +3660,11 @@ export class SessionHarness<P = unknown>
                   ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
                   // The tab that asked, carried for the run's life — a tool call
                   // relayed on tick 6 still knows where the request came from.
-                  ...omitUndefined({ connectionId: input.connectionId, clientId: input.clientId }),
+                  ...pick(input, ["connectionId", "clientId"]),
                   // ADR 48 — the app-level model executor has no principal of its
-                  // own, so this execution's owner rides the scope it is handed.
-                  ...omitUndefined({ principal: this.principal }),
+                  // own, so the acting principal rides the scope it is handed: the
+                  // turn's initiator when the send names one, else the owner.
+                  ...omitUndefined({ principal: input.identity?.principal ?? this.principal }),
                   compiler: this.compiler,
                   mountId: this.mountId,
                   modelExecutor: modelExecutorForCall,

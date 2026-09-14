@@ -37,6 +37,7 @@ import type { ToolInfo } from "./tool-executor.js";
 import type { ToolGroupInfo } from "../data/declarations.js";
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
 import type { ModelInfoResult } from "../wire/params.js";
+import type { IngressIdentity } from "../wire/authorizer.js";
 import type { EventEnvelope } from "../data/events.js";
 import type { RenderedTree } from "../data/rendered-tree.js";
 import type { ContentBlock } from "../data/content-blocks.js";
@@ -300,6 +301,21 @@ export interface SendInput<P = unknown, T = unknown> {
    * comes back — and the connection id it reconnects with is a new one.
    */
   readonly clientId?: string;
+  /**
+   * Who this execution acts AS. The session's owning principal (ADR 48) stays
+   * on the record; this is the initiator of ONE turn, and its `principal`
+   * becomes the execution's — the `ctx.principal` every tool, store, and
+   * model envelope under the run sees. Absent → the session's own principal,
+   * which is byte-identical to today for every existing caller.
+   *
+   * Server-declared, like `principal` and `internal`: the wire `session/send`
+   * handler stamps it from the authenticated caller, the connectors harness
+   * from the inbound's identity, and the wire params carry no such slot, so a
+   * value in a request body is ignored. An in-process caller may pass it.
+   * Carried onto the execution rather than read from ctx at use time, for the
+   * same reason `connectionId` is.
+   */
+  readonly identity?: IngressIdentity;
   readonly messages?: ReadonlyArray<SendMessageInput>;
   readonly props?: P;
   readonly metadata?: Readonly<Record<string, unknown>>;

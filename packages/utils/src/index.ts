@@ -9,6 +9,7 @@ export * from "./match-filter.js";
 export { LruCacheStore, type CacheEntry, type CacheStore } from "./lru-cache.js";
 export * from "./merge-layered.js";
 export * from "./omit-undefined.js";
+export * from "./pick.js";
 export * from "./paginate.js";
 export * from "./predicates.js";
 export * from "./resolvable.js";

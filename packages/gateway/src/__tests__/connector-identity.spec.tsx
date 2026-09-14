@@ -13,7 +13,12 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { reactCompiler } from "@agentick/compiler-react";
 import { createGateway, permissiveAuthorizer, type GatewayHarness } from "../index.js";
-import { SPEC_VERSION, type ContentBlock, type IngressIdentity } from "@agentick/spec";
+import {
+  SPEC_VERSION,
+  type Authorizer,
+  type ContentBlock,
+  type IngressIdentity,
+} from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
 
 import { defineConnector } from "@agentick/connector";
@@ -52,9 +57,13 @@ const IDENTITY: IngressIdentity = {
 
 const gateways: GatewayHarness[] = [];
 
-async function buildStack(probe: ConnectorProbe, spec: Partial<ConnectorSpec>) {
+async function buildStack(
+  probe: ConnectorProbe,
+  spec: Partial<ConnectorSpec>,
+  opts: { authorizer?: Authorizer } = {},
+) {
   const gateway = await createGateway({
-    authorizer: permissiveAuthorizer(),
+    authorizer: opts.authorizer ?? permissiveAuthorizer(),
     connectors: [defineConnector({ name: "test", ...probe.spec, ...spec })],
   });
   gateways.push(gateway);
@@ -68,6 +77,34 @@ async function buildStack(probe: ConnectorProbe, spec: Partial<ConnectorSpec>) {
   });
   return { gateway, app };
 }
+
+/**
+ * The principal every execution under this app ran as — read off the run op's
+ * scope by an app-level middleware, which the ADR 83 cascade folds down into
+ * each session's loop.
+ */
+function observePrincipals(app: {
+  use: (
+    mw: (
+      input: unknown,
+      next: (i: unknown) => Promise<unknown>,
+      ctx: { opId?: string; principal?: string },
+    ) => Promise<unknown>,
+  ) => unknown;
+}): (string | undefined)[] {
+  const seen: (string | undefined)[] = [];
+  app.use(async (input, next, ctx) => {
+    if (ctx.opId?.startsWith("loop:execution:")) seen.push(ctx.principal);
+    return next(input);
+  });
+  return seen;
+}
+
+/** Admits anyone to anything — the shape an adopter uses to let staff into a customer's session. */
+const allowAll: Authorizer = {
+  backend: "allow-all",
+  authorize: () => Promise.resolve({ allowed: true }),
+};
 
 afterEach(async () => {
   while (gateways.length) await gateways.pop()!.close();
@@ -163,5 +200,33 @@ describe("connector — gateway.connectors", () => {
         ingressOnlyHandleErr = e;
       });
     expect(ingressOnlyHandleErr?.message).toContain("ingress-only");
+  });
+
+  it("an identity-bearing inbound into a session owned by someone else runs the execution as the inbound's identity", async () => {
+    const probe = connectorProbe();
+    const { app } = await buildStack(probe, {}, { authorizer: allowAll });
+    const principals = observePrincipals(app);
+    const owner = await app.createSession({ sessionId: "bound-1", principal: "tenant-1:user-1" });
+    expect(owner.principal).toBe("tenant-1:user-1");
+
+    probe.emit({ messages: "a note from staff", sessionId: "bound-1", identity: IDENTITY });
+    await waitFor(() => principals.length > 0);
+    await waitFor(() => app.getSession("bound-1")?.status !== "running");
+
+    expect(new Set(principals)).toEqual(new Set([IDENTITY.principal]));
+    expect(app.getSession("bound-1")?.principal).toBe("tenant-1:user-1");
+  });
+
+  it("an inbound without identity into an owned session runs as the owner, as before", async () => {
+    const probe = connectorProbe();
+    const { app } = await buildStack(probe, {}, { authorizer: allowAll });
+    const principals = observePrincipals(app);
+    await app.createSession({ sessionId: "bound-2", principal: "tenant-1:user-1" });
+
+    probe.emit({ messages: "hello", sessionId: "bound-2" });
+    await waitFor(() => principals.length > 0);
+    await waitFor(() => app.getSession("bound-2")?.status !== "running");
+
+    expect(new Set(principals)).toEqual(new Set(["tenant-1:user-1"]));
   });
 });

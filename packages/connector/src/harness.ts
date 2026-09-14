@@ -25,6 +25,7 @@
  * `get` / `list` / `status` are plain reads — map lookups, not operations.
  */
 
+import { pick } from "@agentick/utils";
 import { Effect } from "effect";
 import type {
   AppHarnessProtocol,
@@ -597,12 +598,13 @@ export class ConnectorsHarness
       door.getSession(sessionId) ?? (await door.createSession({ sessionId, ...plan.sessionInit }));
     entry.managedSessions.add(session.id);
 
-    // TODO(#302: per-message actor stamping) — interceptIngress will carry
-    // the platform actor per message; `msg.identity` covers the
-    // session-opening half today.
+    // `msg.identity` opened the session (ADR 100); it also names who this
+    // turn acts AS, so the execution's `ctx.principal` is the replier's, not
+    // the connector's service account.
     const handle = await session.send({
       ...(spec.stream ? { stream: true } : {}),
       ...plan.send,
+      ...pick(msg, ["identity"]),
       messages,
     });
 
