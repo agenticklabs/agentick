@@ -75,6 +75,7 @@ import type {
   ToolGroupInfo,
   ToolGroupsHandle,
   UnregisterToolInput,
+  ToolDispatchPolicy,
 } from "@agentick/spec";
 import { createProgress, normalizeToolResult, TOOL_NARRATION_FIELD } from "@agentick/spec";
 import { viaToOrigin } from "./provenance.js";
@@ -107,6 +108,7 @@ import {
   type ToolCallSnapshotFrame,
 } from "./tool-call-schema.js";
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
+import { assertDispatchVerdict, speakOnlyForNonOwners } from "./dispatch-policy.js";
 import { fromStandardSchema } from "./validator.js";
 import type {
   HandlerEntry,
@@ -168,6 +170,7 @@ export class ToolExecutorHarness
   private readonly defaultTimeoutMs?: number;
   private readonly defaultConfirmationTimeoutMs?: number;
   private readonly confirmationPolicy?: ToolConfirmationPolicy;
+  private readonly dispatchPolicy: ToolDispatchPolicy;
   private readonly channelPublisher?: ChannelPublisher;
   private readonly elicitation: ElicitationHarnessProtocol;
   private readonly tasks: TasksHarnessProtocol | undefined;
@@ -228,6 +231,7 @@ export class ToolExecutorHarness
     this.defaultTimeoutMs = options.defaultTimeoutMs;
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;
     this.confirmationPolicy = options.confirmationPolicy;
+    this.dispatchPolicy = options.dispatchPolicy ?? speakOnlyForNonOwners;
     this.channelPublisher = options.channelPublisher;
     this.elicitation = options.elicitation;
     this.tasks = options.tasks;
@@ -1046,6 +1050,41 @@ export class ToolExecutorHarness
       // compile here (ADR 91 §Enforcement). A branded value still satisfies the
       // plain `ToolHandlerCtx` a handler receives, so adopters are unaffected.
       const ctx: Derived<ToolHandlerCtx> = dispatchCtx;
+
+      // ─── Admission gate ─────────────────────────────────────────────
+      // May this actor call this tool at all — asked FIRST, so a vetoed call
+      // never reaches the confirmation gate (it would ask the owner about a
+      // call someone else could not make), never runs, is never relayed. A
+      // veto is a soft error the model reads, the same shape as a denial.
+      const admission = assertDispatchVerdict(
+        yield* Effect.promise(() =>
+          Promise.resolve(
+            this.dispatchPolicy({ declaration: reg.declaration, input: validated, ctx }),
+          ),
+        ),
+        reg.declaration.name,
+      );
+      if (admission.kind === "veto") {
+        callerSignal?.removeEventListener("abort", onCallerAbort);
+        this.inFlight.delete(input.toolCallId);
+        const vetoResult: DispatchResult = {
+          toolCallId: input.toolCallId,
+          name: input.name,
+          isError: true,
+          content: [
+            blocks.text(
+              admission.reason
+                ? `Tool "${input.name}" not permitted: ${admission.reason}`
+                : `Tool "${input.name}" not permitted for this turn.`,
+            ),
+          ],
+          // The tool never ran — the framework refused it, so provenance is
+          // agentick's, exactly as on a denial.
+          executedBy: "agentick",
+          durationMs: 0,
+        };
+        return vetoResult;
+      }
 
       // ─── Confirmation gate ──────────────────────────────────────────
       // Tools whose `requiresConfirmation` resolves truthy route through

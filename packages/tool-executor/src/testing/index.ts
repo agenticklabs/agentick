@@ -17,6 +17,7 @@ import type {
   ToolConfirmationPolicy,
   ToolDeclaration,
   ToolRegistration,
+  ToolDispatchPolicy,
 } from "@agentick/spec";
 import { ElicitationHarness } from "@agentick/elicitation";
 import { TasksHarness } from "@agentick/tasks";
@@ -65,6 +66,8 @@ export interface TestHarnessOptions {
   readonly defaultConfirmationTimeoutMs?: number;
   /** Deployment-wide confirmation policy — see {@link ToolConfirmationPolicy}. */
   readonly confirmationPolicy?: ToolConfirmationPolicy;
+  /** Admission policy; absent → the executor's default (`speakOnlyForNonOwners`). */
+  readonly dispatchPolicy?: ToolDispatchPolicy;
   /** Scope ID; defaults to a random ULID-ish string. */
   readonly scopeId?: string;
   /**
@@ -151,6 +154,7 @@ export async function createTestHarness(
       defaultTimeoutMs: options.defaultTimeoutMs,
       defaultConfirmationTimeoutMs: options.defaultConfirmationTimeoutMs,
       confirmationPolicy: options.confirmationPolicy,
+      dispatchPolicy: options.dispatchPolicy,
       ctxExtensions: options.ctxExtensions,
     }),
   };

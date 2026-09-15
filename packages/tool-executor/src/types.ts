@@ -25,6 +25,7 @@ import type {
   ToolRegistration,
   ToolGroupInfo,
   Validator,
+  ToolDispatchPolicy,
 } from "@agentick/spec";
 import type { BaseHarness, Middleware, TelemetryProvider } from "@agentick/runtime";
 
@@ -111,6 +112,14 @@ export interface ToolExecutorHarnessOptions {
    * the tool's own verdict stands, exactly as before.
    */
   readonly confirmationPolicy?: ToolConfirmationPolicy;
+
+  /**
+   * Admission policy — may this actor call this tool at all — consulted
+   * before the confirmation gate. See {@link ToolDispatchPolicy}. Absent:
+   * {@link speakOnlyForNonOwners} — owner turns unchanged, non-owner turns
+   * speak and do not dispatch.
+   */
+  readonly dispatchPolicy?: ToolDispatchPolicy;
 
   /**
    * Elicitation harness used by the confirmation gate. Required:

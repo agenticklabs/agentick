@@ -21,6 +21,7 @@ import type {
   SessionRecord,
   SpawnContext,
   StoreCtx,
+  ToolDispatchPolicy,
   ToolHandler,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
@@ -96,6 +97,8 @@ async function mkSession(
     callTool?: string;
     spawnContext?: SpawnContext;
     sessionStore?: InMemorySessionStore;
+    /** Admission policy for the executor; absent → the framework default (speak-only for non-owners). */
+    dispatchPolicy?: ToolDispatchPolicy;
   } = {},
 ) {
   const journal = new MemoryJournal();
@@ -109,6 +112,7 @@ async function mkSession(
   const tools = new ToolExecutorHarness("id-t", journal, bus, inbox, {
     handlerResolver: resolver,
     elicitation,
+    ...(opts.dispatchPolicy !== undefined ? { dispatchPolicy: opts.dispatchPolicy } : {}),
   });
   const seen = observeIdentity(bus);
   const executor = replyExec(opts.callTool);
@@ -139,6 +143,9 @@ const turn = (session: SessionHarness, identity?: { principal: string }, tools?:
       ...(tools !== undefined ? { tools: tools.map(decl) } : {}),
     })
     .then((h) => h.result);
+
+/** Admits every call — what a deployment installs once credentials follow the actor (identity-axes §3.5 R2). */
+const admitAll: ToolDispatchPolicy = () => ({ kind: "proceed" });
 
 function decl(name: string) {
   return {
@@ -213,9 +220,56 @@ describe("SendInput.identity — the execution acts as the initiator, the owner 
     const { session, tools } = await mkSession("tenant-1:owner", {
       callTool: "probe",
       handlers: { "h.probe": probe },
+      dispatchPolicy: admitAll,
     });
     await turn(session, { principal: "tenant-1:staff" }, ["probe"]);
     expect(ctxs).toEqual([{ principal: "tenant-1:owner", actor: "tenant-1:staff" }]);
+    await session.close();
+    await tools.close();
+  });
+});
+
+describe("dispatch admission — a non-owner turn speaks and does not dispatch (default policy)", () => {
+  const rig = async (callTool: string) => {
+    const ran = { count: 0 };
+    const probe: ToolHandler = async () => {
+      ran.count++;
+      return [blocks.text("probed")];
+    };
+    const { session, tools } = await mkSession("tenant-1:owner", {
+      callTool,
+      handlers: { "h.probe": probe },
+    });
+    const results: { name: string; isError?: boolean; text: string }[] = [];
+    tools.hooks.onAfterToolDispatch((result) => {
+      const first = result.content[0];
+      results.push({
+        name: result.name,
+        ...(result.isError !== undefined ? { isError: result.isError } : {}),
+        text: first?.type === "text" ? first.text : "",
+      });
+    });
+    return { session, tools, ran, results };
+  };
+
+  it("the owner's turn runs the tool as before", async () => {
+    const { session, tools, ran, results } = await rig("probe");
+    await turn(session, undefined, ["probe"]);
+    expect(ran.count).toBe(1);
+    expect(results).toEqual([{ name: "probe", text: "probed" }]);
+    await session.close();
+    await tools.close();
+  });
+
+  it("a staff turn's call is vetoed before it runs, as a soft error the model reads", async () => {
+    const { session, tools, ran, results } = await rig("probe");
+    await turn(session, { principal: "tenant-1:staff" }, ["probe"]);
+    expect(ran.count).toBe(0);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.isError).toBe(true);
+    expect(results[0]?.text).toMatch(
+      /not permitted: this turn was started by someone other than the conversation's owner/,
+    );
     await session.close();
     await tools.close();
   });
@@ -239,6 +293,7 @@ describe("spawn — the child's first turn acts as the parent turn's initiator",
       spawnContext: ctx,
       callTool: "spawner",
       handlers: { "h.spawner": spawnFrom(() => current) },
+      dispatchPolicy: admitAll,
     });
     current = session;
     await turn(session, { principal: "tenant-1:staff" }, ["spawner"]);

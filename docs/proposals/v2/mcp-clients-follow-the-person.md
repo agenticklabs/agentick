@@ -149,15 +149,15 @@ the way user messages already carry who + via. Not a content block: the
 result's bytes stay unchanged, 1:1 sessions render nothing, and it is a
 stable historical fact (no prefix churn). Framework contributes nothing here.
 
-### 3.4c The dispatch guard — a tool executor seam
+### 3.4c The dispatch guard — a tool executor seam (BUILT as `dispatchPolicy`, feat/v2 2026-09-15)
 
 The tool-dispatch analog of arena's session-operation guard, in the house
 guard vocabulary:
 
 ```ts
-authorizeDispatch?: (input: {
-  declaration: ToolDeclaration; principal?: string; ctx: ToolHandlerCtx;
-}) => Verdict;   // proceed | veto(reason) — default proceed
+dispatchPolicy?: (decision: {
+  declaration: ToolDeclaration; input: unknown; ctx: ToolHandlerCtx;   // ctx.principal = owner, ctx.actor = asker
+}) => { kind: "proceed" } | { kind: "veto"; reason?: string };   // default: speakOnlyForNonOwners
 ```
 
 A veto is rendered as an `isError` envelope carrying the reason (and the owner

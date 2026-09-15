@@ -167,6 +167,40 @@ export type ToolConfirmationPolicy = (
   decision: ToolConfirmationDecision,
 ) => boolean | Promise<boolean>;
 
+/** What a {@link ToolDispatchPolicy} sees — the same facts the confirmation policy sees, before any gate. */
+export interface ToolDispatchDecision {
+  readonly declaration: ToolDeclaration;
+  /** The validated input, exactly what the handler would receive. */
+  readonly input: unknown;
+  /** The live dispatch ctx: `principal` = the session's owner, `actor` = who this turn is for (absent ⇒ the owner). */
+  readonly ctx: ToolHandlerCtx;
+}
+
+/** The two arms a dispatch policy may answer with — the house verdict words, minus defer/replace. */
+export type ToolDispatchVerdict =
+  | { readonly kind: "proceed" }
+  | { readonly kind: "veto"; readonly reason?: string };
+
+/**
+ * Executor-level ADMISSION policy — may this actor call this tool at all.
+ * Consulted for every dispatch, FIRST: before the confirmation gate, before
+ * any handler, before a client-handled call is relayed. A veto never asks
+ * anyone anything; it comes back to the model as a soft error the way a
+ * user's denial does (`isError`, `executedBy: "agentick"`, the reason in the
+ * text), so the model can explain and adapt.
+ *
+ * The sibling of {@link ToolConfirmationPolicy}: that one decides whether to
+ * ASK, this one decides whether to ADMIT. Neither reaches the model or the
+ * end user; the adopter configures both on the tool executor. Absent, the
+ * executor applies its default (`speakOnlyForNonOwners` in
+ * `@agentick/tool-executor`): a turn whose `actor` is someone other than the
+ * owner may speak and may not dispatch — safe until credentials follow the
+ * actor, byte-identical for every owner turn.
+ */
+export type ToolDispatchPolicy = (
+  decision: ToolDispatchDecision,
+) => ToolDispatchVerdict | Promise<ToolDispatchVerdict>;
+
 export interface ToolAnnotations {
   /** `[V1-INHERITED]` Tool intent hint. */
   readonly intent?: "render" | "action" | "compute";

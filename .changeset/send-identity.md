@@ -52,3 +52,14 @@ dropped:
 `EventScope.actor` is the additive identity axis behind all of the above:
 `principal` = whose session (scope key, tenancy, gate); `actor` = who this
 work is for. See `docs/proposals/v2/identity-axes.md`.
+
+`@agentick/tool-executor` gains `dispatchPolicy` — the ADMISSION gate, sibling
+of `confirmationPolicy`: may this actor call this tool at all. Consulted
+first, before the confirmation gate and any handler; a veto never asks
+anyone and comes back to the model as a soft error the shape of a denial
+(`isError`, `executedBy: "agentick"`, the reason in the text). Absent, the
+executor applies `speakOnlyForNonOwners`: a turn whose `actor` is someone
+other than the owner may speak and may not dispatch — byte-identical for every
+owner turn, scaffolding until credentials follow the actor. Configure it where
+`confirmationPolicy` lives; a policy answers `{ kind: "proceed" }` or
+`{ kind: "veto", reason? }` and anything else throws at the adopter's site.

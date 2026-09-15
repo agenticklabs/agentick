@@ -66,3 +66,4 @@ export type {
   Validator,
   ValidatorResult,
 } from "./types.js";
+export { speakOnlyForNonOwners, PROCEED, assertDispatchVerdict } from "./dispatch-policy.js";
