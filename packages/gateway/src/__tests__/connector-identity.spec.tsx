@@ -79,22 +79,17 @@ async function buildStack(
 }
 
 /**
- * The principal every execution under this app ran as — read off the run op's
- * scope by an app-level middleware, which the ADR 83 cascade folds down into
- * each session's loop.
+ * The identity pair every execution under this gateway ran as — `principal`
+ * (the owner, the scope key) and `actor` (who the turn was for) — read off the
+ * run op's scope by a gateway-level middleware, which the ADR 84 cascade folds
+ * down through the app into each session's loop.
  */
-function observePrincipals(app: {
-  use: (
-    mw: (
-      input: unknown,
-      next: (i: unknown) => Promise<unknown>,
-      ctx: { opId?: string; principal?: string },
-    ) => Promise<unknown>,
-  ) => unknown;
-}): (string | undefined)[] {
-  const seen: (string | undefined)[] = [];
-  app.use(async (input, next, ctx) => {
-    if (ctx.opId?.startsWith("loop:execution:")) seen.push(ctx.principal);
+function observeIdentity(gateway: GatewayHarness): { principal?: string; actor?: string }[] {
+  const seen: { principal?: string; actor?: string }[] = [];
+  gateway.use(async (input, next, ctx) => {
+    if (ctx.opId?.startsWith("loop:execution:")) {
+      seen.push({ principal: ctx.principal, actor: (ctx as { actor?: string }).actor });
+    }
     return next(input);
   });
   return seen;
@@ -202,31 +197,31 @@ describe("connector — gateway.connectors", () => {
     expect(ingressOnlyHandleErr?.message).toContain("ingress-only");
   });
 
-  it("an identity-bearing inbound into a session owned by someone else runs the execution as the inbound's identity", async () => {
+  it("an identity-bearing inbound into a session owned by someone else stamps the inbound's identity as the actor, owner unchanged", async () => {
     const probe = connectorProbe();
-    const { app } = await buildStack(probe, {}, { authorizer: allowAll });
-    const principals = observePrincipals(app);
+    const { gateway, app } = await buildStack(probe, {}, { authorizer: allowAll });
+    const seen = observeIdentity(gateway);
     const owner = await app.createSession({ sessionId: "bound-1", principal: "tenant-1:user-1" });
     expect(owner.principal).toBe("tenant-1:user-1");
 
     probe.emit({ messages: "a note from staff", sessionId: "bound-1", identity: IDENTITY });
-    await waitFor(() => principals.length > 0);
+    await waitFor(() => seen.length > 0);
     await waitFor(() => app.getSession("bound-1")?.status !== "running");
 
-    expect(new Set(principals)).toEqual(new Set([IDENTITY.principal]));
+    expect(seen).toEqual([{ principal: "tenant-1:user-1", actor: IDENTITY.principal }]);
     expect(app.getSession("bound-1")?.principal).toBe("tenant-1:user-1");
   });
 
   it("an inbound without identity into an owned session runs as the owner, as before", async () => {
     const probe = connectorProbe();
-    const { app } = await buildStack(probe, {}, { authorizer: allowAll });
-    const principals = observePrincipals(app);
+    const { gateway, app } = await buildStack(probe, {}, { authorizer: allowAll });
+    const seen = observeIdentity(gateway);
     await app.createSession({ sessionId: "bound-2", principal: "tenant-1:user-1" });
 
     probe.emit({ messages: "hello", sessionId: "bound-2" });
-    await waitFor(() => principals.length > 0);
+    await waitFor(() => seen.length > 0);
     await waitFor(() => app.getSession("bound-2")?.status !== "running");
 
-    expect(new Set(principals)).toEqual(new Set(["tenant-1:user-1"]));
+    expect(seen).toEqual([{ principal: "tenant-1:user-1", actor: undefined }]);
   });
 });

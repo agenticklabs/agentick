@@ -176,6 +176,12 @@ export interface RunExecutionInput {
    * principal-carved subscription can admit.
    */
   readonly principal?: string;
+  /**
+   * The execution's ACTOR when it is not the owner (`EventScope.actor`) —
+   * stamped onto the execution's and every tick's `EventScope`, from which
+   * every nested op (model, tool dispatch, store write) inherits it.
+   */
+  readonly actor?: string;
 
   /** Compiler harness whose `mountId` the loop will render each tick. */
   readonly compiler: CompilerProtocol;
@@ -630,6 +636,8 @@ export interface TickInput {
   readonly spawnPath?: readonly string[];
   /** Owning principal of the session (ADR 48), inherited from the run. */
   readonly principal?: string;
+  /** The execution's actor when not the owner, inherited from the run. */
+  readonly actor?: string;
 
   /**
    * Failed ticks immediately PRECEDING this one (ADR 99 slice 2) — the run's

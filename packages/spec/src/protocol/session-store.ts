@@ -216,19 +216,20 @@ export interface SessionRecord {
   /** The in-flight execution's id (`exec:${generateId()}`), or absent when idle. */
   readonly currentExecutionId?: string;
   /**
-   * Who the in-flight execution acts AS (`send.identity.principal`) when that
-   * is not the session's owner; absent when it is, or when idle. Written with
-   * `currentExecutionId` in the execution-start delta and cleared with it at
-   * the settle, but NOT wiped by the hydrate merge or the interruption mark,
-   * so `resumeExecution` re-drives a crashed turn as the person who started
-   * it rather than as the owner. See `docs/proposals/v2/execution-resume.md` §3.4.
+   * The in-flight execution's ACTOR (`send.identity.principal`, the scope's
+   * `actor`) when that is not the session's owner; absent when it is, or when
+   * idle. Written with `currentExecutionId` in the execution-start delta and
+   * cleared with it at the settle, but NOT wiped by the hydrate merge or the
+   * interruption mark, so `resumeExecution` re-drives a crashed turn as the
+   * person who started it rather than as the owner. See
+   * `docs/proposals/v2/execution-resume.md` §3.4 and `identity-axes.md`.
    *
    * NOTE (downstream store adapters): persist + round-trip this beside
    * `currentExecutionId` — an adapter that drops it resumes every interrupted
    * turn as the owner, which for a staff-initiated turn is a privilege change.
-   * `KnowifySessionStore` needs the column.
+   * `KnowifySessionStore` keeps it on the executions row (`executions.actor`).
    */
-  readonly currentExecutionPrincipal?: string;
+  readonly currentExecutionActor?: string;
   /**
    * The execution a boot-time reconcile found `running` and marked interrupted —
    * a crash mid-turn (a durable `running` can only be a crash: eviction refuses

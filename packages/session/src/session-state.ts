@@ -204,7 +204,7 @@ type SessionRecordPatch = Partial<
     | "byModel"
     | "cost"
     | "currentExecutionId"
-    | "currentExecutionPrincipal"
+    | "currentExecutionActor"
     | "interruptedExecutionId"
     | "resumeAttempts"
     | "title"
@@ -479,15 +479,15 @@ export class SessionRuntime {
     this.commit({ currentExecutionId: id ?? undefined }, { persist: false });
   }
   /**
-   * The initiator's principal for the in-flight execution, when it is not the
-   * owner. Rides the same execution-start write-through as the id; survives
-   * the hydrate merge so a crash resume can read it.
+   * The in-flight execution's actor, when it is not the owner. Rides the same
+   * execution-start write-through as the id; survives the hydrate merge so a
+   * crash resume can read it.
    */
-  currentExecutionPrincipal(): string | null {
-    return this.record().currentExecutionPrincipal ?? null;
+  currentExecutionActor(): string | null {
+    return this.record().currentExecutionActor ?? null;
   }
-  setCurrentExecutionPrincipal(principal: string | null): void {
-    this.commit({ currentExecutionPrincipal: principal ?? undefined }, { persist: false });
+  setCurrentExecutionActor(actor: string | null): void {
+    this.commit({ currentExecutionActor: actor ?? undefined }, { persist: false });
   }
 
   /** Whether the SESSION is internal (durable, backlog F) — the spine's top rung. */

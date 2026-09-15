@@ -303,10 +303,11 @@ export interface SendInput<P = unknown, T = unknown> {
   readonly clientId?: string;
   /**
    * Who this execution acts AS. The session's owning principal (ADR 48) stays
-   * on the record; this is the initiator of ONE turn, and its `principal`
-   * becomes the execution's — the `ctx.principal` every tool, store, and
-   * model envelope under the run sees. Absent → the session's own principal,
-   * which is byte-identical to today for every existing caller.
+   * on the record AND on every envelope's `principal`; this is the initiator
+   * of ONE turn, and its `principal` becomes the execution's `actor` — the
+   * `ctx.actor` every tool, store, and model envelope under the run sees
+   * (`EventScope.actor`). Absent, or equal to the owner → no `actor` is
+   * stamped, which is byte-identical to before for every existing caller.
    *
    * Server-declared, like `principal` and `internal`: the wire `session/send`
    * handler stamps it from the authenticated caller, the connectors harness

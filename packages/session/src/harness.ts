@@ -1983,11 +1983,11 @@ export class SessionHarness<P = unknown>
     }
     // SYNCHRONOUS-ENTRY contract: no await between the admission checks above
     // and the core's reservation.
-    // Re-drive as whoever started the turn. The principal survived the
-    // hydrate merge and the interruption mark precisely so this read works.
-    const principal = this.runtime.currentExecutionPrincipal();
+    // Re-drive as whoever started the turn. The actor survived the hydrate
+    // merge and the interruption mark precisely so this read works.
+    const actor = this.runtime.currentExecutionActor();
     return this.runExecutionCore(
-      principal !== null ? { identity: { principal } } : {},
+      actor !== null ? { identity: { principal: actor } } : {},
       undefined,
       undefined,
       { executionId, seedTickIndex: cursor?.lastTickIndex ?? 0 },
@@ -3402,6 +3402,12 @@ export class SessionHarness<P = unknown>
    * between its admission guard passing and this call — the reservation below
    * must be taken in the same microtask.
    */
+  /** The turn's acting identity when it is not the owner; `undefined` otherwise. */
+  private actorOf(input: SendInput<P>): string | undefined {
+    const initiator = input.identity?.principal;
+    return initiator !== undefined && initiator !== this.principal ? initiator : undefined;
+  }
+
   private async runExecutionCore(
     input: SendInput<P>,
     effectiveResponseFormat: ResponseFormat | undefined,
@@ -3485,7 +3491,7 @@ export class SessionHarness<P = unknown>
       this._currentExecutionAbort = null;
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
-      this.runtime.setCurrentExecutionPrincipal(null);
+      this.runtime.setCurrentExecutionActor(null);
       this.runtime.setCurrentExecutionInternal(false); // execution rung cleared (backlog F)
       this.runtime.setCurrentExecutionIdentity(null);
       // Completion resolves the interruption (execution-resume.md §3.3) —
@@ -3559,10 +3565,7 @@ export class SessionHarness<P = unknown>
       this.runtime.setCurrentExecutionId(executionId);
       // Only a non-owner initiator is worth a durable slot: the owner is the
       // record's own principal, and a resume defaults to it.
-      const initiator = input.identity?.principal;
-      this.runtime.setCurrentExecutionPrincipal(
-        initiator !== undefined && initiator !== this.principal ? initiator : null,
-      );
+      this.runtime.setCurrentExecutionActor(this.actorOf(input) ?? null);
       // Execution is the intent moment — the first turn earns the durable
       // record via the `session:persist` command (un-awaited: the write is
       // off the critical path, and the status write below rides into the
@@ -3682,10 +3685,13 @@ export class SessionHarness<P = unknown>
                   // The tab that asked, carried for the run's life — a tool call
                   // relayed on tick 6 still knows where the request came from.
                   ...pick(input, ["connectionId", "clientId"]),
-                  // ADR 48 — the app-level model executor has no principal of its
-                  // own, so the acting principal rides the scope it is handed: the
-                  // turn's initiator when the send names one, else the owner.
-                  ...omitUndefined({ principal: input.identity?.principal ?? this.principal }),
+                  // ADR 48 — the owner stays the scope key on every envelope under
+                  // this run; the app-level model executor has no principal of its
+                  // own, so it rides the scope it is handed.
+                  ...omitUndefined({ principal: this.principal }),
+                  // The ACTING identity, only when it is someone else: nested ops
+                  // inherit it (`inheritScope`), a single-user turn stamps nothing.
+                  ...omitUndefined({ actor: this.actorOf(input) }),
                   compiler: this.compiler,
                   mountId: this.mountId,
                   modelExecutor: modelExecutorForCall,

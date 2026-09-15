@@ -69,17 +69,24 @@ function replyExec(callTool?: string) {
   );
 }
 
-/** Every `loop:*` envelope's principal — the scope each execution and tick ran under. */
-function observePrincipals(bus: LocalEventBus): (string | undefined)[] {
-  const seen: (string | undefined)[] = [];
+/** Every `loop:*` envelope's identity pair — the scope each execution and tick ran under. */
+type Seen = { principal: string | undefined; actor: string | undefined; hasActorKey: boolean };
+function observeIdentity(bus: LocalEventBus): Seen[] {
+  const seen: Seen[] = [];
   void Effect.runPromise(
     Stream.runForEach(bus.subscribe({ name: { prefix: "loop:" } }), (e: ProtocolEvent) => {
-      seen.push(e.scope.principal);
+      seen.push({
+        principal: e.scope.principal,
+        actor: e.scope.actor,
+        hasActorKey: "actor" in e.scope,
+      });
       return Effect.void;
     }),
   ).catch(() => {});
   return seen;
 }
+const principalsOf = (seen: Seen[]) => new Set(seen.map((s) => s.principal));
+const actorsOf = (seen: Seen[]) => new Set(seen.map((s) => s.actor));
 
 async function mkSession(
   principal: string,
@@ -103,7 +110,7 @@ async function mkSession(
     handlerResolver: resolver,
     elicitation,
   });
-  const principals = observePrincipals(bus);
+  const seen = observeIdentity(bus);
   const executor = replyExec(opts.callTool);
   await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
   const session = new SessionHarness(journal, bus, inbox, {
@@ -121,7 +128,7 @@ async function mkSession(
   });
   await session.ready;
   await session.mountReady;
-  return { session, tools, principals };
+  return { session, tools, seen };
 }
 
 const turn = (session: SessionHarness, identity?: { principal: string }, tools?: string[]) =>
@@ -162,31 +169,53 @@ function recordingSpawnContext() {
   return { ctx, sends };
 }
 
-describe("SendInput.identity — the execution acts as the initiator", () => {
-  it("no identity runs as the owner; an identity runs as itself; the owner stays on the session", async () => {
-    const { session, tools, principals } = await mkSession("tenant-1:owner");
+describe("SendInput.identity — the execution acts as the initiator, the owner stays the scope key", () => {
+  it("no identity stamps no actor; an identity stamps the actor on every nested op while principal stays the owner", async () => {
+    const { session, tools, seen } = await mkSession("tenant-1:owner");
 
     await turn(session);
-    expect(new Set(principals)).toEqual(new Set(["tenant-1:owner"]));
+    expect(seen.length).toBeGreaterThan(0);
+    expect(principalsOf(seen)).toEqual(new Set(["tenant-1:owner"]));
+    expect(seen.every((s) => !s.hasActorKey)).toBe(true);
 
-    principals.length = 0;
+    seen.length = 0;
     await turn(session, { principal: "tenant-1:staff" });
-    expect(principals.length).toBeGreaterThan(0);
-    expect(new Set(principals)).toEqual(new Set(["tenant-1:staff"]));
+    expect(seen.length).toBeGreaterThan(0);
+    expect(principalsOf(seen)).toEqual(new Set(["tenant-1:owner"]));
+    expect(actorsOf(seen)).toEqual(new Set(["tenant-1:staff"]));
     expect(session.principal).toBe("tenant-1:owner");
 
-    principals.length = 0;
+    seen.length = 0;
     await turn(session);
-    expect(new Set(principals)).toEqual(new Set(["tenant-1:owner"]));
+    expect(principalsOf(seen)).toEqual(new Set(["tenant-1:owner"]));
+    expect(seen.every((s) => !s.hasActorKey)).toBe(true);
 
     await session.close();
     await tools.close();
   });
 
-  it("an identity without a principal changes nothing", async () => {
-    const { session, tools, principals } = await mkSession("tenant-1:owner");
+  it("an identity equal to the owner, or without a principal, stamps nothing", async () => {
+    const { session, tools, seen } = await mkSession("tenant-1:owner");
+    await turn(session, { principal: "tenant-1:owner" });
     await turn(session, {} as { principal: string });
-    expect(new Set(principals)).toEqual(new Set(["tenant-1:owner"]));
+    expect(principalsOf(seen)).toEqual(new Set(["tenant-1:owner"]));
+    expect(seen.every((s) => !s.hasActorKey)).toBe(true);
+    await session.close();
+    await tools.close();
+  });
+
+  it("a tool handler's ctx carries actor beside principal, inherited from the execution root", async () => {
+    const ctxs: { principal?: string; actor?: string }[] = [];
+    const probe: ToolHandler = async (_input, { ctx }) => {
+      ctxs.push({ principal: ctx.principal, actor: (ctx as { actor?: string }).actor });
+      return [blocks.text("probed")];
+    };
+    const { session, tools } = await mkSession("tenant-1:owner", {
+      callTool: "probe",
+      handlers: { "h.probe": probe },
+    });
+    await turn(session, { principal: "tenant-1:staff" }, ["probe"]);
+    expect(ctxs).toEqual([{ principal: "tenant-1:owner", actor: "tenant-1:staff" }]);
     await session.close();
     await tools.close();
   });
@@ -247,7 +276,7 @@ describe("resumeExecution — a crashed turn re-drives as the person who started
       status: "running",
       principal: "tenant-1:owner",
       currentExecutionId: "exec:crashed",
-      ...(principal !== undefined ? { currentExecutionPrincipal: principal } : {}),
+      ...(principal !== undefined ? { currentExecutionActor: principal } : {}),
       executionCount: 1,
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
     }) as unknown as SessionRecord;
@@ -255,14 +284,15 @@ describe("resumeExecution — a crashed turn re-drives as the person who started
   it("reads the initiator off the durable record", async () => {
     const store = new InMemorySessionStore();
     await store.put(crashed("s-resume-staff", "tenant-1:staff"), ctx);
-    const { session, tools, principals } = await mkSession("tenant-1:owner", {
+    const { session, tools, seen } = await mkSession("tenant-1:owner", {
       sessionId: "s-resume-staff",
       sessionStore: store,
     });
     const handle = await session.resumeExecution("exec:crashed");
     await handle.result;
-    expect(principals.length).toBeGreaterThan(0);
-    expect(new Set(principals)).toEqual(new Set(["tenant-1:staff"]));
+    expect(seen.length).toBeGreaterThan(0);
+    expect(principalsOf(seen)).toEqual(new Set(["tenant-1:owner"]));
+    expect(actorsOf(seen)).toEqual(new Set(["tenant-1:staff"]));
     await session.close();
     await tools.close();
   });
@@ -270,13 +300,14 @@ describe("resumeExecution — a crashed turn re-drives as the person who started
   it("falls back to the owner when the record carries none", async () => {
     const store = new InMemorySessionStore();
     await store.put(crashed("s-resume-owner", undefined), ctx);
-    const { session, tools, principals } = await mkSession("tenant-1:owner", {
+    const { session, tools, seen } = await mkSession("tenant-1:owner", {
       sessionId: "s-resume-owner",
       sessionStore: store,
     });
     const handle = await session.resumeExecution("exec:crashed");
     await handle.result;
-    expect(new Set(principals)).toEqual(new Set(["tenant-1:owner"]));
+    expect(principalsOf(seen)).toEqual(new Set(["tenant-1:owner"]));
+    expect(seen.every((s) => !s.hasActorKey)).toBe(true);
     await session.close();
     await tools.close();
   });
@@ -289,10 +320,10 @@ describe("resumeExecution — a crashed turn re-drives as the person who started
     });
     await turn(session, { principal: "tenant-1:staff" });
     await session.flushRecordWrites();
-    expect((await store.get("s-slot", ctx))?.currentExecutionPrincipal).toBeUndefined();
+    expect((await store.get("s-slot", ctx))?.currentExecutionActor).toBeUndefined();
     await turn(session);
     await session.flushRecordWrites();
-    expect((await store.get("s-slot", ctx))?.currentExecutionPrincipal).toBeUndefined();
+    expect((await store.get("s-slot", ctx))?.currentExecutionActor).toBeUndefined();
     await session.close();
     await tools.close();
   });

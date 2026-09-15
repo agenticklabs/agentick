@@ -136,7 +136,7 @@ import {
   validateStructuredOutput,
 } from "@agentick/spec";
 import * as blocks from "@agentick/spec/blocks";
-import { mergeAbortSignals, omitUndefined, reasonOf } from "@agentick/utils";
+import { mergeAbortSignals, omitUndefined, pick, reasonOf } from "@agentick/utils";
 
 // ADR 80/83 — light up the execution-lifecycle verb. `loop:run-execution`
 // is a STREAMING command (`this.commandStream`, see the constructor): its
@@ -296,6 +296,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
         ...(i.clientId !== undefined ? { clientId: i.clientId } : {}),
         ...(i.principal !== undefined ? { principal: i.principal } : {}),
+        ...pick(i, ["actor"]),
       }),
       handler: (i) => this.tickBody(i),
     });
@@ -329,6 +330,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
         ...(i.clientId !== undefined ? { clientId: i.clientId } : {}),
         ...(i.principal !== undefined ? { principal: i.principal } : {}),
+        ...pick(i, ["actor"]),
       }),
       body: (i, sink) => this.runExecutionBody(i, sink),
     });
@@ -540,6 +542,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
           ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
           ...(input.principal !== undefined ? { principal: input.principal } : {}),
+          ...pick(input, ["actor"]),
           // Non-zero ⇒ the previous tick failed and was force-continued, so
           // this tick is its retry (ADR 99 slice 2).
           ...(consecutiveFailures > 0 ? { consecutiveFailures } : {}),
@@ -829,6 +832,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
           ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
           ...(input.principal !== undefined ? { principal: input.principal } : {}),
+          ...pick(input, ["actor"]),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
@@ -1052,6 +1056,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       executionId,
       tickId,
       principal: input.principal,
+      actor: input.actor,
     });
     return Effect.gen(function* () {
       // Tick-start orchestration event (public stream). The

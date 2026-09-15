@@ -111,6 +111,19 @@ export interface EventScope extends EventScopeExtensions {
    */
   readonly principal?: string;
   /**
+   * The ACTING identity for this operation and everything nested under it —
+   * who the work is FOR. Twin of {@link principal} (the construction-bound
+   * scope key: whose session, whose tenancy) and DISTINCT from it: a turn sent
+   * AS someone other than the owner (`SendInput.identity`) sets `actor` at the
+   * execution's root scope, and every nested op inherits it (`inheritScope`)
+   * — loop, model, tool dispatch, and the write-path `StoreCtx`. Absent ⇒ the
+   * owner: readers take `actor ?? principal` as the acting identity, so a
+   * single-user session carries no `actor` at all and its envelopes are
+   * unchanged. Set only at boundaries the framework owns (the session's
+   * execution root, the identity doors) — never by an op's own scope factory.
+   */
+  readonly actor?: string;
+  /**
    * The client connection this work came in on — a WebSocket, a unix socket.
    * Minted by the transport that owns the socket and retained for its life.
    *

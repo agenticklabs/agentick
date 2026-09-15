@@ -10,12 +10,13 @@
 session.
 
 The session's owning principal (ADR 48) stays construction-bound on the
-record and remains the input to the wire gate. What changes per turn is the
-initiator: `send({ identity })` makes that identity's `principal` the
-execution's, so `ctx.principal` in every tool handler, store call, and model
-envelope under the run names the person who asked, not the person who owns
-the conversation. Absent, the execution runs as the session's own principal,
-byte-identical to before.
+record, remains the input to the wire gate, and stays the `principal` on
+every envelope. What changes per turn is the ACTOR: `send({ identity })`
+stamps that identity's principal as `EventScope.actor` at the execution's
+root scope, and every nested op inherits it (`inheritScope`), so `ctx.actor`
+in every tool handler, store write, and model envelope under the run names the
+person who asked. Readers take `actor ?? principal` as the acting identity.
+Absent, or equal to the owner, nothing is stamped — byte-identical to before.
 
 The field is server-declared like `principal` and `internal`. The wire
 `session/send` handler stamps it from the authenticated caller; the
@@ -40,10 +41,14 @@ dropped:
   the parent turn's identity; an explicit `send.identity` still wins.
 - The ephemeral connector path (`runOnce`) stamps the inbound's identity on
   its send, as the held-session path does.
-- `SessionRecord.currentExecutionPrincipal` — written with
-  `currentExecutionId` in the execution-start delta when the initiator is
-  not the owner, cleared at the settle, and deliberately NOT wiped by the
+- `SessionRecord.currentExecutionActor` — written with
+  `currentExecutionId` in the execution-start delta when the actor is not
+  the owner, cleared at the settle, and deliberately NOT wiped by the
   hydrate merge or the interruption mark — so `resumeExecution` re-drives a
   crashed turn as the person who started it. Store adapters must persist
   and round-trip it beside `currentExecutionId`; one that drops it resumes
   every interrupted turn as the owner.
+
+`EventScope.actor` is the additive identity axis behind all of the above:
+`principal` = whose session (scope key, tenancy, gate); `actor` = who this
+work is for. See `docs/proposals/v2/identity-axes.md`.
