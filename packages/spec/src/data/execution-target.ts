@@ -88,7 +88,8 @@ export const DEFAULT_URL_SCHEMES: readonly string[] = ["http", "https", "data"];
 
 /**
  * How the provider caches a prompt prefix — the facts a caller needs to know
- * when it is free to reshape history and when reshaping costs a rewrite.
+ * when it is free to reshape history, when reshaping costs a rewrite, and
+ * whether a declared boundary means anything here.
  *
  * Absent `cache`: assume nothing about caching. Present but empty: the
  * provider caches, but publishes no lifetime (Gemini's implicit caching), so
@@ -101,6 +102,18 @@ export interface CacheSupport {
   readonly extendedTtlMs?: number;
   /** A cache read restarts the entry's clock. */
   readonly refreshedOnRead?: boolean;
+  /**
+   * What a declared {@link CacheBoundary} can become on this target. Absent:
+   * the provider caches on its own terms and a declaration is declined.
+   */
+  readonly explicit?: {
+    /** `breakpoint` marks the request in place (Anthropic); `object` names a prefix stored ahead of time (Gemini). */
+    readonly kind: "breakpoint" | "object";
+    /** How many boundaries one request may carry; the earliest beyond it are declined. */
+    readonly maxBoundaries?: number;
+    /** A prefix shorter than this is not worth marking. */
+    readonly minTokens?: number;
+  };
 }
 
 /**

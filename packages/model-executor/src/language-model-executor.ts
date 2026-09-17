@@ -80,6 +80,8 @@ import {
 import {
   applyMediaSupport,
   type PartDeclined,
+  type BoundaryDeclined,
+  applyCacheSupport,
   repairToolSpans,
   type DanglingToolPart,
   composeTransforms,
@@ -500,6 +502,28 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     };
   }
 
+  /** Declared cache boundaries the target cannot honour, removed before the wire — see `applyCacheSupport`. */
+  private screenCache(input: ExecuteInput<LanguageModelInput>): {
+    readonly input: ExecuteInput<LanguageModelInput>;
+    readonly declined: readonly BoundaryDeclined[];
+  } {
+    // The adapter is the authority on its own caching: a resolved target that says
+    // nothing about it inherits the adapter's record rather than declining everything.
+    const cache = input.target.capabilities?.cache ?? this.adapter.target.capabilities?.cache;
+    const target =
+      cache === undefined || cache === input.target.capabilities?.cache
+        ? input.target
+        : { ...input.target, capabilities: { ...input.target.capabilities, cache } };
+    const { messages, declined } = applyCacheSupport(input.targetInput.messages, target);
+    return {
+      input:
+        messages === input.targetInput.messages
+          ? input
+          : { ...input, targetInput: { ...input.targetInput, messages } },
+      declined,
+    };
+  }
+
   /**
    * Prune tool parts whose other end is absent — see `repairToolSpans`.
    *
@@ -902,11 +926,29 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
           );
         }
       }
+      const cached = this.screenCache(screened.input);
+      if (cached.declined.length > 0) {
+        const opCtx = yield* this.currentOperationCtx();
+        for (const boundary of cached.declined) {
+          opCtx.log.warning(
+            {
+              event: "model.cache.declined",
+              provider: this.adapter.provider,
+              modelId: input.target.modelId,
+              messageIndex: boundary.messageIndex,
+              partIndex: boundary.partIndex,
+              ttlMs: boundary.ttlMs,
+              reason: boundary.reason,
+            },
+            "model",
+          );
+        }
+      }
       // Spans last: this is the invariant that must hold on the messages actually
       // sent. Unlike a declined attachment it is never a judgement call — the
       // request was going to be REFUSED — so a prune here means something
       // upstream cut between a call and its result, and the position names it.
-      const spans = this.repairSpans(screened.input);
+      const spans = this.repairSpans(cached.input);
       for (const part of spans.pruned) {
         const opCtx = yield* this.currentOperationCtx();
         opCtx.log.warning(

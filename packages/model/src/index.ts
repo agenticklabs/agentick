@@ -131,6 +131,11 @@ export { buildMessageProvenance, type MessageProvenance, type PartOrigin } from 
 // the reasoning) so a first real consumer can promote it deliberately.
 // TODO(ddmin-home): export from a utility surface, or drop, on the first real caller.
 export { applyMediaSupport, type MediaSupportResult, type PartDeclined } from "./media-support.js";
+export {
+  applyCacheSupport,
+  type CacheSupportResult,
+  type BoundaryDeclined,
+} from "./cache-support.js";
 export { repairToolSpans, type ToolSpanRepair, type DanglingToolPart } from "./tool-span-repair.js";
 export {
   detectDroppedInputs,

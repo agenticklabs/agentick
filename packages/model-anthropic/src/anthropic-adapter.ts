@@ -282,7 +282,12 @@ export function anthropic(
       media: { image: ["base64", "url"], document: ["base64", "url"] },
       // Prompt caching: a five-minute entry by default, an hour when asked, and
       // a read restarts the clock at no charge.
-      cache: { ttlMs: 5 * 60_000, extendedTtlMs: 60 * 60_000, refreshedOnRead: true },
+      cache: {
+        ttlMs: 5 * 60_000,
+        extendedTtlMs: 60 * 60_000,
+        refreshedOnRead: true,
+        explicit: { kind: "breakpoint", maxBoundaries: 4 },
+      },
       contextWindow: 200_000,
       maxOutputTokens: 8_192,
     },

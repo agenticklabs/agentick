@@ -8,6 +8,7 @@ describe("the cache record", () => {
       ttlMs: 300_000,
       extendedTtlMs: 3_600_000,
       refreshedOnRead: true,
+      explicit: { kind: "breakpoint", maxBoundaries: 4 },
     });
   });
 });
