@@ -48,7 +48,7 @@ interface ContextSpec {
 
 One entry kind. Array order IS the order; there is no `position` field and no reorder hint. `MessageEntry.role` is an OPEN string so an application can tag its own turns, and two of its values are agentick-semantic rather than provider vocabulary: `grounding` (context that is neither an instruction nor a human turn) and `event` (a record of something that happened). Adapters lower those to their own vocabulary at their own boundary; nothing casts.
 
-A **section** is not an entry. It is content that lowers into the blocks of the message containing it — or, written on its own, into an anonymous `grounding` message at its own position (ADR 94). What a section used to carry survives one level down: its stable `id` on the blocks it produced, and its cache breakpoint as `BaseContentBlock.cache`, which the projection forwards onto the message part.
+A **section** is not an entry. It is content that lowers into the blocks of the message containing it — or, written on its own, into an anonymous `grounding` message at its own position (ADR 94). What a section used to carry survives one level down: its stable `id` on the blocks it produced, and its cache boundary (a `CacheBoundary`) as `BaseContentBlock.cache`, which the projection forwards onto the message part.
 
 ## The augmentation seams
 
@@ -228,6 +228,34 @@ The two rules are worth memorizing, because they are not symmetric:
 | `media` **present** | **Complete** — a modality with no entry carries nothing. `[]` says the same thing explicitly                                             |
 
 Why a declaration and not a per-adapter convention: whether a part can go on the wire was previously decided inside each adapter's own projection, and the verdict was discarded. A part an adapter could not carry was skipped and the request **succeeded** — the model never saw the user's attachment and nothing recorded it. Worse, some adapters have no arm for a modality at all, so there was no decline to report even in principle. Moving the fact into the target makes it **data**: enforceable in one place, and checkable — `runMediaDeclarationCheck` from `@agentick/model/testing` asserts each adapter's declaration against its real wire projection, in both directions.
+
+### `capabilities.cache` — declaring how a target caches
+
+A provider caches a prompt prefix for a lifetime measured from the request that wrote or last read it. `cache` states that lifetime, and whether the caller may say where a cached prefix ends:
+
+```ts
+capabilities: {
+  cache: {
+    ttlMs: 5 * 60_000, // default lifetime of a cached prefix
+    extendedTtlMs: 60 * 60_000, // the longest a boundary may ask for
+    refreshedOnRead: true, // a hit restarts the clock
+    explicit: { kind: "breakpoint", maxBoundaries: 4 },
+  },
+}
+```
+
+The same asymmetry as `media`, one level deeper:
+
+|                       | Meaning                                                                                                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cache` **absent**    | **Undeclared** — the framework assumes nothing about the prefix                                                                                                                            |
+| `cache: {}`           | The target caches, and publishes no lifetime                                                                                                                                               |
+| `explicit` **absent** | The target caches on its own terms — every boundary a request declares is declined                                                                                                         |
+| `explicit` present    | `breakpoint`: a marker on a part (Anthropic `cache_control`). `object`: a cache the caller creates and names (Gemini). `maxBoundaries` and `minTokens` are the provider's published limits |
+
+A **boundary** is the caller's side of the same fact: `cache: { ttlMs }` on a content block (`BaseContentBlock.cache`) or on a message's metadata — a `CacheBoundary`. It says _the prefix through here should live this long_, in milliseconds; the adapter maps that onto its provider's vocabulary (Anthropic: five minutes or less → `"5m"`, longer → `"1h"`). It is read by `applyCacheSupport` in [@agentick/model](../model), which the executor runs right after the media screen — so a boundary the target cannot honour is declined with a stated reason rather than sent as a marker the provider ignores or rejects.
+
+The lifetime is also what a timeline reads to know where the prefix was last rewritten anyway: `coldStart(ttlMs)` in [@agentick/timeline](../timeline).
 
 ### Wire methods derive their own hooks
 

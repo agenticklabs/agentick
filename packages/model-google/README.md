@@ -173,6 +173,8 @@ media: {
 }
 ```
 
+The cache record is `cache: {}`: Gemini's implicit caching publishes no lifetime, and its explicit cache is a named object with a lifecycle of its own that this adapter does not yet drive — so a `CacheBoundary` on a request is declined by the executor's screen rather than sent.
+
 On the API-key endpoint a `gs://` source is therefore **declined with a stated reason** rather than 400-ing the whole request — and a decline is the signal to resolve it first. `ai.files.registerFiles({ uris })` takes the bucket URI itself and returns a handle, so registration moves no bytes either; the returned `File` carries an `expirationTime`, which is what a caching layer needs to know when to re-register.
 
 > [!IMPORTANT]

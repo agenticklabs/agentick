@@ -169,6 +169,8 @@ media: { image: ["url", "base64"], document: ["base64", "reference"], audio: ["b
 //                                                       ^ a Files API file_id      ^ video absent
 ```
 
+The cache record is `{ ttlMs: 5 min, extendedTtlMs: 24 h, refreshedOnRead: true }` with no `explicit` entry: OpenAI caches a prefix on its own terms (automatic prompt caching, extendable with `prompt_cache_retention`), so a `CacheBoundary` on a request is declined by the executor's screen rather than sent as a marker the API has no slot for.
+
 Video and replayed `reasoning` input are **dropped, not flattened** — Chat Completions has no slot for either, and stuffing them into text would be a silent token bomb. Both drops are pinned by `src/__tests__/silent-drops.spec.ts`, so a fix cannot land unnoticed. A URL document source needs staging first — Chat Completions has no url form for `file` — so fetch to base64 or upload for a `file_id`. `urlSchemes` is left at its default, so a non-HTTP scheme is declined rather than sent.
 
 ## Provider knobs

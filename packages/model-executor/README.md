@@ -251,6 +251,12 @@ That is the seam for the one source the framework cannot resolve. A `MediaSource
 
 Verdicts are not threaded anywhere: `applyMediaSupport` is pure, so re-derive them when you need them, joined to `buildMessageProvenance` to name the timeline entry behind each. Surfacing them per-request without asking is `TODO(decline-reporting)`.
 
+### The cache screen runs right after it
+
+Same position, one step later: every `CacheBoundary` on the screened request is checked against `target.capabilities.cache` by `applyCacheSupport`, and what the target cannot honour is stripped before `prepareRequest`. A target without `explicit` support declines every boundary; one with it declines a longer lifetime placed after a shorter one and keeps only the last `maxBoundaries`. Each decline is logged as `model.cache.declined`, naming the message and part and why — never thrown, because a lost boundary costs cache efficiency, not the request.
+
+One rule of precedence: a resolved target that says nothing about caching inherits the adapter's own record. The adapter is the authority on what it supports, so a target override without a `cache` entry does not silently disable the boundaries its provider takes.
+
 ## Cancellation
 
 `abort({ executionId })` fires the in-flight `AbortController`, which is merged with the caller's `signal` and with Effect's own fiber-interrupt signal into one signal the SDK sees. Aborting before a run starts short-circuits it: the next call with that id resolves a `canceled` terminal without touching the provider.
@@ -404,6 +410,7 @@ Adapter hooks that override executor defaults: `project`, `adapterTransforms`, `
 ## Verified by
 
 - `src/__tests__/media-screen-ordering.spec.ts` — a declared-unprojectable source dropped before `prepareRequest` sees it, a declared-carryable one kept, neighbouring text never taken with the dropped part, and the ordering that matters: an `onBeforeModelGenerate` hook resolving a `reference` to `gcs` has its result **survive**, while whatever the hook leaves unresolved is still screened. Plus `project()` deliberately NOT screening, since the request it produces is not yet the request being sent.
+- The cache screen's rules are pinned as a pure function in [@agentick/model](../model) (`cache-support.spec.ts`); its placement here is exercised by the Anthropic executor suite, whose `cache_control` expectations pass through the screen on the adapter's own record.
 
 - `src/__tests__/language-model-executor-conformance.spec.ts` — `runExecutorConformance` against the real executor with a synthetic adapter. The suite includes the command block: `model:generate` mints and fires its hooks, a guard veto rejects `execute()` and folds to a `vetoed` terminal on `run()`, the streaming command fires `onAfterModelGenerateStream` at its terminal, and every envelope carries a `model:*` operation name. Its `errorFixtures` certify `defaultMapProviderError` — the table an adapter without its own `mapProviderError` falls back to.
 - `src/__tests__/run-failure-terminal.spec.ts` — `run()` answering in terminals for failure: a classified provider error keeping its class, an unclassified one folded under the default table's, a classified raise from `normalize` folded the same way, an abort still `canceled` — and a normalization or projection defect still rejecting.

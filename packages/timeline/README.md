@@ -125,7 +125,29 @@ export function CompactionNotice() {
 }
 ```
 
-The hook returns `{ entries, version }` and is backed by `useSyncExternalStore`, so a component re-renders as the projection's `version` advances. It is read-only by design — writes go through `session.timeline` or the declared commands, never through the hook. For the uncompacted log, reach the bridge directly as above.
+The hook returns `{ entries, version, lastReplyAt, coldStart }` and is backed by `useSyncExternalStore`, so a component re-renders as the projection's `version` advances. It is read-only by design — writes go through `session.timeline` or the declared commands, never through the hook. For the uncompacted log, reach the bridge directly as above.
+
+### Where the prefix was last rewritten — `coldStart`
+
+A provider caches the prompt prefix for a lifetime — `target.capabilities.cache.ttlMs` — measured from the request that wrote or last read it. An execution that begins after a longer gap starts on a **cold** cache: its prefix is written in full whatever it contains, so everything before it can be reshaped at no extra cost. That point never moves once it exists, which is what makes a render decision keyed to it stable from tick to tick.
+
+`coldStart(ttlMs)` on the snapshot is the index of the first entry of the latest execution that began more than `ttlMs` after the previous reply, or `undefined` when every execution began warm; `lastReplyAt` is when the model last answered. Both are derived from the log — no wall clock in render — and memoized per projection version. The free functions `coldStart(entries, ttlMs)` and `lastReplyAt(entries)` are exported for a reader outside render.
+
+```tsx
+import { useActiveModel } from "@agentick/compiler-react";
+import { useTimeline } from "@agentick/timeline/react";
+
+function CompactBehindColdStart() {
+  const { entries, coldStart } = useTimeline();
+  const ttl = useActiveModel()?.capabilities?.cache?.ttlMs ?? 5 * 60_000;
+  const cold = coldStart(ttl);
+  return entries.map((e, i) =>
+    cold !== undefined && i < cold ? <Compact entry={e} /> : <Full entry={e} />,
+  );
+}
+```
+
+Collapsing an old attachment to a reference the moment its turn ends looks cheap and is not: it rewrites the prefix, and the next re-read costs more than the bytes it saved. Collapse behind the cold start and the rewrite is free.
 
 ## No pending queue
 
@@ -619,6 +641,8 @@ Both splices are copy-on-write — a new array reference each time, satisfying t
 | `defineTimelineStore(verbs)`                      | Build a conforming `TimelineStore` from its log verbs              |
 | `hydrateFromStore()`                              | Genesis: the whole durable log (the default when a store is set)   |
 | `hydrateTail(n)`                                  | Genesis: the last `n` entries, without loading the log             |
+| `coldStart(entries, ttlMs)`                       | Index of the latest execution that began on a cold prefix cache    |
+| `lastReplyAt(entries)`                            | When the model last answered                                       |
 | `withTimeline(definition?)`                       | The same definition as a session extension, for `extensions: []`   |
 | `TimelineHarness`                                 | The implementation, for direct construction                        |
 | `MemoryTimelineStore`                             | Bundled in-memory log store                                        |
@@ -660,13 +684,13 @@ That enumeration is itself a wire door: `await client.session(id).timeline.comma
 
 ### `@agentick/timeline/react`
 
-| Export                              | Purpose                                                            |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| `<Timeline>`                        | Override the default fold; filter, budget, or render-prop it       |
-| `<Transcript>`                      | The same component, chat-shaped name                               |
-| `<Compaction strategy>`             | Declare the fold strategy from the tree; outranks `defineTimeline` |
-| `useTimeline()`                     | Projection snapshot; re-renders when the version advances          |
-| `compactEntries` / `getEntryTokens` | The budget primitives `<Timeline>` uses internally                 |
+| Export                              | Purpose                                                                    |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| `<Timeline>`                        | Override the default fold; filter, budget, or render-prop it               |
+| `<Transcript>`                      | The same component, chat-shaped name                                       |
+| `<Compaction strategy>`             | Declare the fold strategy from the tree; outranks `defineTimeline`         |
+| `useTimeline()`                     | Projection snapshot (+ `lastReplyAt`, `coldStart`); re-renders per version |
+| `compactEntries` / `getEntryTokens` | The budget primitives `<Timeline>` uses internally                         |
 
 `<Timeline>` props: `roles`, `filter`, `limit` (pre-filters) · `maxTokens`, `strategy`, `preserveRoles`, `headroom`, `guidance`, `onEvict` (budget) · `children` as a render function or static JSX.
 
@@ -715,6 +739,7 @@ That enumeration is itself a wire door: `await client.session(id).timeline.comma
 
 - `src/__tests__/harness.spec.ts` + `conformance.ts` — append/projection invariants, inbox addressability, and the checkpoint contract: the harness is `CheckpointCapable`, the store outlives the harness (`persist` → `hydrate` on a fresh instance), `hydrate` replaces the projection with the scope's contents, a store-less harness does both without effect, and a rejected `persist` propagates so the caller cannot unmount behind it.
 - `conformance.ts` also pins `executionCursor`: `undefined` for an execution the log never saw, `lastTickIndex` as the max of **this** execution's ticks with a sibling's never leaking in, `boundary` absent in flight and present after `endTurn`, and an execution whose only entry carries no tick provenance registering at tick 0.
+- `src/__tests__/cold-start.spec.ts` — the cold start as the first entry of the latest execution that began more than the ttl after the previous reply, measured to the user run that asked rather than the reply it produced; not moving while the execution it names keeps going; `undefined` while every execution began warm, the first execution never cold; moving forward to the latest cold start and never back; `lastReplyAt` as the newest assistant timestamp; and the snapshot binding both, identity-stable until the projection changes.
 - `src/__tests__/harness-store.spec.ts` — write-behind and write-through, flush barrier and idempotence, hydration on resume, typed store failures, cursored `history()`, `turnBoundaries: false`, and that compaction never touches the store.
 - `src/__tests__/compact-default.spec.ts` — construction-bound default strategy, call-site override, typed rejection with neither, the bare `timeline:compact` verb, verb enumeration.
 - `src/__tests__/definition.spec.ts` — `defineTimeline` identity + non-enumerable brand, inertness (no store touched, no hydrator run), the inline-bag equivalence, and `defineTimelineStore` under the full store conformance suite plus its loud failure on a `fromSeq` query without `history`.
