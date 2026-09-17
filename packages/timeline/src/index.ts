@@ -68,3 +68,4 @@ export type {
 } from "@agentick/spec";
 
 export { projectLog, coverageIn, type CompactionCoverage } from "./project.js";
+export { coldStart, lastReplyAt } from "./cold-start.js";

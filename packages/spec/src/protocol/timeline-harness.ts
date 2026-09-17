@@ -74,6 +74,15 @@ export interface TimelineSnapshot {
    * showed the entry; the next read sees it. Absent for a store-less timeline.
    */
   readonly seqs?: ReadonlyMap<TimelineEntry, number>;
+  /** When the model last answered — the end of the last request that touched the prefix. */
+  readonly lastReplyAt?: number;
+  /**
+   * The index of the first entry of the latest execution that began more than
+   * `ttlMs` after the previous reply — where the prompt prefix was rewritten in
+   * full anyway, so everything before it can be reshaped for free. `undefined`
+   * when no execution began cold.
+   */
+  readonly coldStart?: (ttlMs: number) => number | undefined;
 }
 
 // ============================================================================

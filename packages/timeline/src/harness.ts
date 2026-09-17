@@ -46,6 +46,7 @@ import {
   type Unsubscribe,
 } from "@agentick/runtime";
 import { LogView, type LogProjectionMeta } from "@agentick/store";
+import { coldStart, lastReplyAt } from "./cold-start.js";
 
 import { MemoryTimelineStore, timelineScopeKey } from "./store.js";
 import { hydrateFromStore } from "./hydrators.js";
@@ -264,6 +265,8 @@ export class TimelineHarness
   // its DOMAIN logic (turn boundaries, compaction STRATEGIES, the declared
   // commands) and delegates every storage touch to `log`.
   private readonly log: LogView<TimelineEntry>;
+  /** `read()`'s snapshot with the log-derived facts, identity-stable per projection version. */
+  private derived: { version: number; snapshot: TimelineSnapshot } | undefined;
 
   // ─── Durable backing (ADR 49) ───
   /** Append-only durable store for the persisted tier; keyed by scopeId (= sessionId). */
@@ -591,7 +594,22 @@ export class TimelineHarness
   // ─────────── Sync surface — projection (the primary consumer view) ───────────
 
   read(): TimelineSnapshot {
-    return this.log.snapshot();
+    const snapshot = this.log.snapshot();
+    if (this.derived?.version !== snapshot.version) {
+      const byTtl = new Map<number, number | undefined>();
+      this.derived = {
+        version: snapshot.version,
+        snapshot: {
+          ...snapshot,
+          lastReplyAt: lastReplyAt(snapshot.entries),
+          coldStart: (ttlMs) => {
+            if (!byTtl.has(ttlMs)) byTtl.set(ttlMs, coldStart(snapshot.entries, ttlMs));
+            return byTtl.get(ttlMs);
+          },
+        },
+      };
+    }
+    return this.derived.snapshot;
   }
 
   subscribe(listener: () => void): Unsubscribe {
