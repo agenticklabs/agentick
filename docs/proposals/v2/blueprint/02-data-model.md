@@ -134,7 +134,7 @@ interface MessageEntry {
 }
 
 interface MessageMetadata {
-  cache?: CacheHint;
+  cache?: CacheBoundary;
   providerMetadata?: Record<string, Record<string, unknown>>;
   [key: string]: unknown;
 }
@@ -170,7 +170,7 @@ interface SectionEntry {
 
 interface SectionMetadata {
   priority?: number; // hint to executors that may reorder
-  cache?: CacheHint;
+  cache?: CacheBoundary;
   providerMetadata?: Record<string, Record<string, unknown>>;
   [key: string]: unknown;
 }
@@ -190,20 +190,20 @@ references). The v2 shape has none of those:
 - `formattedContent` / `formatter` removed (rendering produces `content`
   during renderTree; renderer instances do not appear in IR).
 
-### CacheHint — caching intent
+### CacheBoundary — the prefix through here is stable
 
 ```ts
-interface CacheHint {
-  ttl?: "5m" | "1h" | string; // cross-provider hint
-  scope?: "prefix" | "block"; // [PLACEHOLDER]
-  [key: string]: unknown;
+interface CacheBoundary {
+  ttlMs: number; // keep the prefix through the carrying entry cached this long
 }
 ```
 
-The compiler MUST NOT reorder context for caching. The executor maps the
-hint to provider mechanics (Anthropic `cache_control`, OpenAI prefix
-caching, Gemini `cachedContents`). `[GAP]` — exact mapping policy across
-providers stays in the executor proposal and is not re-specified here.
+A boundary means "through here"; there is no "from here". The compiler MUST NOT
+reorder context for caching. An adapter lowers a boundary to its provider's
+mechanics (Anthropic `cache_control`, the shortest tier covering `ttlMs`) or
+declines it when the target's `TargetCapabilities.cache` declares no
+`explicit` support; providers that cache automatically (OpenAI, Gemini
+implicit) are the latter.
 
 ## RuntimeDeclarations — runtime registrations
 
@@ -265,7 +265,7 @@ interface ToolAnnotations {
     resourceUri?: string;
     visibility?: Array<"model" | "app">;
   };
-  cache?: CacheHint;
+  cache?: CacheBoundary;
   providerMetadata?: Record<string, Record<string, unknown>>;
 }
 ```

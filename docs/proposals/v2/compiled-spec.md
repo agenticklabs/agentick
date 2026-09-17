@@ -79,7 +79,7 @@ interface SectionEntry {
   renderTrace?: RenderTrace[];
   metadata?: SectionMetadata & {
     priority?: number;
-    cache?: CacheHint;
+    cache?: CacheBoundary;
   };
 }
 

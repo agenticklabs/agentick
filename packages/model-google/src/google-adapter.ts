@@ -965,7 +965,7 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
 
   for (const message of messages) {
     if (message.role === "system") {
-      // Canonical `CacheHint` (`message.cache` / per-part `cache`) is a
+      // Canonical `CacheBoundary` (`message.cache` / per-part `cache`) is a
       // deliberate NO-OP for Gemini (#212). Unlike Anthropic's inline
       // `cache_control`, Gemini caching is either implicit (automatic
       // prefix caching on 2.5 models — no translation needed, same posture

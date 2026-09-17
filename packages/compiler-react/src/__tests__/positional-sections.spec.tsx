@@ -184,7 +184,7 @@ describe("a section inside a message becomes that message's content", () => {
     // is what `messagePartFromBlock` forwards onto the projected part.
     const tree = await compile(
       <System>
-        <Section title="Stable" cache={{ ttl: "1h" }}>
+        <Section title="Stable" cache={{ ttlMs: 3_600_000 }}>
           expensive prefix
         </Section>
         <Section title="Volatile">changes every turn</Section>
@@ -194,7 +194,7 @@ describe("a section inside a message becomes that message's content", () => {
     expect(system?.content).toHaveLength(2);
     expect(system?.content[0]).toMatchObject({
       text: "# Stable\nexpensive prefix",
-      cache: { ttl: "1h" },
+      cache: { ttlMs: 3_600_000 },
     });
     expect(system?.content[1]).not.toHaveProperty("cache");
   });

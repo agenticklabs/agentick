@@ -281,7 +281,7 @@ A handler that throws is caught, logged with its kind, and skipped. It has to be
 
 The compiler's output _is_ the model input, so byte-stability across ticks is a billing concern. **A static tree must compile to byte-identical input on every tick.** Provider prompt caches key on an exact prefix match, and any drift in the cached prefix silently busts it and re-bills the full prompt.
 
-Keep time-varying content out of the stable prefix — put timestamps, counters, and live state in late positions. In particular, do not inject a date or clock into the system prompt. The framework injects none by default, and that default is load-bearing. Use `CacheHint` to declare where the boundary sits rather than relying on incidental prefix stability.
+Keep time-varying content out of the stable prefix — put timestamps, counters, and live state in late positions. In particular, do not inject a date or clock into the system prompt. The framework injects none by default, and that default is load-bearing. Use `CacheBoundary` to declare where the boundary sits rather than relying on incidental prefix stability.
 
 One documented non-defect: `hostId`-derived automatic element ids differ across separate mounts, because the counter is per-process. They never enter the model projection, so the model-facing bytes stay mount-independent — which is what keeps a provider cache warm across processes.
 

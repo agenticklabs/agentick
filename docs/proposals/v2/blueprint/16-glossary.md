@@ -155,9 +155,10 @@ Cross-provider normalized knobs (`responseFormat`, `maxOutputTokens`,
 Provider-namespaced escape hatch (`{ openai, anthropic, google,
 "ai-sdk" }`).
 
-**CacheHint**
-Caching intent on entries/declarations. Adapters map to provider
-mechanics. Compiler MUST NOT reorder for caching.
+**CacheBoundary**
+`{ ttlMs }` on an entry or declaration: the prompt prefix through it is
+stable for that long. Adapters lower it to provider mechanics or decline it;
+the compiler MUST NOT reorder for caching.
 
 ## Execution and adapters
 

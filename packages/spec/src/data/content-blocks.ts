@@ -61,22 +61,16 @@ export type MessageRole =
   | (string & {});
 
 /**
- * Cross-provider caching intent. The compiler MUST NOT reorder context
- * for caching; the executor maps this hint to provider mechanics
- * (Anthropic `cache_control`, OpenAI prefix caching, Gemini
- * `cachedContents`).
- *
- * Carried at three levels, each narrower than the last: a
- * {@link MessageEntry}'s `metadata.cache`, a single block's
- * {@link BaseContentBlock.cache}, and the projected message part's own
- * `cache`. Block level is what makes a per-section cache breakpoint
- * survive the section → content lowering (ADR 94 / #185).
+ * "The prompt prefix through the entry carrying this is stable; keep it
+ * cached for `ttlMs`." Carried on a {@link MessageEntry}'s `metadata.cache`,
+ * on a block's {@link BaseContentBlock.cache} (how a section's boundary
+ * survives lowering into content, ADR 94 / #185), and on the projected
+ * part. The compiler never reorders context for it; an adapter lowers it to
+ * its provider's mechanics or declines it when the target declares none
+ * (`TargetCapabilities.cache.explicit`).
  */
-export interface CacheHint {
-  readonly ttl?: "5m" | "1h" | (string & {});
-  /** `[PLACEHOLDER]` — exact semantics pending sign-off. */
-  readonly scope?: "prefix" | "block";
-  readonly [key: string]: unknown;
+export interface CacheBoundary {
+  readonly ttlMs: number;
 }
 
 /**
@@ -133,7 +127,7 @@ export interface BaseContentBlock {
    * hint rides the block the section produced; `messagePartFromBlock`
    * forwards it to the projected part (ADR 94 / #185).
    */
-  readonly cache?: CacheHint;
+  readonly cache?: CacheBoundary;
   /**
    * Provider-specific metadata that must round-trip through the
    * pipeline on this specific block. Keyed by provider namespace

@@ -124,7 +124,7 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
     expect((params as { config?: { seed?: number } }).config?.seed).toBe(11);
   });
 
-  it("#212 — a canonical CacheHint is a deliberate NO-OP: hinted text still projects, no `cachedContent` synthesized", () => {
+  it("#212 — a canonical CacheBoundary is a deliberate NO-OP: hinted text still projects, no `cachedContent` synthesized", () => {
     // Gemini caching is implicit (automatic prefix, no translation) or
     // explicit (requires a pre-created CachedContent RESOURCE NAME the
     // hint cannot supply). So the inline hint must NOT crash and must NOT
@@ -134,8 +134,8 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
         messages: [
           {
             role: "system",
-            content: [{ type: "text", text: "STABLE PREFIX", cache: { ttl: "1h" } }],
-            cache: { ttl: "1h" },
+            content: [{ type: "text", text: "STABLE PREFIX", cache: { ttlMs: 3_600_000 } }],
+            cache: { ttlMs: 3_600_000 },
           },
           { role: "user", content: [{ type: "text", text: "hi" }] },
         ],

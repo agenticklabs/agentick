@@ -55,6 +55,7 @@ import {
   thinkTagTransform,
 } from "@agentick/model";
 import type {
+  CacheBoundary,
   AdapterDelta,
   Citation,
   ContentBlock,
@@ -795,18 +796,18 @@ function readBlockCacheControl(part: {
   return undefined;
 }
 
+const FIVE_MINUTES_MS = 5 * 60_000;
+
 /**
- * Canonical CacheHint → Anthropic cache_control (#185). ttl "5m"/"1h"
- * maps through; anything else falls back to plain ephemeral. Explicit
- * per-block `providerMetadata.anthropic.cacheControl` always wins over
- * this translation (escape hatch beats canonical).
+ * A canonical {@link CacheBoundary} as Anthropic's `cache_control` (#185): the
+ * shortest tier that covers the requested lifetime, the hour when nothing does.
+ * Explicit per-block `providerMetadata.anthropic.cacheControl` always wins.
  */
 function cacheControlFromHint(
-  hint: { readonly ttl?: string } | undefined,
-): { type: "ephemeral"; ttl?: "5m" | "1h" } | undefined {
-  if (hint === undefined) return undefined;
-  if (hint.ttl === "5m" || hint.ttl === "1h") return { type: "ephemeral", ttl: hint.ttl };
-  return { type: "ephemeral" };
+  boundary: { readonly ttlMs: number } | undefined,
+): { type: "ephemeral"; ttl: "5m" | "1h" } | undefined {
+  if (boundary === undefined) return undefined;
+  return { type: "ephemeral", ttl: boundary.ttlMs <= FIVE_MINUTES_MS ? "5m" : "1h" };
 }
 
 function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
@@ -845,7 +846,7 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
       const messageHint = i === message.content.length - 1 ? message.cache : undefined;
       const cache =
         readBlockCacheControl(part) ??
-        cacheControlFromHint((part as { cache?: { ttl?: string } }).cache ?? messageHint);
+        cacheControlFromHint((part as { cache?: CacheBoundary }).cache ?? messageHint);
       switch (part.type) {
         case "text": {
           const block: TextBlockParam = { type: "text", text: part.text };

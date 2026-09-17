@@ -16,7 +16,7 @@
  */
 
 import React, { type ReactNode } from "react";
-import type { CacheHint, MessageRole } from "@agentick/spec";
+import type { CacheBoundary, MessageRole } from "@agentick/spec";
 
 export interface SectionProps {
   readonly id?: string;
@@ -37,7 +37,7 @@ export interface SectionProps {
    * Prompt-cache breakpoint for this section. Rides the block the section
    * lowers to, so it stays a real boundary inside its message (#185).
    */
-  readonly cache?: CacheHint;
+  readonly cache?: CacheBoundary;
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
   readonly metadata?: Record<string, unknown>;
   readonly children?: ReactNode;

@@ -289,7 +289,7 @@ export interface LanguageModelMessage {
    * block; providers with automatic prefix caching no-op); explicit
    * per-block `providerMetadata.<ns>` always wins over this hint.
    */
-  readonly cache?: import("../data/content-blocks.js").CacheHint;
+  readonly cache?: import("../data/content-blocks.js").CacheBoundary;
 }
 
 /**
@@ -331,7 +331,7 @@ export type LanguageModelMessagePart =
       readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;
       /** Canonical cache hint for THIS part (per-section system boundaries, #185). */
-      readonly cache?: import("../data/content-blocks.js").CacheHint;
+      readonly cache?: import("../data/content-blocks.js").CacheBoundary;
     }
   | {
       /**

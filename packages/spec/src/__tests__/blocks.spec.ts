@@ -19,11 +19,11 @@ describe("block constructors", () => {
   it("build exactly the wire shape — no undefined keys, the narrow type", () => {
     expect(text("hi")).toEqual({ type: "text", text: "hi" });
     expect(text("hi", { id: undefined, summary: undefined })).toEqual({ type: "text", text: "hi" });
-    expect(text("hi", { id: "b1", cache: { type: "ephemeral" } })).toEqual({
+    expect(text("hi", { id: "b1", cache: { ttlMs: 300_000 } })).toEqual({
       type: "text",
       text: "hi",
       id: "b1",
-      cache: { type: "ephemeral" },
+      cache: { ttlMs: 300_000 },
     });
     expect(isTextBlock(text("x"))).toBe(true);
   });

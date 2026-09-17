@@ -103,7 +103,7 @@ This is where:
 - `ToolDeclaration` entries with `model` exposure → provider tool format.
 - `SpecConfig.responseFormat` → provider generation knobs.
 - `providerOptions[provider]` → merged into the target call.
-- `CacheHint` → provider cache mechanics.
+- `CacheBoundary` → provider cache mechanics.
 
 Projection MUST NOT mutate the IR. Returns a new target input value.
 
@@ -447,7 +447,7 @@ SHOULD NOT read another adapter's namespace.
 
 ## Caching
 
-The executor maps `CacheHint` on entries/declarations to provider mechanics:
+The executor maps `CacheBoundary` on entries/declarations to provider mechanics:
 
 | Provider  | Mechanism                                                    |
 | --------- | ------------------------------------------------------------ |

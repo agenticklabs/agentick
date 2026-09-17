@@ -142,7 +142,7 @@ Synthesized four adversarially-critiqued gap dimensions (connectors, sandbox, mo
 
 **Recommendation.** Tracked by #173. Add providerMetadata to LanguageModelMessage; carry entry.metadata.providerMetadata in buildMessages + buildAnthropicMessages; adapters merge into the provider message envelope.
 
-### Google adapter ignores canonical CacheHint (input cache never translated)
+### Google adapter ignores canonical CacheBoundary (input cache never translated)
 
 **Workstream:** C-parity · **cut-blocking:** False _(net-new)_
 
@@ -150,7 +150,7 @@ Synthesized four adversarially-critiqued gap dimensions (connectors, sandbox, mo
 
 **v2 location.** model-google/src/google-adapter.ts:558.
 
-**Recommendation.** REOPEN #185 (its cross-adapter claim is unmet for Google). Map CacheHint→Gemini cachedContent OR document Google as no-op in #185's matrix; add a per-adapter cache-hints conformance cell exercising Google.
+**Recommendation.** REOPEN #185 (its cross-adapter claim is unmet for Google). Map CacheBoundary→Gemini cachedContent OR document Google as no-op in #185's matrix; add a per-adapter cache-hints conformance cell exercising Google.
 
 ### AI SDK adapter drops reasoning/thinking parts (regression vs v1)
 

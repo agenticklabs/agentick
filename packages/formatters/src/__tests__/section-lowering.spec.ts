@@ -117,9 +117,9 @@ describe("what rides the blocks", () => {
       id: "s",
       title: "T",
       content: [text("a")],
-      cache: { ttl: "1h" },
+      cache: { ttlMs: 3_600_000 },
     });
-    expect(out[out.length - 1]).toMatchObject({ cache: { ttl: "1h" } });
+    expect(out[out.length - 1]).toMatchObject({ cache: { ttlMs: 3_600_000 } });
   });
 
   it("puts per-section providerMetadata on the LAST block", () => {
@@ -225,11 +225,11 @@ describe("the carrier — collect emits structure, the formatter lowers it", () 
 
   it("keeps a cache-hinted section's hint on its own block", () => {
     const out = markdownFormatter([
-      sectionBlock({ id: "a", title: "A", content: [text("first")], cache: { ttl: "1h" } }),
+      sectionBlock({ id: "a", title: "A", content: [text("first")], cache: { ttlMs: 3_600_000 } }),
       sectionBlock({ id: "b", title: "B", content: [text("second")] }),
     ]);
     expect(out).toHaveLength(2);
-    expect(out[0]).toMatchObject({ text: "# A\nfirst", cache: { ttl: "1h" } });
+    expect(out[0]).toMatchObject({ text: "# A\nfirst", cache: { ttlMs: 3_600_000 } });
     expect(out[1]).not.toHaveProperty("cache");
   });
 

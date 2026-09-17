@@ -160,7 +160,7 @@ describe("prompts — materialization provenance", () => {
             kind: "message",
             role: "user",
             content: [blocks.text("body")],
-            metadata: { cache: { ttl: "1h" }, adopterKey: 7 },
+            metadata: { cache: { ttlMs: 3_600_000 }, adopterKey: 7 },
           },
         ],
       },
@@ -169,7 +169,7 @@ describe("prompts — materialization provenance", () => {
     await h.invoke({ name: "cached" });
 
     const metadata = appended[0]!.kind === "message" ? appended[0]!.message.metadata : undefined;
-    expect(metadata?.cache).toEqual({ ttl: "1h" });
+    expect(metadata?.cache).toEqual({ ttlMs: 3_600_000 });
     expect(metadata?.adopterKey).toBe(7);
     expect(promptSourceOf(appended[0]!)?.name).toBe("cached");
 

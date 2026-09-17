@@ -900,7 +900,7 @@ describe("anthropic() adapter — journaled lifecycle", () => {
   });
 });
 
-describe("anthropic() adapter — canonical CacheHint translation (#185)", () => {
+describe("anthropic() adapter — canonical CacheBoundary translation (#185)", () => {
   it("block cache hint → cache_control with ttl on the system block", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
@@ -916,7 +916,9 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
             kind: "message",
             role: "system",
             id: "s1",
-            content: [{ type: "text", text: "stable persona", id: "s1", cache: { ttl: "1h" } }],
+            content: [
+              { type: "text", text: "stable persona", id: "s1", cache: { ttlMs: 3_600_000 } },
+            ],
           },
           { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "hi" }] },
         ],
@@ -950,7 +952,7 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
               { type: "image", source: { type: "url", url: "https://example.test/1.png" } },
               { type: "text", text: "part two" },
             ],
-            metadata: { cache: {} },
+            metadata: { cache: { ttlMs: 300_000 } },
           },
         ],
       },
@@ -961,7 +963,7 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
     }>;
     expect(msgs[0]!.content).toHaveLength(3);
     expect(msgs[0]!.content[0]!.cache_control).toBeUndefined();
-    expect(msgs[0]!.content[2]!.cache_control).toEqual({ type: "ephemeral" });
+    expect(msgs[0]!.content[2]!.cache_control).toEqual({ type: "ephemeral", ttl: "5m" });
   });
 
   it("explicit per-block providerMetadata wins over the canonical hint", async () => {
@@ -984,7 +986,7 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
                 providerMetadata: { anthropic: { cacheControl: { type: "ephemeral" } } },
               },
             ],
-            metadata: { cache: { ttl: "1h" } },
+            metadata: { cache: { ttlMs: 3_600_000 } },
           },
         ],
       },

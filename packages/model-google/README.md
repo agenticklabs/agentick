@@ -229,7 +229,7 @@ A per-call `SendInput.target` is the exception — it replaces the target outrig
 
 ### Prompt caching is a deliberate no-op here
 
-The canonical `CacheHint` is **intentionally not translated** for Gemini, because neither of Gemini's two caching modes wants it. Implicit caching on 2.5 models is automatic — nothing to translate. Explicit caching needs a pre-created `CachedContent` **resource name**, which a `{ ttl, scope }` hint cannot synthesize out of thin air.
+The canonical `CacheBoundary` is **intentionally not translated** for Gemini, because neither of Gemini's two caching modes wants it. Implicit caching on 2.5 models is automatic — nothing to translate. Explicit caching needs a pre-created `CachedContent` **resource name**, which a `{ ttlMs }` boundary cannot synthesize out of thin air.
 
 So the hint's text still projects into `systemInstruction`, only its untranslatable metadata is dropped, and adopters wiring explicit caching pass the resource through the escape hatch:
 
@@ -353,12 +353,12 @@ The second argument is required and total over `ExecuteError["_tag"]`: for each 
 - **No `s3` sources.** Stage to GCS or base64; there is no native `fileData` form for them.
 - **Model-generated media is not surfaced.** `normalize` maps text, thinking, and function-call parts; returned `inlineData` — an image the model produced — does not yet become a `generated_image` block.
 - **No replayed reasoning input.** Dropped rather than flattened; the signature path is how Gemini round-trips thinking.
-- **`CacheHint` is a no-op.** By design, per the section above. Explicit caching goes through `providerOptions.google.cachedContent`.
+- **`CacheBoundary` is a no-op.** By design, per the section above. Explicit caching goes through `providerOptions.google.cachedContent`.
 - **Code-execution provenance is unmapped.** `executableCode` and `codeExecutionResult` parts would be genuine provider tool results carrying `executedBy`; only grounding citations are mapped today.
 
 ## Verified by
 
 - `src/__tests__/google-executor.spec.ts` — the dialect: schema sanitization, thought-part routing to reasoning, `thoughtSignature` capture and carry, synthesized block boundaries, stop-reason mapping, the grounding-tools request projection, grounding citations with no `executedBy` stamp, and the factory `providerOptions` bag reaching the request config on both paths, folding over an explicit target's bag, and losing to a tree-declared one.
-- `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection across all four source kinds, the `thoughtSignature` round trip, and the `CacheHint` no-op alongside the `cachedContent` escape hatch.
+- `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection across all four source kinds, the `thoughtSignature` round trip, and the `CacheBoundary` no-op alongside the `cachedContent` escape hatch.
 - `src/__tests__/usage-normalization.spec.ts` — thoughts folded into `outputTokens` with `reasoningTokens` still reported separately, `inputTokens + outputTokens` agreeing with `totalTokenCount`, cached content treated as a subset of input, unreported kinds left `undefined`, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor, this adapter, and a stubbed SDK client.

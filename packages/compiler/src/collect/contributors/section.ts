@@ -19,7 +19,7 @@
  * @see docs/proposals/v2/blueprint/94-positional-sections.md
  */
 
-import type { CacheHint, MessageRole, SemanticContentBlock } from "@agentick/spec";
+import type { CacheBoundary, MessageRole, SemanticContentBlock } from "@agentick/spec";
 import { sectionBlock } from "@agentick/formatters";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
@@ -38,7 +38,7 @@ export interface SectionProps {
    * container has already decided the role.
    */
   readonly role?: MessageRole;
-  readonly cache?: CacheHint;
+  readonly cache?: CacheBoundary;
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
   readonly metadata?: Record<string, unknown>;
 }

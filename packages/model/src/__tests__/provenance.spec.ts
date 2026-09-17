@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { CacheHint, ContentBlock, MessageEntry, RenderedTree } from "@agentick/spec";
+import type { CacheBoundary, ContentBlock, MessageEntry, RenderedTree } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 import { text as textBlock } from "@agentick/spec/blocks";
 
@@ -36,7 +36,7 @@ const msg = (role: string, content: readonly ContentBlock[], id?: string): Messa
  * a BLOCK — which is exactly the walk the two functions have to agree on.
  */
 let sectionSeq = 0;
-const sectionBlock = (title: string, body: string, cache?: CacheHint): ContentBlock =>
+const sectionBlock = (title: string, body: string, cache?: CacheBoundary): ContentBlock =>
   ({
     type: "text",
     text: body.length > 0 ? `# ${title}\n${body}` : `# ${title}`,
@@ -75,8 +75,8 @@ describe("the alignment invariant — provenance[i][j] describes messages[i].con
     expectAligned(
       tree(
         system(
-          sectionBlock("A", "first", { ttl: "1h" }),
-          sectionBlock("B", "second", { ttl: "1h" }),
+          sectionBlock("A", "first", { ttlMs: 3_600_000 }),
+          sectionBlock("B", "second", { ttlMs: 3_600_000 }),
         ),
         msg("user", [text("hi")], "m1"),
       ),
@@ -177,7 +177,7 @@ describe("what an origin says", () => {
     // breakpoint (or any other boundary) between them yields two parts naming
     // two sections.
     const t = tree(
-      system(sectionBlock("A", "first", { ttl: "1h" }), sectionBlock("B", "second")),
+      system(sectionBlock("A", "first", { ttlMs: 3_600_000 }), sectionBlock("B", "second")),
       msg("user", [text("hi")], "m1"),
     );
     expectAligned(t);

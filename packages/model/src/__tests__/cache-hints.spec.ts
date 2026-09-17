@@ -1,5 +1,5 @@
 /**
- * CacheHint wake-up (#185): entry-level hints reach the executor
+ * CacheBoundary wake-up (#185): entry-level hints reach the executor
  * boundary via canonical projection. Normalize → translate → escape
  * hatch: the anthropic translation is pinned in model-anthropic's spec.
  */
@@ -15,7 +15,7 @@ function tree(entries: RenderedTree["context"]["entries"]): RenderedTree {
   return { specVersion: "2026-05-08", context: { entries } };
 }
 
-describe("buildMessages — CacheHint carry (#185)", () => {
+describe("buildMessages — CacheBoundary carry (#185)", () => {
   it("carries MessageEntry.metadata.cache onto the canonical message", () => {
     const messages = buildMessages(
       tree([
@@ -24,11 +24,11 @@ describe("buildMessages — CacheHint carry (#185)", () => {
           id: "m1",
           role: "user",
           content: [blocks.text("hi")],
-          metadata: { cache: { ttl: "5m" } },
+          metadata: { cache: { ttlMs: 300_000 } },
         },
       ]),
     );
-    expect(messages[0]).toMatchObject({ role: "user", cache: { ttl: "5m" } });
+    expect(messages[0]).toMatchObject({ role: "user", cache: { ttlMs: 300_000 } });
   });
 
   it("carries a BLOCK-level hint onto the part it rides (ADR 94)", () => {
@@ -42,7 +42,7 @@ describe("buildMessages — CacheHint carry (#185)", () => {
           kind: "message",
           role: "system",
           content: [
-            { type: "text", text: "STABLE PREFIX", cache: { ttl: "1h" } },
+            { type: "text", text: "STABLE PREFIX", cache: { ttlMs: 3_600_000 } },
             blocks.text("volatile"),
           ],
         },
@@ -51,7 +51,7 @@ describe("buildMessages — CacheHint carry (#185)", () => {
     const system = messages[0]!;
     expect(system.role).toBe("system");
     expect(system.content).toHaveLength(2);
-    expect(system.content[0]).toMatchObject({ text: "STABLE PREFIX", cache: { ttl: "1h" } });
+    expect(system.content[0]).toMatchObject({ text: "STABLE PREFIX", cache: { ttlMs: 3_600_000 } });
     expect(system.content[1]).not.toHaveProperty("cache");
   });
 
@@ -69,13 +69,13 @@ describe("buildMessages — CacheHint carry (#185)", () => {
             blocks.image(blocks.source.url("https://example.test/1.png")),
             blocks.text("B"),
           ],
-          metadata: { cache: { ttl: "5m" } },
+          metadata: { cache: { ttlMs: 300_000 } },
         },
       ]),
     );
     expect(messages[0]!.content).toHaveLength(3);
     expect(messages[0]!.content[0]).not.toHaveProperty("cache");
-    expect(messages[0]!.content[2]).toMatchObject({ text: "B", cache: { ttl: "5m" } });
+    expect(messages[0]!.content[2]).toMatchObject({ text: "B", cache: { ttlMs: 300_000 } });
   });
 });
 
@@ -114,14 +114,17 @@ describe("buildMessages — adjacent text parts join at the wire", () => {
           kind: "message",
           role: "system",
           content: [
-            { type: "text", text: "# A\nfirst", cache: { ttl: "1h" } },
+            { type: "text", text: "# A\nfirst", cache: { ttlMs: 3_600_000 } },
             blocks.text("# B\nsecond"),
           ],
         },
       ]),
     );
     expect(messages[0]!.content).toHaveLength(2);
-    expect(messages[0]!.content[0]).toMatchObject({ text: "# A\nfirst", cache: { ttl: "1h" } });
+    expect(messages[0]!.content[0]).toMatchObject({
+      text: "# A\nfirst",
+      cache: { ttlMs: 3_600_000 },
+    });
     expect(messages[0]!.content[1]).toMatchObject({ text: "# B\nsecond" });
   });
 

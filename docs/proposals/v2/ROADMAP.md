@@ -26,7 +26,7 @@ Run in parallel; mostly delegated small fixes.
   (`@agentick/agent` → **fold into metapackage #161**). Unblocks D/E cleanup.
 - **Adapter-parity batch** (one delegate, judged): **#214 first** (OpenAI ignores
   `target.modelId` — silently breaks the ADR-56 per-tick `<Model>`; regression), then #212
-  (Google CacheHint), #173 (providerMetadata at projection), #216 (Anthropic stop-reasons),
+  (Google CacheBoundary), #173 (providerMetadata at projection), #216 (Anthropic stop-reasons),
   #211 (topP/penalties), #217 (reasoningTokens), #213 (AI-SDK reasoning), #184 (responseFormat
   all adapters — Knowify need), #175 (tokenEstimator). Small, unblocked, correctness.
 

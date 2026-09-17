@@ -3,7 +3,7 @@
 **Status:** PROPOSED 2026-07-06 (Fable, for Ryan — scope + placement + naming ratified same day)
 **Depends on:** ADR 52 (the ONE LanguageModelExecutor + LanguageModelAdapter), the content-block union
 **Fixes:** the content-block projection cut-blockers (CB-BLOCKER-1/2 in CUT-GAP-AUDIT.md), #176 (providerOptions orphan)
-**Adjacent:** #173 (message-level providerMetadata), #174 (custom-block formatter — NOT this ADR), #185 (CacheHint)
+**Adjacent:** #173 (message-level providerMetadata), #174 (custom-block formatter — NOT this ADR), #185 (CacheBoundary)
 
 ## TL;DR
 

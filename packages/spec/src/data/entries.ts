@@ -15,7 +15,7 @@
  * @see docs/proposals/v2/blueprint/02-data-model.md §ContextSpec
  */
 
-import type { CacheHint, ContentBlock, MessageRole } from "./content-blocks.js";
+import type { CacheBoundary, ContentBlock, MessageRole } from "./content-blocks.js";
 import type { FormatterRef, FormatTrace } from "./formatter.js";
 
 // ============================================================================
@@ -23,7 +23,7 @@ import type { FormatterRef, FormatTrace } from "./formatter.js";
 // ============================================================================
 
 export interface MessageMetadata {
-  readonly cache?: CacheHint;
+  readonly cache?: CacheBoundary;
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
   /**
    * Provenance convention (NOT a typed field — see below). Messages

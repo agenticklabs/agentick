@@ -5,7 +5,7 @@
  * journaling-policy, standard-schema). Phase 1c (this batch) adds the
  * compiler-facing types needed to unblock Phase 3:
  *
- *   - content-blocks.ts   ContentBlock taxonomy (promoted from @agentick/shared), CacheHint
+ *   - content-blocks.ts   ContentBlock taxonomy (promoted from @agentick/shared), CacheBoundary
  *   - semantic.ts         SemanticNode, SemanticMetadata, SemanticContentBlock
  *   - formatter.ts        FormatterRef, FormatInput, FormatResult, FormatScope, FormatTrace
  *   - entries.ts          MessageEntry, MessageMetadata, ContextSpec

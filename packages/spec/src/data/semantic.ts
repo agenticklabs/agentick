@@ -12,7 +12,7 @@
  * @see docs/proposals/v2/blueprint/04-formatters.md
  */
 
-import type { CacheHint, ContentBlock } from "./content-blocks.js";
+import type { CacheBoundary, ContentBlock } from "./content-blocks.js";
 import type { FormatterRef } from "./formatter.js";
 import type { RenderedTree } from "./rendered-tree.js";
 
@@ -134,7 +134,7 @@ export interface SectionNode {
   readonly title?: string;
   readonly content: readonly SemanticContentBlock[];
   /** Prompt-cache breakpoint for this section (#185). Rides the LAST block. */
-  readonly cache?: CacheHint;
+  readonly cache?: CacheBoundary;
   /** Per-section provider knobs (Anthropic `cacheControl`). Rides the LAST block. */
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
   /** Author-supplied bag. Rides EVERY block the section produces. */
