@@ -279,6 +279,9 @@ export function anthropic(
       // those parts used to fall off the end of the switch and disappear with no
       // `null` anywhere to observe. Stated here, they are dropped with a reason.
       media: { image: ["base64", "url"], document: ["base64", "url"] },
+      // Prompt caching: a five-minute entry by default, an hour when asked, and
+      // a read restarts the clock at no charge.
+      cache: { ttlMs: 5 * 60_000, extendedTtlMs: 60 * 60_000, refreshedOnRead: true },
       contextWindow: 200_000,
       maxOutputTokens: 8_192,
     },

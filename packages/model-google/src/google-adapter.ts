@@ -293,6 +293,9 @@ export function google(
         // `gs:` ONLY on Vertex — see `onVertex` above.
         urlSchemes,
       },
+      // Implicit caching on 2.5 and later, with no published lifetime: the
+      // record says "caches" and nothing more, and the caller assumes the rest.
+      cache: {},
       // The catalog knows the per-model numbers; these are the floor for a
       // model it has no row for. A wrong `maxOutputTokens` is not cosmetic —
       // it is what the compaction threshold and every headroom calculation

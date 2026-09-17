@@ -299,6 +299,10 @@ export function openai(
         document: ["base64", "reference"],
         audio: ["base64"],
       },
+      // Automatic prompt caching: an entry outlives "typically 5 to 10 minutes"
+      // of inactivity (30 minutes on GPT-5.6 and later), reuse refreshes it, and
+      // `prompt_cache_retention: "24h"` keeps it for a day. The floor is declared.
+      cache: { ttlMs: 5 * 60_000, extendedTtlMs: 24 * 60 * 60_000, refreshedOnRead: true },
     },
     // OpenAI charges 85 base tokens plus 170 per 512² tile at high detail (low
     // detail is the 85 alone). A MediaSource carries no dimensions, so `image`

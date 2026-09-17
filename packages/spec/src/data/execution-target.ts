@@ -87,6 +87,23 @@ export interface MediaSupport {
 export const DEFAULT_URL_SCHEMES: readonly string[] = ["http", "https", "data"];
 
 /**
+ * How the provider caches a prompt prefix — the facts a caller needs to know
+ * when it is free to reshape history and when reshaping costs a rewrite.
+ *
+ * Absent `cache`: assume nothing about caching. Present but empty: the
+ * provider caches, but publishes no lifetime (Gemini's implicit caching), so
+ * the caller supplies its own assumption.
+ */
+export interface CacheSupport {
+  /** How long an entry lives after the request that wrote or last read it started. */
+  readonly ttlMs?: number;
+  /** The longer lifetime the provider sells, when it sells one. */
+  readonly extendedTtlMs?: number;
+  /** A cache read restarts the entry's clock. */
+  readonly refreshedOnRead?: boolean;
+}
+
+/**
  * Capabilities advertised by an execution target. Drives loop-executor
  * decisions (tool exposure, streaming opt-in, max-output negotiation).
  */
@@ -104,6 +121,7 @@ export interface TargetCapabilities {
    * times inside adapters that then discard it.
    */
   readonly media?: MediaSupport;
+  readonly cache?: CacheSupport;
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
   readonly [key: string]: unknown;
